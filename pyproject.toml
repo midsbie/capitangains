@@ -9,7 +9,7 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.scripts]
-ibkr-report = "capitangains.cmd.generate_report:main"
+ibkr-report = "capitangains.cmd.generate_ibkr_report:main"
 
 [project.optional-dependencies]
 dev = [
