@@ -79,7 +79,7 @@ class TradeRow:
     code: str
 
 
-def parse_trades_stocklike(
+def parse_trades_stocklike(  # noqa: C901
     model: IbkrModel, asset_scope: str = "stocks"
 ) -> list[TradeRow]:
     """Extract stock-like trades from 'Trades' section across header variants.
