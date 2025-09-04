@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "capitangains"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+ibkr-report = "capitangains.cmd.generate_report:main"
+
+[project.optional-dependencies]
+dev = [
+    "ipython",
+    "isort",
+    "pre-commit",
+    "pyflakes",
+    "pytest",
+    "pytest-mock",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+lint.extend-select = [
+    "I",     # isort: Import sorting rules (ensures consistent ordering of imports)
+    "E",     # pycodestyle (errors): Style guide enforcement (PEP8)
+    "W",     # pycodestyle (warnings): Style guide warnings
+    "F",     # pyflakes: Detects logical errors like undefined or unused variables
+    "B",     # flake8-bugbear: Finds likely bugs and best practice violations (e.g., mutable default args)
+    "C90",   # mccabe: Checks for overly complex code (cyclomatic complexity)
+    # "D",     # pydocstyle: Enforces docstring conventions (e.g., starts with a capital letter, ends with a period)
+    "N",     # pep8-naming: Ensures proper naming conventions (e.g., functions lowercase_with_underscores)
+    "UP",    # pyupgrade: Suggests syntax upgrades to modern Python versions (e.g., f-strings, type hints)
+    "SIM",   # flake8-simplify: Flags unnecessary or redundant code (e.g., `if x == True:`)
+    "PERF",  # perflint: Highlights performance anti-patterns (e.g., prefer generator over list when possible)
+]
+fix = true  # Auto-fix applicable lint issues
+
+[tool.isort]
+known_first_party = ["capitangains"]
+
+[tool.mypy]
+python_version = "3.9"
+check_untyped_defs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+strict_optional = true
+
+[tool.coverage.run]
+branch = true
+source = ["capitangains"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.coverage.html]
+directory = "htmlcov"

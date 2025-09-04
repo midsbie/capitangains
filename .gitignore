@@ -1,0 +1,16 @@
+# Directories
+.aider*
+.venv
+backtest_results
+models
+
+*.egg-info
+
+# Files
+.env
+.~*
+*.csv
+*.parquet
+
+# Symlinks
+VIX_VIX_daily.csv
