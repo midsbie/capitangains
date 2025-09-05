@@ -41,6 +41,8 @@ class ExcelReportSink:
                     "metric": "Metric",
                     "amount": "Amount",
                     "total_eur": "Total Realized P/L (EUR)",
+                    "proceeds_eur": "Total Net Proceeds (EUR)",
+                    "alloc_eur": "Total Allocated Cost (EUR)",
                     "total_cur_tpl": "Total Realized P/L ({cur})",
                 },
                 "realized": {
@@ -132,6 +134,8 @@ class ExcelReportSink:
                 "metric": "Métrica",
                 "amount": "Montante",
                 "total_eur": "Total Realizado (EUR)",
+                "proceeds_eur": "Total Proveitos Líquidos (EUR)",
+                "alloc_eur": "Total Custo Alocado (EUR)",
                 "total_cur_tpl": "Total Realizado ({cur})",
             },
             "realized": {
@@ -224,8 +228,20 @@ class ExcelReportSink:
             (rl.realized_pl_eur or Decimal("0") for rl in report.realized_lines),
             Decimal("0"),
         )
+        proceeds_total_eur = sum(
+            (rl.sell_net_eur or Decimal("0") for rl in report.realized_lines),
+            Decimal("0"),
+        )
+        alloc_total_eur = sum(
+            (rl.alloc_cost_eur or Decimal("0") for rl in report.realized_lines),
+            Decimal("0"),
+        )
+
         totals_by_cur = {}
         for rl in report.realized_lines:
+            # Exclude EUR from by-currency totals to avoid duplicate label confusion
+            if rl.currency == "EUR":
+                continue
             totals_by_cur[rl.currency] = (
                 totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
             )
@@ -247,11 +263,13 @@ class ExcelReportSink:
                 return f'#,##0.00 "{cur}"'
             return f'"{cur}" #,##0.00'
 
-        if total_eur != 0:
-            ws.append([labels["summary"]["total_eur"], float(total_eur)])
-            ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency(
-                "EUR"
-            )
+        # Primary EUR totals
+        ws.append([labels["summary"]["total_eur"], float(total_eur)])
+        ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency("EUR")
+        ws.append([labels["summary"]["proceeds_eur"], float(proceeds_total_eur)])
+        ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency("EUR")
+        ws.append([labels["summary"]["alloc_eur"], float(alloc_total_eur)])
+        ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency("EUR")
         for cur, amt in sorted(totals_by_cur.items()):
             ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)])
             ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency(
