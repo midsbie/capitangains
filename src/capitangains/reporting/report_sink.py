@@ -161,12 +161,30 @@ class ExcelReportSink:
         date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
         money_fmt = "#,##0.00"
         qty_fmt = "0.########"
+
+        def money_fmt_for_currency(ccy: str) -> str:
+            loc = self.locale.upper()
+            cur = (ccy or "").upper()
+            symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
+            sym = symbols.get(cur)
+            if sym:
+                if cur == "EUR" and loc == "PT":
+                    return f'#,##0.00 "{sym}"'
+                return f"{sym}#,##0.00"
+            if loc == "PT":
+                return f'#,##0.00 "{cur}"'
+            return f'"{cur}" #,##0.00'
+
         if total_eur != 0:
             ws.append([labels["summary"]["total_eur"], float(total_eur)])
-            ws.cell(row=ws.max_row, column=2).number_format = money_fmt
+            ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency(
+                "EUR"
+            )
         for cur, amt in sorted(totals_by_cur.items()):
             ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)])
-            ws.cell(row=ws.max_row, column=2).number_format = money_fmt
+            ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency(
+                cur
+            )
 
         # Realized trades sheet
         ws = wb.create_sheet(title=labels["sheet"]["realized"])
@@ -229,8 +247,14 @@ class ExcelReportSink:
             r = ws.max_row
             ws.cell(row=r, column=3).number_format = date_fmt
             ws.cell(row=r, column=4).number_format = qty_fmt
-            for c in range(5, 15):
-                ws.cell(row=r, column=c).number_format = money_fmt
+            # Trade currency money columns 5..9
+            tcy_fmt = money_fmt_for_currency(rl.currency)
+            for c in range(5, 10):
+                ws.cell(row=r, column=c).number_format = tcy_fmt
+            # EUR money columns 10..14
+            eur_fmt = money_fmt_for_currency("EUR")
+            for c in range(10, 15):
+                ws.cell(row=r, column=c).number_format = eur_fmt
 
         # Per-symbol summary
         ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
@@ -250,17 +274,23 @@ class ExcelReportSink:
             ]
         )
         ws.append(headers)
+        cur_list = sorted(all_ccy)
         for symbol, totals in sorted(report.symbol_totals.items()):
             row = [symbol]
-            for c in sorted(all_ccy):
+            for c in cur_list:
                 row.append(float(totals.get("realized_ccy:" + c, Decimal("0"))))
             row.append(float(totals.get("realized_eur", Decimal("0"))))
             row.append(float(totals.get("proceeds_eur", Decimal("0"))))
             row.append(float(totals.get("alloc_cost_eur", Decimal("0"))))
             ws.append(row)
+
             r = ws.max_row
-            for c in range(2, 2 + len(all_ccy) + 3):
-                ws.cell(row=r, column=c).number_format = money_fmt
+            for i, ccy in enumerate(cur_list, start=2):
+                ws.cell(row=r, column=i).number_format = money_fmt_for_currency(ccy)
+
+            base = 2 + len(cur_list)
+            for c in range(base, base + 3):
+                ws.cell(row=r, column=c).number_format = money_fmt_for_currency("EUR")
 
         # Dividends
         if report.dividends:
@@ -279,7 +309,9 @@ class ExcelReportSink:
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
-                ws.cell(row=r, column=4).number_format = money_fmt
+                ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
+                    d["currency"]
+                )
 
         # Withholding Tax
         if report.withholding:
@@ -305,7 +337,11 @@ class ExcelReportSink:
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
-                ws.cell(row=r, column=4).number_format = money_fmt
+                ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
+                    d["currency"]
+                )
+
+        from openpyxl.utils import get_column_letter
 
         def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
             header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []
