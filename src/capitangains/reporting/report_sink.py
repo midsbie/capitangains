@@ -30,7 +30,7 @@ class ExcelReportSink:
                     "dividends": "Dividends",
                     "interest": "Interest",
                     "withholding": "Withholding Tax",
-                    "anexo_g": "Annex G Helper",
+                    "anexo_g": "Lot-Level EUR Breakdown",
                     "syep_interest": "SYEP Interest",
                 },
                 "summary": {
@@ -118,7 +118,7 @@ class ExcelReportSink:
                 "dividends": "Dividendos",
                 "interest": "Juros",
                 "withholding": "Retenção na Fonte",
-                "anexo_g": "Anexo G",
+                "anexo_g": "Operações por Lote (Anexo G)",
                 "syep_interest": "Juros SYEP",
             },
             "summary": {
