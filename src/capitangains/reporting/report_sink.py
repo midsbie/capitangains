@@ -16,6 +16,116 @@ class ReportSink(Protocol):
 @dataclass
 class ExcelReportSink:
     out_path: Path
+    locale: str = "PT"  # "PT" (default) or "EN"
+
+    def _labels(self):
+        loc = (self.locale or "PT").upper()
+        if loc == "EN":
+            return {
+                "sheet": {
+                    "summary": "Summary",
+                    "realized": "Realized Trades",
+                    "per_symbol": "Per Symbol Summary",
+                    "dividends": "Dividends",
+                    "withholding": "Withholding Tax",
+                },
+                "summary": {
+                    "metric": "Metric",
+                    "amount": "Amount",
+                    "total_eur": "Total Realized P/L (EUR)",
+                    "total_cur_tpl": "Total Realized P/L ({cur})",
+                },
+                "realized": {
+                    "ticker": "Ticker",
+                    "trade_currency": "Trade Currency",
+                    "sell_date": "Sell Date",
+                    "qty_sold": "Quantity Sold",
+                    "gross_tcy": "Gross Proceeds (Trade Currency)",
+                    "fees_tcy": "Commissions/Fees (Trade Currency)",
+                    "net_tcy": "Net Proceeds (Trade Currency)",
+                    "alloc_tcy": "Allocated Cost Basis (Trade Currency)",
+                    "pl_tcy": "Realized P/L (Trade Currency)",
+                    "gross_eur": "Gross Proceeds (EUR)",
+                    "fees_eur": "Commissions/Fees (EUR)",
+                    "net_eur": "Net Proceeds (EUR)",
+                    "alloc_eur": "Allocated Cost Basis (EUR)",
+                    "pl_eur": "Realized P/L (EUR)",
+                    "legs_json": "Matched Buy Lots (JSON)",
+                },
+                "per_symbol": {
+                    "ticker": "Ticker",
+                    "pl_tpl": "Realized P/L ({cur})",
+                    "pl_eur": "Realized P/L (EUR)",
+                    "net_eur": "Net Proceeds (EUR)",
+                    "alloc_eur": "Allocated Cost Basis (EUR)",
+                },
+                "dividends": {
+                    "date": "Date",
+                    "currency": "Currency",
+                    "desc": "Description",
+                    "amount": "Amount (Currency)",
+                },
+                "withholding": {
+                    "date": "Date",
+                    "currency": "Currency",
+                    "desc": "Description",
+                    "amount": "Amount (Currency)",
+                    "code": "Tax Code",
+                },
+            }
+        # Default: Portuguese (Portugal)
+        return {
+            "sheet": {
+                "summary": "Resumo",
+                "realized": "Operações Realizadas",
+                "per_symbol": "Resumo por Símbolo",
+                "dividends": "Dividendos",
+                "withholding": "Retenção na Fonte",
+            },
+            "summary": {
+                "metric": "Métrica",
+                "amount": "Montante",
+                "total_eur": "Total Realizado (EUR)",
+                "total_cur_tpl": "Total Realizado ({cur})",
+            },
+            "realized": {
+                "ticker": "Símbolo",
+                "trade_currency": "Moeda da Operação",
+                "sell_date": "Data de Venda",
+                "qty_sold": "Quantidade Vendida",
+                "gross_tcy": "Proveitos Brutos (Moeda)",
+                "fees_tcy": "Comissões/Taxas (Moeda)",
+                "net_tcy": "Proveitos Líquidos (Moeda)",
+                "alloc_tcy": "Custo Alocado (Moeda)",
+                "pl_tcy": "Resultado Realizado (Moeda)",
+                "gross_eur": "Proveitos Brutos (EUR)",
+                "fees_eur": "Comissões/Taxas (EUR)",
+                "net_eur": "Proveitos Líquidos (EUR)",
+                "alloc_eur": "Custo Alocado (EUR)",
+                "pl_eur": "Resultado Realizado (EUR)",
+                "legs_json": "Lotes de Compra (JSON)",
+            },
+            "per_symbol": {
+                "ticker": "Símbolo",
+                "pl_tpl": "Resultado Realizado ({cur})",
+                "pl_eur": "Resultado Realizado (EUR)",
+                "net_eur": "Proveitos Líquidos (EUR)",
+                "alloc_eur": "Custo Alocado (EUR)",
+            },
+            "dividends": {
+                "date": "Data",
+                "currency": "Moeda",
+                "desc": "Descrição",
+                "amount": "Montante (Moeda)",
+            },
+            "withholding": {
+                "date": "Data",
+                "currency": "Moeda",
+                "desc": "Descrição",
+                "amount": "Montante (Moeda)",
+                "code": "Código de Imposto",
+            },
+        }
 
     def write(self, report: ReportBuilder) -> Path:
         try:
@@ -32,8 +142,10 @@ class ExcelReportSink:
         ws_default = wb.active
         wb.remove(ws_default)
 
+        labels = self._labels()
+
         # Summary sheet (totals)
-        ws = wb.create_sheet(title="Summary")
+        ws = wb.create_sheet(title=labels["sheet"]["summary"])
         total_eur = sum(
             (rl.realized_pl_eur or Decimal("0") for rl in report.realized_lines),
             Decimal("0"),
@@ -43,33 +155,31 @@ class ExcelReportSink:
             totals_by_cur[rl.currency] = (
                 totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
             )
-        ws.append(["Metric", "Amount"])
+        ws.append([labels["summary"]["metric"], labels["summary"]["amount"]])
         if total_eur != 0:
-            ws.append(["Total Realized P/L (EUR)", str(total_eur)])
+            ws.append([labels["summary"]["total_eur"], str(total_eur)])
         for cur, amt in sorted(totals_by_cur.items()):
-            ws.append([f"Total Realized P/L ({cur})", str(amt)])
+            ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), str(amt)])
 
         # Realized trades sheet
-        ws = wb.create_sheet(title="RealizedTrades")
-        ws.append(
-            [
-                "Ticker",
-                "Trade Currency",
-                "Sell Date",
-                "Quantity Sold",
-                "Gross Proceeds (Trade Currency)",
-                "Commissions/Fees (Trade Currency)",
-                "Net Proceeds (Trade Currency)",
-                "Allocated Cost Basis (Trade Currency)",
-                "Realized P/L (Trade Currency)",
-                "Gross Proceeds (EUR)",
-                "Commissions/Fees (EUR)",
-                "Net Proceeds (EUR)",
-                "Allocated Cost Basis (EUR)",
-                "Realized P/L (EUR)",
-                "Matched Buy Lots (JSON)",
-            ]
-        )
+        ws = wb.create_sheet(title=labels["sheet"]["realized"])
+        ws.append([
+            labels["realized"]["ticker"],
+            labels["realized"]["trade_currency"],
+            labels["realized"]["sell_date"],
+            labels["realized"]["qty_sold"],
+            labels["realized"]["gross_tcy"],
+            labels["realized"]["fees_tcy"],
+            labels["realized"]["net_tcy"],
+            labels["realized"]["alloc_tcy"],
+            labels["realized"]["pl_tcy"],
+            labels["realized"]["gross_eur"],
+            labels["realized"]["fees_eur"],
+            labels["realized"]["net_eur"],
+            labels["realized"]["alloc_eur"],
+            labels["realized"]["pl_eur"],
+            labels["realized"]["legs_json"],
+        ])
         import json
 
         for rl in report.realized_lines:
@@ -109,22 +219,20 @@ class ExcelReportSink:
             )
 
         # Per-symbol summary
-        ws = wb.create_sheet(title="PerSymbolSummary")
+        ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
         # Collect currencies dynamically
         all_ccy = set()
         for _, totals in report.symbol_totals.items():
             for k in totals.keys():
                 if k.startswith("realized_ccy:"):
                     all_ccy.add(k.split(":", 1)[1])
-        headers = (
-            ["Ticker"]
-            + [f"Realized P/L ({c})" for c in sorted(all_ccy)]
-            + [
-                "Realized P/L (EUR)",
-                "Net Proceeds (EUR)",
-                "Allocated Cost Basis (EUR)",
-            ]
-        )
+        headers = [labels["per_symbol"]["ticker"]] + [
+            labels["per_symbol"]["pl_tpl"].format(cur=c) for c in sorted(all_ccy)
+        ] + [
+            labels["per_symbol"]["pl_eur"],
+            labels["per_symbol"]["net_eur"],
+            labels["per_symbol"]["alloc_eur"],
+        ]
         ws.append(headers)
         for symbol, totals in sorted(report.symbol_totals.items()):
             row = [symbol]
@@ -137,8 +245,13 @@ class ExcelReportSink:
 
         # Dividends
         if report.dividends:
-            ws = wb.create_sheet(title="Dividends")
-            ws.append(["Date", "Currency", "Description", "Amount (Currency)"])
+            ws = wb.create_sheet(title=labels["sheet"]["dividends"])
+            ws.append([
+                labels["dividends"]["date"],
+                labels["dividends"]["currency"],
+                labels["dividends"]["desc"],
+                labels["dividends"]["amount"],
+            ])
             for d in report.dividends:
                 ws.append(
                     [
@@ -151,10 +264,14 @@ class ExcelReportSink:
 
         # Withholding Tax
         if report.withholding:
-            ws = wb.create_sheet(title="WithholdingTax")
-            ws.append(
-                ["Date", "Currency", "Description", "Amount (Currency)", "Tax Code"]
-            )
+            ws = wb.create_sheet(title=labels["sheet"]["withholding"])
+            ws.append([
+                labels["withholding"]["date"],
+                labels["withholding"]["currency"],
+                labels["withholding"]["desc"],
+                labels["withholding"]["amount"],
+                labels["withholding"]["code"],
+            ])
             for d in report.withholding:
                 ws.append(
                     [

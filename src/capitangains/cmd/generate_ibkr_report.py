@@ -110,7 +110,7 @@ def process_files(args):
 
     # Write outputs via sink
     if args.format == "xlsx":
-        sink = ExcelReportSink(out_path=out_path)
+        sink = ExcelReportSink(out_path=out_path, locale=args.locale)
     elif args.format == "ods":
         sink = OdsReportSink(out_path=out_path)
     else:
@@ -151,6 +151,13 @@ def build_argparser():
         default="xlsx",
         choices=["xlsx", "ods"],
         help="Output workbook format",
+    )
+    p.add_argument(
+        "--locale",
+        type=str,
+        default="PT",
+        choices=["PT", "EN"],
+        help="Locale for headers and sheet names (PT or EN)",
     )
     p.add_argument(
         "--output",
