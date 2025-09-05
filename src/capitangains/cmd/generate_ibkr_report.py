@@ -50,6 +50,7 @@ from capitangains.reporting import (
     FifoMatcher,
     ReportBuilder,
     parse_dividends,
+    parse_syep_interest_details,
     parse_trades_stocklike,
     parse_withholding_tax,
     reconcile_with_ibkr_summary,
@@ -82,6 +83,7 @@ def process_files(args):
     trades = parse_trades_stocklike(model, asset_scope=args.asset_scope)
     dividends = parse_dividends(model)
     withholding = parse_withholding_tax(model)
+    syep_interest = parse_syep_interest_details(model)
 
     # Build FIFO realized
     matcher = FifoMatcher()
@@ -97,6 +99,13 @@ def process_files(args):
         rb.add_realized(rl)
     rb.set_dividends([d for d in dividends if d["date"].year == args.year])
     rb.set_withholding([w for w in withholding if w["date"].year == args.year])
+
+    # Some SYEP interest rows are totals without dates; keep those as well
+    def _syep_in_year(row):
+        d = row.get("value_date")
+        return (d is not None and d.year == args.year) or d is None
+
+    rb.set_syep_interest([r for r in syep_interest if _syep_in_year(r)])
 
     # FX conversion if provided
     fx: Optional[FxTable] = None

@@ -184,3 +184,47 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
                 }
             )
     return out
+
+
+def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
+    """Parse 'Stock Yield Enhancement Program Securities Lent Interest Details'.
+
+    Expected header (as observed):
+      Currency, Value Date, Symbol, Start Date, Quantity, Collateral Amount,
+      Market-based Rate (%), Interest Rate on Customer Collateral (%),
+      Interest Paid to Customer, Code
+    """
+    out: list[dict[str, Any]] = []
+    section = "Stock Yield Enhancement Program Securities Lent Interest Details"
+    for r in model.iter_rows(section):
+        cur = r.get("Currency", "").strip()
+        value_date_s = r.get("Value Date", "").strip()
+        sym = r.get("Symbol", "").strip()
+        start_date_s = r.get("Start Date", "").strip()
+        qty_s = r.get("Quantity", "").strip()
+        collat_s = r.get("Collateral Amount", "").strip()
+        mkt_rate_s = r.get("Market-based Rate (%)", "").strip()
+        cust_rate_s = r.get("Interest Rate on Customer Collateral (%)", "").strip()
+        paid_s = r.get("Interest Paid to Customer", "").strip()
+        code = r.get("Code", "").strip()
+
+        # Some trailing total rows use synthetic "Currency" like "Total" or "Total in EUR".
+        # We still include them, leaving dates empty as present in the CSV.
+        # For normal rows, require at least currency + value date + symbol.
+        if not cur:
+            continue
+
+        row: dict[str, Any] = {
+            "currency": cur,
+            "value_date": (parse_date(value_date_s) if value_date_s else None),
+            "symbol": sym,
+            "start_date": (parse_date(start_date_s) if start_date_s else None),
+            "quantity": to_dec(qty_s),
+            "collateral_amount": to_dec(collat_s),
+            "market_rate_pct": to_dec(mkt_rate_s),
+            "customer_rate_pct": to_dec(cust_rate_s),
+            "interest_paid": to_dec(paid_s),
+            "code": code,
+        }
+        out.append(row)
+    return out

@@ -30,6 +30,7 @@ class ExcelReportSink:
                     "dividends": "Dividends",
                     "withholding": "Withholding Tax",
                     "anexo_g": "Annex G Helper",
+                    "syep_interest": "SYEP Interest",
                 },
                 "summary": {
                     "metric": "Metric",
@@ -84,6 +85,18 @@ class ExcelReportSink:
                     "amount": "Amount (Currency)",
                     "code": "Tax Code",
                 },
+                "syep": {
+                    "date": "Value Date",
+                    "currency": "Currency",
+                    "symbol": "Symbol",
+                    "start_date": "Start Date",
+                    "quantity": "Quantity",
+                    "collateral": "Collateral Amount",
+                    "market_rate": "Market Rate (%)",
+                    "customer_rate": "Customer Rate (%)",
+                    "interest_paid": "Interest Paid",
+                    "code": "Code",
+                },
             }
         # Default: Portuguese (Portugal)
         return {
@@ -94,6 +107,7 @@ class ExcelReportSink:
                 "dividends": "Dividendos",
                 "withholding": "Retenção na Fonte",
                 "anexo_g": "Anexo G",
+                "syep_interest": "Juros SYEP",
             },
             "summary": {
                 "metric": "Métrica",
@@ -147,6 +161,18 @@ class ExcelReportSink:
                 "desc": "Descrição",
                 "amount": "Montante (Moeda)",
                 "code": "Código de Imposto",
+            },
+            "syep": {
+                "date": "Data",
+                "currency": "Moeda",
+                "symbol": "Símbolo",
+                "start_date": "Data de Início",
+                "quantity": "Quantidade",
+                "collateral": "Valor de Colateral",
+                "market_rate": "Taxa de Mercado (%)",
+                "customer_rate": "Taxa ao Cliente (%)",
+                "interest_paid": "Juros Pagos",
+                "code": "Código",
             },
         }
 
@@ -279,7 +305,7 @@ class ExcelReportSink:
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
         # Per-symbol summary
-        ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])        
+        ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
         # Collect currencies dynamically
         all_ccy = set()
         for _, totals in report.symbol_totals.items():
@@ -335,8 +361,55 @@ class ExcelReportSink:
                     d["currency"]
                 )
 
+        # SYEP Interest Details
+        if getattr(report, "syep_interest", None):
+            if report.syep_interest:
+                ws = wb.create_sheet(title=labels["sheet"]["syep_interest"])
+                ws.append(
+                    [
+                        labels["syep"]["date"],
+                        labels["syep"]["currency"],
+                        labels["syep"]["symbol"],
+                        labels["syep"]["start_date"],
+                        labels["syep"]["quantity"],
+                        labels["syep"]["collateral"],
+                        labels["syep"]["market_rate"],
+                        labels["syep"]["customer_rate"],
+                        labels["syep"]["interest_paid"],
+                        labels["syep"]["code"],
+                    ]
+                )
+                pct_fmt = "0.00####"
+                for row in report.syep_interest:
+                    ws.append(
+                        [
+                            row.get("value_date"),
+                            row.get("currency"),
+                            row.get("symbol"),
+                            row.get("start_date"),
+                            float(row.get("quantity", 0)),
+                            float(row.get("collateral_amount", 0)),
+                            float(row.get("market_rate_pct", 0)),
+                            float(row.get("customer_rate_pct", 0)),
+                            float(row.get("interest_paid", 0)),
+                            row.get("code", ""),
+                        ]
+                    )
+                    r = ws.max_row
+                    ws.cell(row=r, column=1).number_format = date_fmt
+                    ws.cell(row=r, column=4).number_format = date_fmt
+                    ws.cell(row=r, column=5).number_format = qty_fmt
+                    ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
+                        row.get("currency", "")
+                    )
+                    ws.cell(row=r, column=7).number_format = pct_fmt
+                    ws.cell(row=r, column=8).number_format = pct_fmt
+                    ws.cell(row=r, column=9).number_format = money_fmt_for_currency(
+                        row.get("currency", "")
+                    )
+
         # Annex G helper (per-leg breakdown with EUR values)
-        ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])        
+        ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])
         ws.append(
             [
                 labels["anexo_g"]["ticker"],

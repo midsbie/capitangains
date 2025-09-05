@@ -25,6 +25,7 @@ class ReportBuilder:
         )
         self.dividends: list[dict[str, Any]] = []
         self.withholding: list[dict[str, Any]] = []
+        self.syep_interest: list[dict[str, Any]] = []
 
         # flags
         self.fx_needed: bool = False
@@ -50,6 +51,9 @@ class ReportBuilder:
 
     def set_withholding(self, rows: list[dict[str, Any]]):
         self.withholding = rows
+
+    def set_syep_interest(self, rows: list[dict[str, Any]]):
+        self.syep_interest = rows
 
     # CSV/Markdown writers have been intentionally removed in favor of ReportSink-based outputs.
 
@@ -78,7 +82,7 @@ class ReportBuilder:
                 # allocate sale net EUR across legs by quantity share (helps Annex G)
                 if rl.sell_qty != 0:
                     for leg in rl.legs:
-                        share = (leg["qty"] / rl.sell_qty)
+                        share = leg["qty"] / rl.sell_qty
                         leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
                             Decimal("0.01")
                         )
@@ -115,7 +119,7 @@ class ReportBuilder:
             # allocate sale net EUR across legs by quantity share
             if rl.sell_qty != 0 and rl.sell_net_eur is not None:
                 for leg in rl.legs:
-                    share = (leg["qty"] / rl.sell_qty)
+                    share = leg["qty"] / rl.sell_qty
                     leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
                         Decimal("0.01")
                     )

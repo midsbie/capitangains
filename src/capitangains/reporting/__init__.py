@@ -1,4 +1,10 @@
-from .extract import TradeRow, parse_trades_stocklike, parse_dividends, parse_withholding_tax
+from .extract import (
+    TradeRow,
+    parse_trades_stocklike,
+    parse_dividends,
+    parse_withholding_tax,
+    parse_syep_interest_details,
+)
 from .fifo import FifoMatcher, RealizedLine, Lot
 from .fx import FxTable
 from .reconcile import reconcile_with_ibkr_summary
@@ -10,6 +16,7 @@ __all__ = [
     "parse_trades_stocklike",
     "parse_dividends",
     "parse_withholding_tax",
+    "parse_syep_interest_details",
     "FifoMatcher",
     "RealizedLine",
     "Lot",
