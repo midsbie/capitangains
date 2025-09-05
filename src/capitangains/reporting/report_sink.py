@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
+
+from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 
 from .report_builder import ReportBuilder
@@ -68,7 +72,10 @@ class ExcelReportSink:
                 },
                 "per_symbol": {
                     "ticker": "Ticker",
-                    "pl_tpl": "Realized P/L ({cur})",
+                    "trade_currency": "Trade Currency",
+                    "pl_tcy": "Realized P/L (Trade Currency)",
+                    "net_tcy": "Net Proceeds (Trade Currency)",
+                    "alloc_tcy": "Allocated Cost Basis (Trade Currency)",
                     "pl_eur": "Realized P/L (EUR)",
                     "net_eur": "Net Proceeds (EUR)",
                     "alloc_eur": "Allocated Cost Basis (EUR)",
@@ -156,7 +163,10 @@ class ExcelReportSink:
             },
             "per_symbol": {
                 "ticker": "Símbolo",
-                "pl_tpl": "Resultado Realizado ({cur})",
+                "trade_currency": "Moeda da Operação",
+                "pl_tcy": "Resultado Realizado (Moeda)",
+                "net_tcy": "Proveitos Líquidos (Moeda)",
+                "alloc_tcy": "Custo Alocado (Moeda)",
                 "pl_eur": "Resultado Realizado (EUR)",
                 "net_eur": "Proveitos Líquidos (EUR)",
                 "alloc_eur": "Custo Alocado (EUR)",
@@ -199,13 +209,6 @@ class ExcelReportSink:
         }
 
     def write(self, report: ReportBuilder) -> Path:
-        try:
-            from openpyxl import Workbook
-        except Exception as e:  # pragma: no cover - optional dependency
-            raise RuntimeError(
-                "openpyxl is required to write XLSX. Install with: pip install openpyxl"
-            ) from e
-
         out_path = Path(self.out_path)
         wb = Workbook()
 
@@ -229,7 +232,6 @@ class ExcelReportSink:
         ws.append([labels["summary"]["metric"], labels["summary"]["amount"]])
         # Number formats
         date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
-        money_fmt = "#,##0.00"
         qty_fmt = "0.########"
 
         def money_fmt_for_currency(ccy: str) -> str:
@@ -277,7 +279,6 @@ class ExcelReportSink:
                 labels["realized"]["legs_json"],
             ]
         )
-        import json
 
         for rl in report.realized_lines:
             alloc_cost_ccy = sum(
@@ -326,40 +327,62 @@ class ExcelReportSink:
             for c in range(10, 15):
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
-        # Per-symbol summary
+        # Per-symbol summary (trade currency + EUR)
         ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
-        # Collect currencies dynamically
-        all_ccy = set()
-        for _, totals in report.symbol_totals.items():
-            for k in totals.keys():
-                if k.startswith("realized_ccy:"):
-                    all_ccy.add(k.split(":", 1)[1])
-        headers = (
-            [labels["per_symbol"]["ticker"]]
-            + [labels["per_symbol"]["pl_tpl"].format(cur=c) for c in sorted(all_ccy)]
-            + [
+        ws.append(
+            [
+                labels["per_symbol"]["ticker"],
+                labels["per_symbol"]["trade_currency"],
+                labels["per_symbol"]["pl_tcy"],
+                labels["per_symbol"]["net_tcy"],
+                labels["per_symbol"]["alloc_tcy"],
                 labels["per_symbol"]["pl_eur"],
                 labels["per_symbol"]["net_eur"],
                 labels["per_symbol"]["alloc_eur"],
             ]
         )
-        ws.append(headers)
-        cur_list = sorted(all_ccy)
+
+        # Determine primary trade currency per symbol (by total abs net proceeds)
+        sym_ccy_score: dict[str, dict[str, Decimal]] = defaultdict(
+            lambda: defaultdict(Decimal)
+        )
+        for rl in report.realized_lines:
+            sym_ccy_score[rl.symbol][rl.currency] += rl.sell_net_ccy.copy_abs()
+
+        def primary_ccy(symbol: str) -> str:
+            scores = sym_ccy_score.get(symbol, {})
+            if not scores:
+                # fallback: best-effort detect from available totals keys
+                totals = report.symbol_totals.get(symbol, {})
+                for k in totals.keys():
+                    if k.startswith("realized_ccy:"):
+                        return k.split(":", 1)[1]
+                return "EUR"
+            return max(scores.items(), key=lambda kv: kv[1])[0]
+
         for symbol, totals in sorted(report.symbol_totals.items()):
-            row = [symbol]
-            for c in cur_list:
-                row.append(float(totals.get("realized_ccy:" + c, Decimal("0"))))
-            row.append(float(totals.get("realized_eur", Decimal("0"))))
-            row.append(float(totals.get("proceeds_eur", Decimal("0"))))
-            row.append(float(totals.get("alloc_cost_eur", Decimal("0"))))
+            ccy = primary_ccy(symbol)
+            pl_tcy = totals.get("realized_ccy:" + ccy, Decimal("0"))
+            net_tcy = totals.get("proceeds_ccy:" + ccy, Decimal("0"))
+            alloc_tcy = totals.get("alloc_cost_ccy:" + ccy, Decimal("0"))
+            row = [
+                symbol,
+                ccy,
+                float(pl_tcy),
+                float(net_tcy),
+                float(alloc_tcy),
+                float(totals.get("realized_eur", Decimal("0"))),
+                float(totals.get("proceeds_eur", Decimal("0"))),
+                float(totals.get("alloc_eur", Decimal("0"))),
+            ]
             ws.append(row)
 
             r = ws.max_row
-            for i, ccy in enumerate(cur_list, start=2):
-                ws.cell(row=r, column=i).number_format = money_fmt_for_currency(ccy)
-
-            base = 2 + len(cur_list)
-            for c in range(base, base + 3):
+            # Money formats for trade currency values
+            tcy_fmt = money_fmt_for_currency(ccy)
+            for c in (3, 4, 5):
+                ws.cell(row=r, column=c).number_format = tcy_fmt
+            for c in (6, 7, 8):
                 ws.cell(row=r, column=c).number_format = money_fmt_for_currency("EUR")
 
         # Dividends
@@ -563,8 +586,6 @@ class ExcelReportSink:
                     d["currency"]
                 )
                 ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
-
-        from openpyxl.utils import get_column_letter
 
         def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
             header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []

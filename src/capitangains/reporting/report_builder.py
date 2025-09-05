@@ -185,6 +185,25 @@ class ReportBuilder:
                     continue
                 row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))
 
+        # Recompute EUR aggregates per symbol after conversions
+        # Clear prior EUR aggregates (they would have been zero before conversion)
+        for _sym, totals in self.symbol_totals.items():
+            if "realized_eur" in totals:
+                totals["realized_eur"] = Decimal("0")
+            if "proceeds_eur" in totals:
+                totals["proceeds_eur"] = Decimal("0")
+            if "alloc_eur" in totals:
+                totals["alloc_eur"] = Decimal("0")
+
+        for rl in self.realized_lines:
+            t = self.symbol_totals[rl.symbol]
+            if rl.realized_pl_eur is not None:
+                t["realized_eur"] += rl.realized_pl_eur
+            if rl.sell_net_eur is not None:
+                t["proceeds_eur"] += rl.sell_net_eur
+            if rl.alloc_cost_eur is not None:
+                t["alloc_eur"] += rl.alloc_cost_eur
+
         # Convert Interest amounts to EUR, if possible
         if getattr(self, "interest", None):
             for row in self.interest:
