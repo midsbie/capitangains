@@ -29,6 +29,7 @@ class ExcelReportSink:
                     "per_symbol": "Per Symbol Summary",
                     "dividends": "Dividends",
                     "withholding": "Withholding Tax",
+                    "anexo_g": "Annex G Helper",
                 },
                 "summary": {
                     "metric": "Metric",
@@ -52,6 +53,16 @@ class ExcelReportSink:
                     "alloc_eur": "Allocated Cost Basis (EUR)",
                     "pl_eur": "Realized P/L (EUR)",
                     "legs_json": "Matched Buy Lots (JSON)",
+                },
+                "anexo_g": {
+                    "ticker": "Ticker",
+                    "trade_currency": "Trade Currency",
+                    "buy_date": "Acquisition Date",
+                    "sell_date": "Disposal Date",
+                    "qty": "Quantity",
+                    "alloc_eur": "Acquisition Value (EUR)",
+                    "proceeds_eur": "Disposal Value (EUR)",
+                    "pl_eur": "Realized P/L (EUR)",
                 },
                 "per_symbol": {
                     "ticker": "Ticker",
@@ -82,6 +93,7 @@ class ExcelReportSink:
                 "per_symbol": "Resumo por Símbolo",
                 "dividends": "Dividendos",
                 "withholding": "Retenção na Fonte",
+                "anexo_g": "Anexo G",
             },
             "summary": {
                 "metric": "Métrica",
@@ -105,6 +117,16 @@ class ExcelReportSink:
                 "alloc_eur": "Custo Alocado (EUR)",
                 "pl_eur": "Resultado Realizado (EUR)",
                 "legs_json": "Lotes de Compra (JSON)",
+            },
+            "anexo_g": {
+                "ticker": "Símbolo",
+                "trade_currency": "Moeda da Operação",
+                "buy_date": "Data de Aquisição",
+                "sell_date": "Data de Venda",
+                "qty": "Quantidade",
+                "alloc_eur": "Valor de Aquisição (EUR)",
+                "proceeds_eur": "Valor de Realização (EUR)",
+                "pl_eur": "Mais/menos‑valia (EUR)",
             },
             "per_symbol": {
                 "ticker": "Símbolo",
@@ -257,7 +279,7 @@ class ExcelReportSink:
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
         # Per-symbol summary
-        ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
+        ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])        
         # Collect currencies dynamically
         all_ccy = set()
         for _, totals in report.symbol_totals.items():
@@ -312,6 +334,48 @@ class ExcelReportSink:
                 ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
                     d["currency"]
                 )
+
+        # Annex G helper (per-leg breakdown with EUR values)
+        ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])        
+        ws.append(
+            [
+                labels["anexo_g"]["ticker"],
+                labels["anexo_g"]["trade_currency"],
+                labels["anexo_g"]["buy_date"],
+                labels["anexo_g"]["sell_date"],
+                labels["anexo_g"]["qty"],
+                labels["anexo_g"]["alloc_eur"],
+                labels["anexo_g"]["proceeds_eur"],
+                labels["anexo_g"]["pl_eur"],
+            ]
+        )
+        for rl in report.realized_lines:
+            for leg in rl.legs:
+                alloc_eur = leg.get("alloc_cost_eur")
+                proceeds_eur = leg.get("proceeds_share_eur")
+                pl_eur = None
+                if alloc_eur is not None and proceeds_eur is not None:
+                    pl_eur = (proceeds_eur - alloc_eur).quantize(Decimal("0.01"))
+                ws.append(
+                    [
+                        rl.symbol,
+                        rl.currency,
+                        leg.get("buy_date"),
+                        rl.sell_date,
+                        float(leg.get("qty", 0)),
+                        (None if alloc_eur is None else float(alloc_eur)),
+                        (None if proceeds_eur is None else float(proceeds_eur)),
+                        (None if pl_eur is None else float(pl_eur)),
+                    ]
+                )
+                r = ws.max_row
+                ws.cell(row=r, column=3).number_format = date_fmt
+                ws.cell(row=r, column=4).number_format = date_fmt
+                ws.cell(row=r, column=5).number_format = qty_fmt
+                for c in (6, 7, 8):
+                    ws.cell(row=r, column=c).number_format = money_fmt_for_currency(
+                        "EUR"
+                    )
 
         # Withholding Tax
         if report.withholding:

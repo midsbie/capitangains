@@ -67,11 +67,22 @@ class ReportBuilder:
                 rl.sell_gross_eur = rl.sell_gross_ccy
                 rl.sell_comm_eur = rl.sell_comm_ccy
                 rl.sell_net_eur = rl.sell_net_ccy
-                alloc_eur = sum(
-                    (leg["alloc_cost_ccy"] for leg in rl.legs), Decimal("0")
+                alloc_eur = Decimal("0")
+                # per-leg EUR breakdown (identity conversion)
+                for leg in rl.legs:
+                    leg["alloc_cost_eur"] = leg["alloc_cost_ccy"]
+                    alloc_eur += leg["alloc_cost_eur"]
+                rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
+                rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
+                    Decimal("0.01")
                 )
-                rl.alloc_cost_eur = alloc_eur
-                rl.realized_pl_eur = rl.sell_net_eur - rl.alloc_cost_eur
+                # allocate sale net EUR across legs by quantity share (helps Annex G)
+                if rl.sell_qty != 0:
+                    for leg in rl.legs:
+                        share = (leg["qty"] / rl.sell_qty)
+                        leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
+                            Decimal("0.01")
+                        )
                 continue
 
             # Non-EUR needs FX
@@ -92,8 +103,17 @@ class ReportBuilder:
                     rate = sell_rate  # fallback
                 else:
                     rate = fx.get_rate(bd, rl.currency) or sell_rate
-                alloc_eur += leg["alloc_cost_ccy"] * rate
+                leg_eur = (leg["alloc_cost_ccy"] * rate).quantize(Decimal("0.01"))
+                leg["alloc_cost_eur"] = leg_eur
+                alloc_eur += leg_eur
             rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
             rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
                 Decimal("0.01")
             )
+            # allocate sale net EUR across legs by quantity share
+            if rl.sell_qty != 0 and rl.sell_net_eur is not None:
+                for leg in rl.legs:
+                    share = (leg["qty"] / rl.sell_qty)
+                    leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
+                        Decimal("0.01")
+                    )
