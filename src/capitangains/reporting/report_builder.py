@@ -161,3 +161,22 @@ class ReportBuilder:
                     self.fx_missing = True
                     continue
                 row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))
+
+        # Convert Dividends amounts to EUR, if possible
+        if getattr(self, "dividends", None):
+            for row in self.dividends:
+                cur = (row.get("currency") or "").upper()
+                amt = row.get("amount")
+                d = row.get("date")
+                if amt is None:
+                    continue
+                if cur == "EUR":
+                    row["amount_eur"] = amt.quantize(Decimal("0.01"))
+                    continue
+                if fx is None or d is None:
+                    continue
+                rate = fx.get_rate(d, cur)
+                if rate is None:
+                    self.fx_missing = True
+                    continue
+                row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))

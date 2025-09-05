@@ -77,6 +77,7 @@ class ExcelReportSink:
                     "currency": "Currency",
                     "desc": "Description",
                     "amount": "Amount (Currency)",
+                    "amount_eur": "Amount (EUR)",
                 },
                 "withholding": {
                     "date": "Date",
@@ -156,6 +157,7 @@ class ExcelReportSink:
                 "currency": "Moeda",
                 "desc": "Descrição",
                 "amount": "Montante (Moeda)",
+                "amount_eur": "Montante (EUR)",
             },
             "withholding": {
                 "date": "Data",
@@ -353,17 +355,29 @@ class ExcelReportSink:
                     labels["dividends"]["currency"],
                     labels["dividends"]["desc"],
                     labels["dividends"]["amount"],
+                    labels["dividends"]["amount_eur"],
                 ]
             )
             for d in report.dividends:
                 ws.append(
-                    [d["date"], d["currency"], d["description"], float(d["amount"])]
+                    [
+                        d["date"],
+                        d["currency"],
+                        d["description"],
+                        float(d["amount"]),
+                        (
+                            None
+                            if d.get("amount_eur") is None
+                            else float(d["amount_eur"])
+                        ),
+                    ]
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
                 ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
                     d["currency"]
                 )
+                ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
 
         # SYEP Interest Details
         if getattr(report, "syep_interest", None):
