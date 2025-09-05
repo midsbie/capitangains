@@ -83,6 +83,7 @@ class ExcelReportSink:
                     "currency": "Currency",
                     "desc": "Description",
                     "amount": "Amount (Currency)",
+                    "amount_eur": "Amount (EUR)",
                     "code": "Tax Code",
                 },
                 "syep": {
@@ -161,6 +162,7 @@ class ExcelReportSink:
                 "currency": "Moeda",
                 "desc": "Descrição",
                 "amount": "Montante (Moeda)",
+                "amount_eur": "Montante (EUR)",
                 "code": "Código de Imposto",
             },
             "syep": {
@@ -470,6 +472,7 @@ class ExcelReportSink:
                     labels["withholding"]["currency"],
                     labels["withholding"]["desc"],
                     labels["withholding"]["amount"],
+                    labels["withholding"]["amount_eur"],
                     labels["withholding"]["code"],
                 ]
             )
@@ -480,6 +483,11 @@ class ExcelReportSink:
                         d["currency"],
                         d["description"],
                         float(d["amount"]),
+                        (
+                            None
+                            if d.get("amount_eur") is None
+                            else float(d["amount_eur"])
+                        ),
                         d.get("code", ""),
                     ]
                 )
@@ -488,6 +496,7 @@ class ExcelReportSink:
                 ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
                     d["currency"]
                 )
+                ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
 
         from openpyxl.utils import get_column_letter
 
