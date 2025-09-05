@@ -327,6 +327,48 @@ class ExcelReportSink:
             for c in range(10, 15):
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
+        # Annex G helper (per-leg breakdown with EUR values)
+        ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])
+        ws.append(
+            [
+                labels["anexo_g"]["ticker"],
+                labels["anexo_g"]["trade_currency"],
+                labels["anexo_g"]["buy_date"],
+                labels["anexo_g"]["sell_date"],
+                labels["anexo_g"]["qty"],
+                labels["anexo_g"]["alloc_eur"],
+                labels["anexo_g"]["proceeds_eur"],
+                labels["anexo_g"]["pl_eur"],
+            ]
+        )
+        for rl in report.realized_lines:
+            for leg in rl.legs:
+                alloc_eur = leg.get("alloc_cost_eur")
+                proceeds_eur = leg.get("proceeds_share_eur")
+                pl_eur = None
+                if alloc_eur is not None and proceeds_eur is not None:
+                    pl_eur = (proceeds_eur - alloc_eur).quantize(Decimal("0.01"))
+                ws.append(
+                    [
+                        rl.symbol,
+                        rl.currency,
+                        leg.get("buy_date"),
+                        rl.sell_date,
+                        float(leg.get("qty", 0)),
+                        (None if alloc_eur is None else float(alloc_eur)),
+                        (None if proceeds_eur is None else float(proceeds_eur)),
+                        (None if pl_eur is None else float(pl_eur)),
+                    ]
+                )
+                r = ws.max_row
+                ws.cell(row=r, column=3).number_format = date_fmt
+                ws.cell(row=r, column=4).number_format = date_fmt
+                ws.cell(row=r, column=5).number_format = qty_fmt
+                for c in (6, 7, 8):
+                    ws.cell(row=r, column=c).number_format = money_fmt_for_currency(
+                        "EUR"
+                    )
+
         # Per-symbol summary (trade currency + EUR)
         ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
         ws.append(
@@ -507,48 +549,6 @@ class ExcelReportSink:
                         row.get("currency", "")
                     )
                     ws.cell(row=r, column=10).number_format = money_fmt_for_currency(
-                        "EUR"
-                    )
-
-        # Annex G helper (per-leg breakdown with EUR values)
-        ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])
-        ws.append(
-            [
-                labels["anexo_g"]["ticker"],
-                labels["anexo_g"]["trade_currency"],
-                labels["anexo_g"]["buy_date"],
-                labels["anexo_g"]["sell_date"],
-                labels["anexo_g"]["qty"],
-                labels["anexo_g"]["alloc_eur"],
-                labels["anexo_g"]["proceeds_eur"],
-                labels["anexo_g"]["pl_eur"],
-            ]
-        )
-        for rl in report.realized_lines:
-            for leg in rl.legs:
-                alloc_eur = leg.get("alloc_cost_eur")
-                proceeds_eur = leg.get("proceeds_share_eur")
-                pl_eur = None
-                if alloc_eur is not None and proceeds_eur is not None:
-                    pl_eur = (proceeds_eur - alloc_eur).quantize(Decimal("0.01"))
-                ws.append(
-                    [
-                        rl.symbol,
-                        rl.currency,
-                        leg.get("buy_date"),
-                        rl.sell_date,
-                        float(leg.get("qty", 0)),
-                        (None if alloc_eur is None else float(alloc_eur)),
-                        (None if proceeds_eur is None else float(proceeds_eur)),
-                        (None if pl_eur is None else float(pl_eur)),
-                    ]
-                )
-                r = ws.max_row
-                ws.cell(row=r, column=3).number_format = date_fmt
-                ws.cell(row=r, column=4).number_format = date_fmt
-                ws.cell(row=r, column=5).number_format = qty_fmt
-                for c in (6, 7, 8):
-                    ws.cell(row=r, column=c).number_format = money_fmt_for_currency(
                         "EUR"
                     )
 
