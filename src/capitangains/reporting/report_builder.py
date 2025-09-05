@@ -58,9 +58,8 @@ class ReportBuilder:
         PT practice: acquisition values -> EUR at buy date; sale values -> EUR at sale date.
         """
         if fx is None:
-            # Mark if any non-EUR currency is present
+            # Mark if any non-EUR currency is present. We will still fill EUR-native trades.
             self.fx_missing = any(rl.currency != "EUR" for rl in self.realized_lines)
-            return
 
         for rl in self.realized_lines:
             if rl.currency == "EUR":
@@ -86,6 +85,9 @@ class ReportBuilder:
                 continue
 
             # Non-EUR needs FX
+            if fx is None:
+                # Cannot convert without FX
+                continue
             sell_rate = fx.get_rate(rl.sell_date, rl.currency)
             if sell_rate is None:
                 self.fx_missing = True
