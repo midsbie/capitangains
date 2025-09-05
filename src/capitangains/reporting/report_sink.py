@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
+from openpyxl.utils import get_column_letter
 
 from .report_builder import ReportBuilder
 
@@ -305,6 +306,38 @@ class ExcelReportSink:
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
                 ws.cell(row=r, column=4).number_format = money_fmt
+
+        def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
+            header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []
+            for col in range(1, sheet.max_column + 1):
+                max_len = 0
+                for row in range(1, sheet.max_row + 1):
+                    v = sheet.cell(row=row, column=col).value
+                    if v is None:
+                        continue
+                    # Approximate display width using string conversion
+                    if hasattr(v, "strftime"):
+                        s = (
+                            v.strftime("%d/%m/%Y")
+                            if self.locale.upper() == "PT"
+                            else v.strftime("%Y-%m-%d")
+                        )
+                    else:
+                        s = str(v)
+                    if len(s) > max_len:
+                        max_len = len(s)
+                header = (
+                    header_values[col - 1] if col - 1 < len(header_values) else None
+                )
+                if header:
+                    max_len = max(max_len, len(str(header)))
+                width = min(max_width, max(min_width, max_len + 2))
+                if header and "JSON" in str(header):
+                    width = min(width, 50)
+                sheet.column_dimensions[get_column_letter(col)].width = width
+
+        for _ws in wb.worksheets:
+            autosize(_ws)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(out_path)
