@@ -1,8 +1,5 @@
 # Directories
-.aider*
 .venv
-backtest_results
-models
 
 *.egg-info
 
@@ -10,7 +7,5 @@ models
 .env
 .~*
 *.csv
-*.parquet
-
-# Symlinks
-VIX_VIX_daily.csv
+*.ods
+*.xls*
