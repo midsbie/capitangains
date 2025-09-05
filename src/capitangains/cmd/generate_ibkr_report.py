@@ -100,12 +100,10 @@ def process_files(args):
     rb.set_dividends([d for d in dividends if d["date"].year == args.year])
     rb.set_withholding([w for w in withholding if w["date"].year == args.year])
 
-    # Some SYEP interest rows are totals without dates; keep those as well
-    def _syep_in_year(row):
-        d = row.get("value_date")
-        return (d is not None and d.year == args.year) or d is None
-
-    rb.set_syep_interest([r for r in syep_interest if _syep_in_year(r)])
+    # Keep only rows with a value date in the selected year (drop CSV 'Total' lines)
+    rb.set_syep_interest(
+        [r for r in syep_interest if r.get("value_date") and r["value_date"].year == args.year]
+    )
 
     # FX conversion if provided
     fx: Optional[FxTable] = None

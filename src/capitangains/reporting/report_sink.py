@@ -94,7 +94,8 @@ class ExcelReportSink:
                     "collateral": "Collateral Amount",
                     "market_rate": "Market Rate (%)",
                     "customer_rate": "Customer Rate (%)",
-                    "interest_paid": "Interest Paid",
+                    "interest_paid": "Interest Paid (Currency)",
+                    "interest_paid_eur": "Interest Paid (EUR)",
                     "code": "Code",
                 },
             }
@@ -171,7 +172,8 @@ class ExcelReportSink:
                 "collateral": "Valor de Colateral",
                 "market_rate": "Taxa de Mercado (%)",
                 "customer_rate": "Taxa ao Cliente (%)",
-                "interest_paid": "Juros Pagos",
+                "interest_paid": "Juros Pagos (Moeda)",
+                "interest_paid_eur": "Juros Pagos (EUR)",
                 "code": "Código",
             },
         }
@@ -376,6 +378,7 @@ class ExcelReportSink:
                         labels["syep"]["market_rate"],
                         labels["syep"]["customer_rate"],
                         labels["syep"]["interest_paid"],
+                        labels["syep"]["interest_paid_eur"],
                         labels["syep"]["code"],
                     ]
                 )
@@ -392,6 +395,11 @@ class ExcelReportSink:
                             float(row.get("market_rate_pct", 0)),
                             float(row.get("customer_rate_pct", 0)),
                             float(row.get("interest_paid", 0)),
+                            (
+                                None
+                                if row.get("interest_paid_eur") is None
+                                else float(row.get("interest_paid_eur"))
+                            ),
                             row.get("code", ""),
                         ]
                     )
@@ -406,6 +414,9 @@ class ExcelReportSink:
                     ws.cell(row=r, column=8).number_format = pct_fmt
                     ws.cell(row=r, column=9).number_format = money_fmt_for_currency(
                         row.get("currency", "")
+                    )
+                    ws.cell(row=r, column=10).number_format = money_fmt_for_currency(
+                        "EUR"
                     )
 
         # Annex G helper (per-leg breakdown with EUR values)

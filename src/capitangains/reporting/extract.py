@@ -208,10 +208,8 @@ def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
         paid_s = r.get("Interest Paid to Customer", "").strip()
         code = r.get("Code", "").strip()
 
-        # Some trailing total rows use synthetic "Currency" like "Total" or "Total in EUR".
-        # We still include them, leaving dates empty as present in the CSV.
-        # For normal rows, require at least currency + value date + symbol.
-        if not cur:
+        # Skip trailing totals like 'Total', 'Total in EUR'.
+        if not cur or cur.lower().startswith("total"):
             continue
 
         row: dict[str, Any] = {

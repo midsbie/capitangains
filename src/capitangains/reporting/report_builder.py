@@ -123,3 +123,22 @@ class ReportBuilder:
                     leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
                         Decimal("0.01")
                     )
+
+        # Convert SYEP interest to EUR, if available
+        if getattr(self, "syep_interest", None):
+            for row in self.syep_interest:
+                cur = (row.get("currency") or "").upper()
+                amt = row.get("interest_paid")
+                d = row.get("value_date")
+                if amt is None:
+                    continue
+                if cur == "EUR":
+                    row["interest_paid_eur"] = amt.quantize(Decimal("0.01"))
+                    continue
+                if fx is None or d is None:
+                    continue
+                rate = fx.get_rate(d, cur)
+                if rate is None:
+                    self.fx_missing = True
+                    continue
+                row["interest_paid_eur"] = (amt * rate).quantize(Decimal("0.01"))
