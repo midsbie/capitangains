@@ -74,67 +74,66 @@ class FifoMatcher:
             )
             self.positions[trade.symbol].append(lot)
             return None
-        else:
-            # SELL
-            qty_to_sell = -trade.quantity  # positive
-            legs: list[dict[str, Any]] = []
-            alloc_cost_ccy = Decimal("0")
 
-            while qty_to_sell > 0 and self.positions[trade.symbol]:
-                lot = self.positions[trade.symbol][0]
-                take = min(qty_to_sell, lot.qty)
-                # proportional cost from this lot
-                ratio = (take / lot.qty) if lot.qty != 0 else Decimal("0")
-                cost_piece = (lot.basis_ccy * ratio).quantize(Decimal("0.00000001"))
-                alloc_cost_ccy += cost_piece
-                legs.append(
-                    {
-                        "buy_date": lot.buy_date,
-                        "qty": take,
-                        "lot_qty_before": lot.qty,
-                        "alloc_cost_ccy": cost_piece,
-                    }
-                )
-                # reduce lot
-                lot.qty -= take
-                lot.basis_ccy -= cost_piece
-                qty_to_sell -= take
-                if lot.qty == 0:
-                    self.positions[trade.symbol].popleft()
+        # SELL
+        qty_to_sell = -trade.quantity  # positive
+        legs: list[dict[str, Any]] = []
+        alloc_cost_ccy = Decimal("0")
 
-            if qty_to_sell > 0:
-                # short sell or not enough lots
-                logger.warning(
-                    "Not enough lots for %s on %s; remaining qty=%s. Treating remainder as zero-cost.",
-                    trade.symbol,
-                    trade.date,
-                    qty_to_sell,
-                )
-                # Treat remainder as zero-cost to avoid crash
-                legs.append(
-                    {
-                        "buy_date": None,
-                        "qty": qty_to_sell,
-                        "lot_qty_before": Decimal("0"),
-                        "alloc_cost_ccy": Decimal("0"),
-                    }
-                )
-                alloc_cost_ccy += Decimal("0")
-                qty_to_sell = Decimal("0")
-
-            sell_gross = self._sell_gross_ccy(trade)
-            sell_net = self._sell_net_ccy(trade)
-            realized_ccy = (sell_net - alloc_cost_ccy).quantize(Decimal("0.01"))
-
-            return RealizedLine(
-                symbol=trade.symbol,
-                currency=trade.currency,
-                sell_date=trade.date,
-                sell_qty=(-trade.quantity),
-                sell_gross_ccy=sell_gross,
-                sell_comm_ccy=trade.comm_fee,
-                sell_net_ccy=sell_net,
-                legs=legs,
-                realized_pl_ccy=realized_ccy,
+        while qty_to_sell > 0 and self.positions[trade.symbol]:
+            lot = self.positions[trade.symbol][0]
+            take = min(qty_to_sell, lot.qty)
+            # proportional cost from this lot
+            ratio = (take / lot.qty) if lot.qty != 0 else Decimal("0")
+            cost_piece = (lot.basis_ccy * ratio).quantize(Decimal("0.00000001"))
+            alloc_cost_ccy += cost_piece
+            legs.append(
+                {
+                    "buy_date": lot.buy_date,
+                    "qty": take,
+                    "lot_qty_before": lot.qty,
+                    "alloc_cost_ccy": cost_piece,
+                }
             )
+            # reduce lot
+            lot.qty -= take
+            lot.basis_ccy -= cost_piece
+            qty_to_sell -= take
+            if lot.qty == 0:
+                self.positions[trade.symbol].popleft()
 
+        if qty_to_sell > 0:
+            # short sell or not enough lots
+            logger.warning(
+                "Not enough lots for %s on %s; remaining qty=%s. Treating remainder as zero-cost.",
+                trade.symbol,
+                trade.date,
+                qty_to_sell,
+            )
+            # Treat remainder as zero-cost to avoid crash
+            legs.append(
+                {
+                    "buy_date": None,
+                    "qty": qty_to_sell,
+                    "lot_qty_before": Decimal("0"),
+                    "alloc_cost_ccy": Decimal("0"),
+                }
+            )
+            alloc_cost_ccy += Decimal("0")
+            qty_to_sell = Decimal("0")
+
+        sell_gross = self._sell_gross_ccy(trade)
+        sell_net = self._sell_net_ccy(trade)
+        realized_ccy = (sell_net - alloc_cost_ccy).quantize(Decimal("0.01"))
+
+        return RealizedLine(
+            symbol=trade.symbol,
+            currency=trade.currency,
+            sell_date=trade.date,
+            sell_qty=(-trade.quantity),
+            sell_gross_ccy=sell_gross,
+            sell_comm_ccy=trade.comm_fee,
+            sell_net_ccy=sell_net,
+            legs=legs,
+            realized_pl_ccy=realized_ccy,
+        )
