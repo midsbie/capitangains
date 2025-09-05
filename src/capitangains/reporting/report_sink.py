@@ -28,6 +28,7 @@ class ExcelReportSink:
                     "realized": "Realized Trades",
                     "per_symbol": "Per Symbol Summary",
                     "dividends": "Dividends",
+                    "interest": "Interest",
                     "withholding": "Withholding Tax",
                     "anexo_g": "Annex G Helper",
                     "syep_interest": "SYEP Interest",
@@ -79,6 +80,13 @@ class ExcelReportSink:
                     "amount": "Amount (Currency)",
                     "amount_eur": "Amount (EUR)",
                 },
+                "interest": {
+                    "date": "Date",
+                    "currency": "Currency",
+                    "desc": "Description",
+                    "amount": "Amount (Currency)",
+                    "amount_eur": "Amount (EUR)",
+                },
                 "withholding": {
                     "date": "Date",
                     "currency": "Currency",
@@ -108,6 +116,7 @@ class ExcelReportSink:
                 "realized": "Operações Realizadas",
                 "per_symbol": "Resumo por Símbolo",
                 "dividends": "Dividendos",
+                "interest": "Juros",
                 "withholding": "Retenção na Fonte",
                 "anexo_g": "Anexo G",
                 "syep_interest": "Juros SYEP",
@@ -153,6 +162,13 @@ class ExcelReportSink:
                 "alloc_eur": "Custo Alocado (EUR)",
             },
             "dividends": {
+                "date": "Data",
+                "currency": "Moeda",
+                "desc": "Descrição",
+                "amount": "Montante (Moeda)",
+                "amount_eur": "Montante (EUR)",
+            },
+            "interest": {
                 "date": "Data",
                 "currency": "Moeda",
                 "desc": "Descrição",
@@ -378,6 +394,42 @@ class ExcelReportSink:
                     d["currency"]
                 )
                 ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
+
+        # Interest
+        if getattr(report, "interest", None):
+            if report.interest:
+                ws = wb.create_sheet(title=labels["sheet"]["interest"])
+                ws.append(
+                    [
+                        labels["interest"]["date"],
+                        labels["interest"]["currency"],
+                        labels["interest"]["desc"],
+                        labels["interest"]["amount"],
+                        labels["interest"]["amount_eur"],
+                    ]
+                )
+                for d in report.interest:
+                    ws.append(
+                        [
+                            d["date"],
+                            d["currency"],
+                            d["description"],
+                            float(d["amount"]),
+                            (
+                                None
+                                if d.get("amount_eur") is None
+                                else float(d["amount_eur"])
+                            ),
+                        ]
+                    )
+                    r = ws.max_row
+                    ws.cell(row=r, column=1).number_format = date_fmt
+                    ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
+                        d["currency"]
+                    )
+                    ws.cell(row=r, column=5).number_format = money_fmt_for_currency(
+                        "EUR"
+                    )
 
         # SYEP Interest Details
         if getattr(report, "syep_interest", None):

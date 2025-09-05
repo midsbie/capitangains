@@ -226,3 +226,30 @@ def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
         }
         out.append(row)
     return out
+
+
+def parse_interest(model: IbkrModel) -> list[dict[str, Any]]:
+    """Parse 'Interest' section: credit/debit interest and monthly SYEP interest summaries.
+
+    Header: Currency, Date, Description, Amount
+
+    Excludes CSV total rows (e.g., 'Total', 'Total in EUR').
+    """
+    out: list[dict[str, Any]] = []
+    for r in model.iter_rows("Interest"):
+        cur = (r.get("Currency", "") or "").strip()
+        if not cur or cur.lower().startswith("total"):
+            continue
+        date_s = r.get("Date", "").strip()
+        desc = r.get("Description", "").strip()
+        amt = to_dec(r.get("Amount", ""))
+        if cur and date_s and desc:
+            out.append(
+                {
+                    "currency": cur,
+                    "date": parse_date(date_s),
+                    "description": desc,
+                    "amount": amt,
+                }
+            )
+    return out

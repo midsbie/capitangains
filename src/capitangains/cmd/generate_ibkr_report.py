@@ -51,6 +51,7 @@ from capitangains.reporting import (
     ReportBuilder,
     parse_dividends,
     parse_syep_interest_details,
+    parse_interest,
     parse_trades_stocklike,
     parse_withholding_tax,
     reconcile_with_ibkr_summary,
@@ -84,6 +85,7 @@ def process_files(args):
     dividends = parse_dividends(model)
     withholding = parse_withholding_tax(model)
     syep_interest = parse_syep_interest_details(model)
+    interest = parse_interest(model)
 
     # Build FIFO realized
     matcher = FifoMatcher()
@@ -102,8 +104,13 @@ def process_files(args):
 
     # Keep only rows with a value date in the selected year (drop CSV 'Total' lines)
     rb.set_syep_interest(
-        [r for r in syep_interest if r.get("value_date") and r["value_date"].year == args.year]
+        [
+            r
+            for r in syep_interest
+            if r.get("value_date") and r["value_date"].year == args.year
+        ]
     )
+    rb.set_interest([i for i in interest if i["date"].year == args.year])
 
     # FX conversion if provided
     fx: Optional[FxTable] = None

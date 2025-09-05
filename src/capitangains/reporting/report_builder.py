@@ -26,6 +26,7 @@ class ReportBuilder:
         self.dividends: list[dict[str, Any]] = []
         self.withholding: list[dict[str, Any]] = []
         self.syep_interest: list[dict[str, Any]] = []
+        self.interest: list[dict[str, Any]] = []
 
         # flags
         self.fx_needed: bool = False
@@ -54,6 +55,9 @@ class ReportBuilder:
 
     def set_syep_interest(self, rows: list[dict[str, Any]]):
         self.syep_interest = rows
+
+    def set_interest(self, rows: list[dict[str, Any]]):
+        self.interest = rows
 
     # CSV/Markdown writers have been intentionally removed in favor of ReportSink-based outputs.
 
@@ -165,6 +169,25 @@ class ReportBuilder:
         # Convert Dividends amounts to EUR, if possible
         if getattr(self, "dividends", None):
             for row in self.dividends:
+                cur = (row.get("currency") or "").upper()
+                amt = row.get("amount")
+                d = row.get("date")
+                if amt is None:
+                    continue
+                if cur == "EUR":
+                    row["amount_eur"] = amt.quantize(Decimal("0.01"))
+                    continue
+                if fx is None or d is None:
+                    continue
+                rate = fx.get_rate(d, cur)
+                if rate is None:
+                    self.fx_missing = True
+                    continue
+                row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))
+
+        # Convert Interest amounts to EUR, if possible
+        if getattr(self, "interest", None):
+            for row in self.interest:
                 cur = (row.get("currency") or "").upper()
                 amt = row.get("amount")
                 d = row.get("date")
