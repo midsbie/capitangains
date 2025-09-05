@@ -5,18 +5,17 @@ import datetime as dt
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import (Any, Dict, Iterable, List, Literal, Mapping, Optional,
-                    Sequence, Tuple, Union)
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
-RowDict = Dict[str, str]
+RowDict = dict[str, str]
 
 
 @dataclass(frozen=True)
 class Subtable:
     """A single subtable inside a section (same header; many rows)."""
 
-    header: Tuple[str, ...]
-    rows: Tuple[RowDict, ...]
+    header: tuple[str, ...]
+    rows: tuple[RowDict, ...]
 
 
 @dataclass
@@ -27,18 +26,17 @@ class IbkrModel:
     sections[section_name] -> list of subtables
     """
 
-    sections: Dict[str, List[Subtable]] = field(default_factory=dict)
+    sections: dict[str, list[Subtable]] = field(default_factory=dict)
 
     # --- Query helpers (same spirit as your original API) ---
-    def get_subtables(self, section_name: str) -> List[Mapping[str, Any]]:
+    def get_subtables(self, section_name: str) -> list[Mapping[str, Any]]:
         """Return the subtables for a section (as list of Subtable)."""
         return self.sections.get(section_name, [])
 
     def iter_rows(self, section_name: str) -> Iterable[RowDict]:
         """Iterate row dicts across all subtables for a section."""
         for sub in self.get_subtables(section_name):
-            for r in sub.rows:
-                yield r
+            yield from sub.rows
 
 
 @dataclass(frozen=True)
@@ -46,21 +44,19 @@ class ParseIssue:
     line_no: int
     severity: Literal["warning", "error"]
     message: str
-    row_preview: Optional[Sequence[str]] = None
+    row_preview: Sequence[str] | None = None
 
 
 @dataclass
 class ParseReport:
     """Non-fatal diagnostics collected during parsing."""
 
-    issues: List[ParseIssue] = field(default_factory=list)
+    issues: list[ParseIssue] = field(default_factory=list)
 
-    def warn(self, line_no: int, msg: str, row: Optional[Sequence[str]] = None) -> None:
+    def warn(self, line_no: int, msg: str, row: Sequence[str] | None = None) -> None:
         self.issues.append(ParseIssue(line_no, "warning", msg, row))
 
-    def error(
-        self, line_no: int, msg: str, row: Optional[Sequence[str]] = None
-    ) -> None:
+    def error(self, line_no: int, msg: str, row: Sequence[str] | None = None) -> None:
         self.issues.append(ParseIssue(line_no, "error", msg, row))
 
     @property
@@ -96,8 +92,8 @@ class IbkrStatementCsvParser:
     """
 
     def parse_file(
-        self, path: Union[str, Path], *, encoding: str = "utf-8", newline: str = ""
-    ) -> Tuple[IbkrModel, ParseReport]:
+        self, path: str | Path, *, encoding: str = "utf-8", newline: str = ""
+    ) -> tuple[IbkrModel, ParseReport]:
         with open(
             path, "r", encoding=encoding, errors="replace", newline=newline
         ) as fp:
@@ -106,13 +102,13 @@ class IbkrStatementCsvParser:
 
     def parse_rows(
         self, rows: Iterable[Sequence[str]]
-    ) -> Tuple[IbkrModel, ParseReport]:
+    ) -> tuple[IbkrModel, ParseReport]:
         report = ParseReport()
         # We'll build mutable structures, then freeze into dataclasses at the end.
-        sections_acc: Dict[str, List[_MutableSubtable]] = {}
+        sections_acc: dict[str, list[_MutableSubtable]] = {}
 
-        current_section: Optional[str] = None
-        current_subtable: Optional[_MutableSubtable] = None
+        current_section: str | None = None
+        current_subtable: _MutableSubtable | None = None
         line_no = 0
 
         for row in rows:
@@ -176,8 +172,8 @@ class IbkrStatementCsvParser:
 
 @dataclass
 class _MutableSubtable:
-    header: Tuple[str, ...]
-    rows: List[RowDict] = field(default_factory=list)
+    header: tuple[str, ...]
+    rows: list[RowDict] = field(default_factory=list)
 
     def freeze(self) -> Subtable:
         # Store as tuples for a slightly more persistent/immutable representation
@@ -192,3 +188,22 @@ def _map_row_to_header(data_vals: Sequence[str], header: Sequence[str]) -> RowDi
     else:
         vals = list(data_vals[:hlen])
     return dict(zip(header, vals))
+
+
+def merge_models(models: Sequence[IbkrModel]) -> IbkrModel:
+    """Merge multiple IbkrModel instances into one by concatenating subtables per section.
+
+    Order is preserved by input sequence, then by original subtable order. No de-duplication.
+    """
+    sections: Dict[str, List[Subtable]] = {}
+    for m in models:
+        for sec, subs in m.sections.items():
+            sections.setdefault(sec, []).extend(subs)
+    return IbkrModel(sections=sections)
+
+
+def merge_reports(reports: Sequence[ParseReport]) -> ParseReport:
+    out = ParseReport()
+    for r in reports:
+        out.issues.extend(r.issues)
+    return out

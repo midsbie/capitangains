@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import csv
 import bisect
+import csv
 import datetime as dt
 from collections import defaultdict
 from decimal import Decimal, DivisionByZero
 from pathlib import Path
-from typing import Iterable, Optional, Set, Tuple, Union, TYPE_CHECKING
 
 from capitangains.conv import date_key, to_dec
-
-if TYPE_CHECKING:  # avoid runtime import cycles
-    from .fifo import RealizedLine
 
 
 class FxTable:
@@ -28,7 +24,7 @@ class FxTable:
         self.date_index: dict[str, list[str]] = {}
 
     @classmethod
-    def from_csv(cls, path: Union[str, Path]) -> "FxTable":
+    def from_csv(cls, path: str | Path) -> "FxTable":
         inst = cls()
         with open(path, "r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
@@ -52,11 +48,9 @@ class FxTable:
                 if units_per_eur == 0:
                     raise ValueError(f"Encountered zero FX rate for {ccy} on {d}")
                 try:
-                    eur_per_unit = (Decimal("1") / units_per_eur)
+                    eur_per_unit = Decimal("1") / units_per_eur
                 except DivisionByZero as exc:  # defensive, though checked above
-                    raise ValueError(
-                        f"Invalid zero FX rate for {ccy} on {d}"
-                    ) from exc
+                    raise ValueError(f"Invalid zero FX rate for {ccy} on {d}") from exc
 
                 inst.data[ccy][d] = eur_per_unit
 
@@ -71,7 +65,7 @@ class FxTable:
         d = date.isoformat()
         return c in self.data and d in self.data[c]
 
-    def get_rate(self, date: dt.date, currency: str) -> Optional[Decimal]:
+    def get_rate(self, date: dt.date, currency: str) -> Decimal | None:
         """Return EUR per 1 unit of currency.
 
         If the exact date isn't available, falls back to the nearest previous

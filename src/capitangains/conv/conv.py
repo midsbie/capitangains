@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as dt
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Union
 
 from capitangains.logging import configure_logging
 
@@ -13,7 +12,7 @@ NUM_CLEAN_RE = re.compile(r"[,\s]")  # remove thousands separators, spaces
 logger = configure_logging()
 
 
-def to_dec(s: Union[str, float, int, Decimal, None]) -> Decimal:
+def to_dec(s: str | float | int | Decimal | None) -> Decimal:
     """Convert IBKR numeric strings to Decimal safely.
     Accepts "1,234.56", "-101.93155704", "", None -> Decimal(0) if empty.
     """
@@ -49,7 +48,7 @@ def parse_date(d: str) -> dt.date:
     return dt.date.fromisoformat(d)
 
 
-def date_key(d: Union[str, dt.date]) -> str:
+def date_key(d: str | dt.date) -> str:
     """Return YYYY-MM-DD string for a date."""
     if isinstance(d, dt.date):
         return d.isoformat()

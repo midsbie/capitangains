@@ -12,9 +12,17 @@ This module acts as the CLI orchestrator, delegating responsibilities to SRP mod
 
 Usage
 -----
+    # Single year input
     python -m capitangains.cmd.generate_ibkr_report \
         --year 2024 \
         --input /path/to/ActivityStatement_2024.csv \
+        --output ./out.xlsx \
+        --fx-table ./fx_rates.csv
+
+    # Multi-year input (include prior years so FIFO has buys)
+    python -m capitangains.cmd.generate_ibkr_report \
+        --year 2024 \
+        --input /path/ActivityStatement_2023.csv /path/ActivityStatement_2024.csv \
         --output ./out.xlsx \
         --fx-table ./fx_rates.csv
 
@@ -32,7 +40,11 @@ from typing import Optional
 from pathlib import Path
 
 from capitangains.logging import configure_logging
-from capitangains.model import IbkrStatementCsvParser
+from capitangains.model import (
+    IbkrStatementCsvParser,
+    merge_models,
+    merge_reports,
+)
 from capitangains.reporting import (
     FxTable,
     FifoMatcher,
@@ -52,12 +64,19 @@ logger = configure_logging()
 
 
 def process_files(args):
-    # Parse CSVs
-    logger.info("Reading %s", args.input)
+    # Parse one or more CSVs
+    inputs = args.input if isinstance(args.input, list) else [args.input]
+    logger.info("Reading %d file(s): %s", len(inputs), ", ".join(inputs))
 
     parser = IbkrStatementCsvParser()
-    model, report = parser.parse_file(args.input)
-    report.log_with(logger)
+    models = []
+    reports = []
+    for p in inputs:
+        m, rep = parser.parse_file(p)
+        models.append(m)
+        reports.append(rep)
+    model = merge_models(models)
+    merge_reports(reports).log_with(logger)
 
     # Extract data
     trades = parse_trades_stocklike(model, asset_scope=args.asset_scope)
@@ -90,21 +109,27 @@ def process_files(args):
     rb.convert_eur(fx)
 
     # Soft reconciliation
-    try:
-        ibkr_sum = reconcile_with_ibkr_summary(model)
-        if ibkr_sum:
-            mismatches = []
-            for sym, ibkr_val in ibkr_sum.items():
-                my_val = rb.symbol_totals.get(sym, {}).get("realized_eur", None)
-                if my_val is not None:
-                    if (my_val - ibkr_val).copy_abs() > Decimal("0.05"):
-                        mismatches.append((sym, my_val, ibkr_val))
-            if mismatches:
-                logger.warning(
-                    "Reconciliation mismatches (my EUR vs IBKR EUR): %s", mismatches[:5]
-                )
-    except Exception:
-        logger.exception("Reconciliation failed; continuing without it.")
+    if len(inputs) == 1:
+        try:
+            ibkr_sum = reconcile_with_ibkr_summary(model)
+            if ibkr_sum:
+                mismatches = []
+                for sym, ibkr_val in ibkr_sum.items():
+                    my_val = rb.symbol_totals.get(sym, {}).get("realized_eur", None)
+                    if my_val is not None:
+                        if (my_val - ibkr_val).copy_abs() > Decimal("0.05"):
+                            mismatches.append((sym, my_val, ibkr_val))
+                if mismatches:
+                    logger.warning(
+                        "Reconciliation mismatches (my EUR vs IBKR EUR): %s",
+                        mismatches[:5],
+                    )
+        except Exception:
+            logger.exception("Reconciliation failed; continuing without it.")
+    else:
+        logger.info(
+            "Skipping IBKR summary reconciliation for multi-file input (spans multiple periods)."
+        )
 
     # Determine output path
     if args.output:
@@ -134,8 +159,9 @@ def build_argparser():
     p.add_argument(
         "--input",
         type=str,
+        nargs="+",
         required=True,
-        help="One or more Activity Statement CSV paths",
+        help="One or more Activity Statement CSV paths (include prior years for FIFO)",
     )
     p.add_argument(
         "--asset-scope",
