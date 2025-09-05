@@ -15,8 +15,13 @@ Usage
     python -m capitangains.cmd.generate_ibkr_report \
         --year 2024 \
         --input /path/to/ActivityStatement_2024.csv \
-        --output-dir ./out \
+        --output ./out.xlsx \
         --fx-table ./fx_rates.csv
+
+Forex CSV schema (base EUR):
+    date,currency,rate
+    1999-01-04,AUD,1.91
+    1999-01-04,GBP,0.7111
 """
 
 from __future__ import annotations
@@ -80,8 +85,8 @@ def process_files(args):
         try:
             fx = FxTable.from_csv(args.fx_table)
         except Exception as e:
-            logger.exception("Failed to read FX table: %s", e)
-            fx = None
+            logger.exception("Failed to prepare FX conversion: %s", e)
+            raise
     rb.convert_eur(fx)
 
     # Soft reconciliation
@@ -143,7 +148,10 @@ def build_argparser():
         "--fx-table",
         type=str,
         default=None,
-        help="CSV of daily FX rates (date,currency,eur_per_unit)",
+        help=(
+            "Forex rates CSV with base EUR: 'date,currency,rate' where "
+            "'rate' is target currency units per EUR"
+        ),
     )
     p.add_argument(
         "--format",

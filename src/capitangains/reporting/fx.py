@@ -1,22 +1,25 @@
 from __future__ import annotations
 
 import csv
+import bisect
 import datetime as dt
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, DivisionByZero
 from pathlib import Path
-from typing import Optional, Union
+from typing import Iterable, Optional, Set, Tuple, Union, TYPE_CHECKING
 
 from capitangains.conv import date_key, to_dec
 
+if TYPE_CHECKING:  # avoid runtime import cycles
+    from .fifo import RealizedLine
+
 
 class FxTable:
-    """Simple date-indexed FX table: (date, currency) -> eur_per_unit.
+    """Date-indexed FX table: (date, currency) -> EUR per 1 unit of currency.
 
-    CSV format required:
-        date,currency,eur_per_unit
-        2024-01-02,USD,0.9123
-        2024-01-02,GBP,1.1620
+    Accepted CSV schemas (base currency is EUR):
+      - date,currency,rate            # rate = target_currency_units_per_EUR
+      - date,currency,eur_per_unit    # geur_per_unit = EUR per 1 unit of currency
     """
 
     def __init__(self):
@@ -29,20 +32,51 @@ class FxTable:
         inst = cls()
         with open(path, "r", encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
-            required = {"date", "currency", "eur_per_unit"}
-            missing = required - set((reader.fieldnames or []))
-            if missing:
-                raise ValueError(f"FX table missing columns: {missing}")
+            fields = set(reader.fieldnames or [])
+            if not {"date", "currency"}.issubset(fields):
+                missing = {"date", "currency"} - fields
+                raise ValueError(f"FX table missing columns: {sorted(missing)}")
+
+            if "rate" not in fields:
+                raise ValueError("FX table must contain 'rate' (units per EUR) column")
+
             for row in reader:
                 d = date_key(row["date"])
                 ccy = row["currency"].strip().upper()
-                rate = to_dec(row["eur_per_unit"])
-                inst.data[ccy][d] = rate
+                if ccy == "EUR":
+                    # Store identity explicitly for completeness
+                    inst.data[ccy][d] = Decimal("1")
+                    continue
+
+                units_per_eur = to_dec(row["rate"])  # e.g., 1 EUR = 1.91 AUD
+                if units_per_eur == 0:
+                    raise ValueError(f"Encountered zero FX rate for {ccy} on {d}")
+                try:
+                    eur_per_unit = (Decimal("1") / units_per_eur)
+                except DivisionByZero as exc:  # defensive, though checked above
+                    raise ValueError(
+                        f"Invalid zero FX rate for {ccy} on {d}"
+                    ) from exc
+
+                inst.data[ccy][d] = eur_per_unit
+
         for ccy, m in inst.data.items():
             inst.date_index[ccy] = sorted(m.keys())
         return inst
 
+    def has_rate_exact(self, date: dt.date, currency: str) -> bool:
+        c = currency.upper()
+        if c == "EUR":
+            return True
+        d = date.isoformat()
+        return c in self.data and d in self.data[c]
+
     def get_rate(self, date: dt.date, currency: str) -> Optional[Decimal]:
+        """Return EUR per 1 unit of currency.
+
+        If the exact date isn't available, falls back to the nearest previous
+        available date for that currency (to accommodate weekends/holidays).
+        """
         c = currency.upper()
         if c == "EUR":
             return Decimal("1")
@@ -54,8 +88,6 @@ class FxTable:
         # fallback to nearest previous date (weekends/holidays)
         # Find the latest date <= d in sorted list
         dates = self.date_index[c]
-        # binary search
-        import bisect
 
         pos = bisect.bisect_right(dates, d)
         if pos == 0:
