@@ -28,7 +28,7 @@ class ExcelReportSink:
         if loc == "EN":
             return {
                 "sheet": {
-                    "summary": "Summary",
+                    "summary": "Trading Totals",
                     "realized": "Realized Trades",
                     "per_symbol": "Per Symbol Summary",
                     "dividends": "Dividends",
@@ -121,7 +121,7 @@ class ExcelReportSink:
         # Default: Portuguese (Portugal)
         return {
             "sheet": {
-                "summary": "Resumo",
+                "summary": "Totais de Operações",
                 "realized": "Operações Realizadas",
                 "per_symbol": "Resumo por Símbolo",
                 "dividends": "Dividendos",
