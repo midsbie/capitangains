@@ -40,61 +40,73 @@ class ExcelReportSink:
         )
         totals_by_cur = {}
         for rl in report.realized_lines:
-            totals_by_cur[rl.currency] = totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
-        ws.append(["Metric", "Value"])
+            totals_by_cur[rl.currency] = (
+                totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
+            )
+        ws.append(["Metric", "Amount"])
         if total_eur != 0:
-            ws.append(["Total realized (EUR)", str(total_eur)])
+            ws.append(["Total Realized P/L (EUR)", str(total_eur)])
         for cur, amt in sorted(totals_by_cur.items()):
-            ws.append([f"Total realized ({cur})", str(amt)])
+            ws.append([f"Total Realized P/L ({cur})", str(amt)])
 
         # Realized trades sheet
         ws = wb.create_sheet(title="RealizedTrades")
-        ws.append([
-            "symbol",
-            "currency",
-            "sell_date",
-            "sell_qty",
-            "sell_gross_ccy",
-            "sell_comm_ccy",
-            "sell_net_ccy",
-            "alloc_cost_ccy",
-            "realized_pl_ccy",
-            "sell_gross_eur",
-            "sell_comm_eur",
-            "sell_net_eur",
-            "alloc_cost_eur",
-            "realized_pl_eur",
-            "legs_json",
-        ])
+        ws.append(
+            [
+                "Ticker",
+                "Trade Currency",
+                "Sell Date",
+                "Quantity Sold",
+                "Gross Proceeds (Trade Currency)",
+                "Commissions/Fees (Trade Currency)",
+                "Net Proceeds (Trade Currency)",
+                "Allocated Cost Basis (Trade Currency)",
+                "Realized P/L (Trade Currency)",
+                "Gross Proceeds (EUR)",
+                "Commissions/Fees (EUR)",
+                "Net Proceeds (EUR)",
+                "Allocated Cost Basis (EUR)",
+                "Realized P/L (EUR)",
+                "Matched Buy Lots (JSON)",
+            ]
+        )
         import json
 
         for rl in report.realized_lines:
-            alloc_cost_ccy = sum((leg["alloc_cost_ccy"] for leg in rl.legs), Decimal("0"))
-            legs_json = json.dumps([
-                {
-                    "buy_date": (ld["buy_date"].isoformat() if ld["buy_date"] else None),
-                    "qty": str(ld["qty"]),
-                    "alloc_cost_ccy": str(ld["alloc_cost_ccy"]),
-                }
-                for ld in rl.legs
-            ])
-            ws.append([
-                rl.symbol,
-                rl.currency,
-                rl.sell_date.isoformat(),
-                str(rl.sell_qty),
-                str(rl.sell_gross_ccy),
-                str(rl.sell_comm_ccy),
-                str(rl.sell_net_ccy),
-                str(alloc_cost_ccy),
-                str(rl.realized_pl_ccy),
-                ("" if rl.sell_gross_eur is None else str(rl.sell_gross_eur)),
-                ("" if rl.sell_comm_eur is None else str(rl.sell_comm_eur)),
-                ("" if rl.sell_net_eur is None else str(rl.sell_net_eur)),
-                ("" if rl.alloc_cost_eur is None else str(rl.alloc_cost_eur)),
-                ("" if rl.realized_pl_eur is None else str(rl.realized_pl_eur)),
-                legs_json,
-            ])
+            alloc_cost_ccy = sum(
+                (leg["alloc_cost_ccy"] for leg in rl.legs), Decimal("0")
+            )
+            legs_json = json.dumps(
+                [
+                    {
+                        "buy_date": (
+                            ld["buy_date"].isoformat() if ld["buy_date"] else None
+                        ),
+                        "qty": str(ld["qty"]),
+                        "alloc_cost_ccy": str(ld["alloc_cost_ccy"]),
+                    }
+                    for ld in rl.legs
+                ]
+            )
+            ws.append(
+                [
+                    rl.symbol,
+                    rl.currency,
+                    rl.sell_date.isoformat(),
+                    str(rl.sell_qty),
+                    str(rl.sell_gross_ccy),
+                    str(rl.sell_comm_ccy),
+                    str(rl.sell_net_ccy),
+                    str(alloc_cost_ccy),
+                    str(rl.realized_pl_ccy),
+                    ("" if rl.sell_gross_eur is None else str(rl.sell_gross_eur)),
+                    ("" if rl.sell_comm_eur is None else str(rl.sell_comm_eur)),
+                    ("" if rl.sell_net_eur is None else str(rl.sell_net_eur)),
+                    ("" if rl.alloc_cost_eur is None else str(rl.alloc_cost_eur)),
+                    ("" if rl.realized_pl_eur is None else str(rl.realized_pl_eur)),
+                    legs_json,
+                ]
+            )
 
         # Per-symbol summary
         ws = wb.create_sheet(title="PerSymbolSummary")
@@ -104,11 +116,15 @@ class ExcelReportSink:
             for k in totals.keys():
                 if k.startswith("realized_ccy:"):
                     all_ccy.add(k.split(":", 1)[1])
-        headers = ["symbol"] + [f"realized_{c.lower()}" for c in sorted(all_ccy)] + [
-            "realized_eur",
-            "proceeds_eur",
-            "alloc_cost_eur",
-        ]
+        headers = (
+            ["Ticker"]
+            + [f"Realized P/L ({c})" for c in sorted(all_ccy)]
+            + [
+                "Realized P/L (EUR)",
+                "Net Proceeds (EUR)",
+                "Allocated Cost Basis (EUR)",
+            ]
+        )
         ws.append(headers)
         for symbol, totals in sorted(report.symbol_totals.items()):
             row = [symbol]
@@ -122,27 +138,33 @@ class ExcelReportSink:
         # Dividends
         if report.dividends:
             ws = wb.create_sheet(title="Dividends")
-            ws.append(["date", "currency", "description", "amount"])
+            ws.append(["Date", "Currency", "Description", "Amount (Currency)"])
             for d in report.dividends:
-                ws.append([
-                    d["date"].isoformat(),
-                    d["currency"],
-                    d["description"],
-                    str(d["amount"]),
-                ])
+                ws.append(
+                    [
+                        d["date"].isoformat(),
+                        d["currency"],
+                        d["description"],
+                        str(d["amount"]),
+                    ]
+                )
 
         # Withholding Tax
         if report.withholding:
             ws = wb.create_sheet(title="WithholdingTax")
-            ws.append(["date", "currency", "description", "amount", "code"])
+            ws.append(
+                ["Date", "Currency", "Description", "Amount (Currency)", "Tax Code"]
+            )
             for d in report.withholding:
-                ws.append([
-                    d["date"].isoformat(),
-                    d["currency"],
-                    d["description"],
-                    str(d["amount"]),
-                    d.get("code", ""),
-                ])
+                ws.append(
+                    [
+                        d["date"].isoformat(),
+                        d["currency"],
+                        d["description"],
+                        str(d["amount"]),
+                        d.get("code", ""),
+                    ]
+                )
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(out_path)
