@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from capitangains.core import parse_date, to_dec
+from capitangains.conv import parse_date, to_dec
 from capitangains.logging import configure_logging
 from capitangains.model import IbkrModel
 
@@ -29,7 +29,7 @@ class TradeRow:
     code: str
 
 
-def parse_trades_stocklike(  # noqa: C901
+def parse_trades_stocklike(
     model: IbkrModel, asset_scope: str = "stocks"
 ) -> list[TradeRow]:
     """Extract stock-like trades from 'Trades' section across header variants.
@@ -86,6 +86,7 @@ def parse_trades_stocklike(  # noqa: C901
             "Code",
         ]
         if any(col[n] is None for n in need_cols):
+            logger.debug("Skipping Trades subtable, missing cols: %s", col)
             continue
 
         for r in rows:
@@ -102,12 +103,14 @@ def parse_trades_stocklike(  # noqa: C901
             # T. Price may be missing in some rows, default 0
             t_price_s = r.get("T. Price", "").strip()
 
-            # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears in some Forex tables.
+            # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears
+            # in some Forex tables.
             comm_s = ""
             if "Comm/Fee" in r:
                 comm_s = r.get("Comm/Fee", "").strip()
             elif "Comm in EUR" in r:
-                # Some subtables only have Comm in EUR (e.g., Forex); we don't use them here, but keep consistent type.
+                # Some subtables only have Comm in EUR (e.g., Forex); we don't use them
+                # here, but keep consistent type.
                 comm_s = r.get("Comm in EUR", "").strip()
             else:
                 comm_s = ""
@@ -181,4 +184,3 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
                 }
             )
     return out
-

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
-from capitangains.core import to_dec
+from capitangains.conv import to_dec
 from capitangains.model import IbkrModel
 from .extract import ASSET_STOCK_LIKE
 
@@ -66,4 +66,3 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
                 result[sym] = result.get(sym, Decimal("0")) + val
 
     return result
-

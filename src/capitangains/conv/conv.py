@@ -5,7 +5,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Union
 
-from .logging import configure_logging
+from capitangains.logging import configure_logging
 
 NUM_CLEAN_RE = re.compile(r"[,\s]")  # remove thousands separators, spaces
 

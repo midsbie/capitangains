@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional, Union
 
-from capitangains.core import date_key, to_dec
+from capitangains.conv import date_key, to_dec
 
 
 class FxTable:
@@ -61,4 +61,3 @@ class FxTable:
         if pos == 0:
             return None
         return self.data[c][dates[pos - 1]]
-
