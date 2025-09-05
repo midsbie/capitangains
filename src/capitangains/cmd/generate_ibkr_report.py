@@ -68,7 +68,7 @@ def process_files(args):
             realized.append(rl)
 
     # Build report
-    rb = ReportBuilder(year=args.year, out_dir=args.output_dir)
+    rb = ReportBuilder(year=args.year)
     for rl in realized:
         rb.add_realized(rl)
     rb.set_dividends([d for d in dividends if d["date"].year == args.year])
@@ -101,11 +101,18 @@ def process_files(args):
     except Exception:
         logger.exception("Reconciliation failed; continuing without it.")
 
+    # Determine output path
+    if args.output:
+        out_path = Path(args.output)
+    else:
+        ext = "xlsx" if args.format == "xlsx" else "ods"
+        out_path = Path(f"report_{args.year}.{ext}")
+
     # Write outputs via sink
     if args.format == "xlsx":
-        sink = ExcelReportSink(out_dir=Path(args.output_dir))
+        sink = ExcelReportSink(out_path=out_path)
     elif args.format == "ods":
-        sink = OdsReportSink(out_dir=Path(args.output_dir))
+        sink = OdsReportSink(out_path=out_path)
     else:
         raise ValueError(f"Unknown output format: {args.format}")
     out_path = sink.write(rb)
@@ -126,9 +133,6 @@ def build_argparser():
         help="One or more Activity Statement CSV paths",
     )
     p.add_argument(
-        "--output-dir", type=str, default="out_report", help="Output directory"
-    )
-    p.add_argument(
         "--asset-scope",
         type=str,
         default="stocks",
@@ -147,6 +151,12 @@ def build_argparser():
         default="xlsx",
         choices=["xlsx", "ods"],
         help="Output workbook format",
+    )
+    p.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output filename (e.g., report.xlsx). If omitted, uses report_<year>.<ext>",
     )
     return p
 

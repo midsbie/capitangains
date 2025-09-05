@@ -16,12 +16,8 @@ logger = configure_logging()
 @dataclass
 class ReportBuilder:
     year: int
-    out_dir: Union[str, Path]
 
     def __post_init__(self):
-        self.out_dir = Path(self.out_dir)
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-
         # collections
         self.realized_lines: list[RealizedLine] = []
         self.symbol_totals: defaultdict[str, dict[str, Decimal]] = defaultdict(

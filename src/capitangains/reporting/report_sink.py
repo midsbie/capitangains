@@ -15,8 +15,7 @@ class ReportSink(Protocol):
 
 @dataclass
 class ExcelReportSink:
-    out_dir: Path
-    filename: str = "report.xlsx"
+    out_path: Path
 
     def write(self, report: ReportBuilder) -> Path:
         try:
@@ -26,7 +25,7 @@ class ExcelReportSink:
                 "openpyxl is required to write XLSX. Install with: pip install openpyxl"
             ) from e
 
-        out_path = Path(self.out_dir) / self.filename
+        out_path = Path(self.out_path)
         wb = Workbook()
 
         # Remove the default sheet
@@ -152,11 +151,9 @@ class ExcelReportSink:
 
 @dataclass
 class OdsReportSink:
-    out_dir: Path
-    filename: str = "report.ods"
+    out_path: Path
 
     def write(self, report: ReportBuilder) -> Path:  # pragma: no cover - placeholder
         raise NotImplementedError(
             "ODS output not implemented yet. Consider using XLSX or extending ReportSink."
         )
-
