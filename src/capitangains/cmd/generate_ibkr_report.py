@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Optional
+from pathlib import Path
 
 from capitangains.logging import configure_logging
 from capitangains.model import IbkrStatementCsvParser
@@ -36,6 +37,7 @@ from capitangains.reporting import (
     parse_withholding_tax,
     reconcile_with_ibkr_summary,
 )
+from capitangains.reporting.report_sink import ExcelReportSink, OdsReportSink
 
 # Monetary precision and rounding
 getcontext().prec = 28
@@ -99,11 +101,15 @@ def process_files(args):
     except Exception:
         logger.exception("Reconciliation failed; continuing without it.")
 
-    # Write outputs
-    rb.write_csvs()
-    rb.write_report()
-
-    logger.info("Wrote outputs to %s", args.output_dir)
+    # Write outputs via sink
+    if args.format == "xlsx":
+        sink = ExcelReportSink(out_dir=Path(args.output_dir))
+    elif args.format == "ods":
+        sink = OdsReportSink(out_dir=Path(args.output_dir))
+    else:
+        raise ValueError(f"Unknown output format: {args.format}")
+    out_path = sink.write(rb)
+    logger.info("Wrote workbook to %s", out_path)
 
 
 def build_argparser():
@@ -135,6 +141,13 @@ def build_argparser():
         default=None,
         help="CSV of daily FX rates (date,currency,eur_per_unit)",
     )
+    p.add_argument(
+        "--format",
+        type=str,
+        default="xlsx",
+        choices=["xlsx", "ods"],
+        help="Output workbook format",
+    )
     return p
 
 
@@ -146,4 +159,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
