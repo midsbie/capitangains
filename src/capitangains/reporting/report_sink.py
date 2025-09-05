@@ -156,30 +156,38 @@ class ExcelReportSink:
                 totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
             )
         ws.append([labels["summary"]["metric"], labels["summary"]["amount"]])
+        # Number formats
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        money_fmt = "#,##0.00"
+        qty_fmt = "0.########"
         if total_eur != 0:
-            ws.append([labels["summary"]["total_eur"], str(total_eur)])
+            ws.append([labels["summary"]["total_eur"], float(total_eur)])
+            ws.cell(row=ws.max_row, column=2).number_format = money_fmt
         for cur, amt in sorted(totals_by_cur.items()):
-            ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), str(amt)])
+            ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)])
+            ws.cell(row=ws.max_row, column=2).number_format = money_fmt
 
         # Realized trades sheet
         ws = wb.create_sheet(title=labels["sheet"]["realized"])
-        ws.append([
-            labels["realized"]["ticker"],
-            labels["realized"]["trade_currency"],
-            labels["realized"]["sell_date"],
-            labels["realized"]["qty_sold"],
-            labels["realized"]["gross_tcy"],
-            labels["realized"]["fees_tcy"],
-            labels["realized"]["net_tcy"],
-            labels["realized"]["alloc_tcy"],
-            labels["realized"]["pl_tcy"],
-            labels["realized"]["gross_eur"],
-            labels["realized"]["fees_eur"],
-            labels["realized"]["net_eur"],
-            labels["realized"]["alloc_eur"],
-            labels["realized"]["pl_eur"],
-            labels["realized"]["legs_json"],
-        ])
+        ws.append(
+            [
+                labels["realized"]["ticker"],
+                labels["realized"]["trade_currency"],
+                labels["realized"]["sell_date"],
+                labels["realized"]["qty_sold"],
+                labels["realized"]["gross_tcy"],
+                labels["realized"]["fees_tcy"],
+                labels["realized"]["net_tcy"],
+                labels["realized"]["alloc_tcy"],
+                labels["realized"]["pl_tcy"],
+                labels["realized"]["gross_eur"],
+                labels["realized"]["fees_eur"],
+                labels["realized"]["net_eur"],
+                labels["realized"]["alloc_eur"],
+                labels["realized"]["pl_eur"],
+                labels["realized"]["legs_json"],
+            ]
+        )
         import json
 
         for rl in report.realized_lines:
@@ -202,21 +210,26 @@ class ExcelReportSink:
                 [
                     rl.symbol,
                     rl.currency,
-                    rl.sell_date.isoformat(),
-                    str(rl.sell_qty),
-                    str(rl.sell_gross_ccy),
-                    str(rl.sell_comm_ccy),
-                    str(rl.sell_net_ccy),
-                    str(alloc_cost_ccy),
-                    str(rl.realized_pl_ccy),
-                    ("" if rl.sell_gross_eur is None else str(rl.sell_gross_eur)),
-                    ("" if rl.sell_comm_eur is None else str(rl.sell_comm_eur)),
-                    ("" if rl.sell_net_eur is None else str(rl.sell_net_eur)),
-                    ("" if rl.alloc_cost_eur is None else str(rl.alloc_cost_eur)),
-                    ("" if rl.realized_pl_eur is None else str(rl.realized_pl_eur)),
+                    rl.sell_date,
+                    float(rl.sell_qty),
+                    float(rl.sell_gross_ccy),
+                    float(rl.sell_comm_ccy),
+                    float(rl.sell_net_ccy),
+                    float(alloc_cost_ccy),
+                    float(rl.realized_pl_ccy),
+                    (None if rl.sell_gross_eur is None else float(rl.sell_gross_eur)),
+                    (None if rl.sell_comm_eur is None else float(rl.sell_comm_eur)),
+                    (None if rl.sell_net_eur is None else float(rl.sell_net_eur)),
+                    (None if rl.alloc_cost_eur is None else float(rl.alloc_cost_eur)),
+                    (None if rl.realized_pl_eur is None else float(rl.realized_pl_eur)),
                     legs_json,
                 ]
             )
+            r = ws.max_row
+            ws.cell(row=r, column=3).number_format = date_fmt
+            ws.cell(row=r, column=4).number_format = qty_fmt
+            for c in range(5, 15):
+                ws.cell(row=r, column=c).number_format = money_fmt
 
         # Per-symbol summary
         ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
@@ -226,62 +239,72 @@ class ExcelReportSink:
             for k in totals.keys():
                 if k.startswith("realized_ccy:"):
                     all_ccy.add(k.split(":", 1)[1])
-        headers = [labels["per_symbol"]["ticker"]] + [
-            labels["per_symbol"]["pl_tpl"].format(cur=c) for c in sorted(all_ccy)
-        ] + [
-            labels["per_symbol"]["pl_eur"],
-            labels["per_symbol"]["net_eur"],
-            labels["per_symbol"]["alloc_eur"],
-        ]
+        headers = (
+            [labels["per_symbol"]["ticker"]]
+            + [labels["per_symbol"]["pl_tpl"].format(cur=c) for c in sorted(all_ccy)]
+            + [
+                labels["per_symbol"]["pl_eur"],
+                labels["per_symbol"]["net_eur"],
+                labels["per_symbol"]["alloc_eur"],
+            ]
+        )
         ws.append(headers)
         for symbol, totals in sorted(report.symbol_totals.items()):
             row = [symbol]
             for c in sorted(all_ccy):
-                row.append(str(totals.get("realized_ccy:" + c, Decimal("0"))))
-            row.append(str(totals.get("realized_eur", Decimal("0"))))
-            row.append(str(totals.get("proceeds_eur", Decimal("0"))))
-            row.append(str(totals.get("alloc_cost_eur", Decimal("0"))))
+                row.append(float(totals.get("realized_ccy:" + c, Decimal("0"))))
+            row.append(float(totals.get("realized_eur", Decimal("0"))))
+            row.append(float(totals.get("proceeds_eur", Decimal("0"))))
+            row.append(float(totals.get("alloc_cost_eur", Decimal("0"))))
             ws.append(row)
+            r = ws.max_row
+            for c in range(2, 2 + len(all_ccy) + 3):
+                ws.cell(row=r, column=c).number_format = money_fmt
 
         # Dividends
         if report.dividends:
             ws = wb.create_sheet(title=labels["sheet"]["dividends"])
-            ws.append([
-                labels["dividends"]["date"],
-                labels["dividends"]["currency"],
-                labels["dividends"]["desc"],
-                labels["dividends"]["amount"],
-            ])
+            ws.append(
+                [
+                    labels["dividends"]["date"],
+                    labels["dividends"]["currency"],
+                    labels["dividends"]["desc"],
+                    labels["dividends"]["amount"],
+                ]
+            )
             for d in report.dividends:
                 ws.append(
-                    [
-                        d["date"].isoformat(),
-                        d["currency"],
-                        d["description"],
-                        str(d["amount"]),
-                    ]
+                    [d["date"], d["currency"], d["description"], float(d["amount"])]
                 )
+                r = ws.max_row
+                ws.cell(row=r, column=1).number_format = date_fmt
+                ws.cell(row=r, column=4).number_format = money_fmt
 
         # Withholding Tax
         if report.withholding:
             ws = wb.create_sheet(title=labels["sheet"]["withholding"])
-            ws.append([
-                labels["withholding"]["date"],
-                labels["withholding"]["currency"],
-                labels["withholding"]["desc"],
-                labels["withholding"]["amount"],
-                labels["withholding"]["code"],
-            ])
+            ws.append(
+                [
+                    labels["withholding"]["date"],
+                    labels["withholding"]["currency"],
+                    labels["withholding"]["desc"],
+                    labels["withholding"]["amount"],
+                    labels["withholding"]["code"],
+                ]
+            )
             for d in report.withholding:
                 ws.append(
                     [
-                        d["date"].isoformat(),
+                        d["date"],
                         d["currency"],
                         d["description"],
-                        str(d["amount"]),
+                        float(d["amount"]),
                         d.get("code", ""),
                     ]
                 )
+                r = ws.max_row
+                ws.cell(row=r, column=1).number_format = date_fmt
+                ws.cell(row=r, column=4).number_format = money_fmt
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(out_path)
