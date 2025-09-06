@@ -53,7 +53,7 @@ Examples:
 - Single year (only if all buys and sells are within the same year):
 
   #+begin_src sh
-  python -m capitangains.cmd.generate_ibkr_report \
+  python -m capitangains.cmd \
     --year 2024 \
     --input ./U1234567_2024_2024.csv \
     --output ./report_2024.xlsx \
@@ -64,7 +64,7 @@ Examples:
 - Multi-year (recommended when sales match prior-year buys):
 
   #+begin_src sh
-  python -m capitangains.cmd.generate_ibkr_report \
+  python -m capitangains.cmd \
     --year 2024 \
     --input ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv \
     --output ./report_2024.xlsx \
