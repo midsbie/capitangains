@@ -15,6 +15,35 @@ CapitaNGains is intended to produce capital gains reports from broker annual sta
 - EUR conversion per date using an external FX table (optional)
 - Clear sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, and =Operações por Lote (Anexo G)=
 
+* Installation
+
+Install from source:
+
+1. Clone the repository
+   #+begin_src sh
+   git clone https://github.com/midsbie/capitangains.git
+   cd capitangains
+   #+end_src
+
+2. (Recommended) Create a virtual environment
+   #+begin_src sh
+   python3 -m venv .venv
+   source .venv/bin/activate
+   #+end_src
+
+3. Install dependencies
+   #+begin_src sh
+   make setup
+   #+end_src
+
+After installation, the CLI is available as:
+
+#+begin_src sh
+python -m capitangains.cmd --help
+# or if entry points are configured in your environment
+capitangains --help
+#+end_src
+
 * CLI Usage
 
 You can pass one or more CSV files via =--input=. It is often necessary to include prior years so FIFO can match sales against earlier buys. Otherwise, sales in the report year that were opened in previous years may be treated as zero-cost (distorting proceeds, allocated cost, and realized P/L).
