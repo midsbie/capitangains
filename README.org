@@ -17,18 +17,33 @@ CapitaNGains is intended to produce capital gains reports from broker annual sta
 
 * CLI Usage
 
-Single year input (add prior years too so FIFO has buys):
+You can pass one or more CSV files via =--input=. It is often necessary to include prior years so FIFO can match sales against earlier buys. Otherwise, sales in the report year that were opened in previous years may be treated as zero-cost (distorting proceeds, allocated cost, and realized P/L).
 
-#+begin_src sh
-python -m capitangains.cmd.generate_ibkr_report \
-  --year 2024 \
-  --input ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv \
-  --output ./report_2024.xlsx \
-  --fx-table ./fx_rates.csv \
-  --locale EN  # or PT
-#+end_src
+Examples:
 
-If you omit =--output=, the tool writes =report_<year>.xlsx= in the current folder. To generate ODS instead of XLSX, use =--format ods= (writing ODS is not implemented yet).
+- Single year (only if all buys and sells are within the same year):
+
+  #+begin_src sh
+  python -m capitangains.cmd.generate_ibkr_report \
+    --year 2024 \
+    --input ./U1234567_2024_2024.csv \
+    --output ./report_2024.xlsx \
+    --fx-table ./fx_rates.csv \
+    --locale EN  # or PT; optional
+  #+end_src
+
+- Multi-year (recommended when sales match prior-year buys):
+
+  #+begin_src sh
+  python -m capitangains.cmd.generate_ibkr_report \
+    --year 2024 \
+    --input ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv \
+    --output ./report_2024.xlsx \
+    --fx-table ./fx_rates.csv \
+    --locale EN  # or PT; optional
+  #+end_src
+
+If you omit =--output=, the tool writes =report_<year>.xlsx= in the current folder.
 
 * FX Data (EUR base)
 
