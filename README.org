@@ -13,7 +13,7 @@ CapitaNGains is intended to produce capital gains reports from broker annual sta
 * Highlights
 - FIFO realized gains with buy-lot audit trail
 - EUR conversion per date using an external FX table (optional)
-- Clear sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, and =Operações por Lote (Anexo G)=
+- Clear sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, and Lot-Level EUR Breakdown for convenient reporting in /Anexo G/ of the Portuguese IRS tax return.
 
 * Installation
 
