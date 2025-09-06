@@ -1,0 +1,59 @@
+#+title: CapitaNGains - Capital Gains and Income Report (PT/EN)
+#+author: 
+#+options: toc:t num:nil
+
+CapitaNGains is intended to produce capital gains reports from broker annual statements. At the moment it supports only Interactive Brokers (IBKR) Activity Statement exports in CSV format, from which it generates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account interest, SYEP interest details, withholding tax, and an Annex-G helper sheet localized in Portuguese or English.
+
+* Highlights
+- FIFO realized gains with buy-lot audit trail
+- EUR conversion per date using an external FX table (optional)
+- Clear sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, and =Operações por Lote (Anexo G)=
+
+* CLI Usage
+
+Single year input (add prior years too so FIFO has buys):
+
+#+begin_src sh
+python -m capitangains.cmd.generate_ibkr_report \
+  --year 2024 \
+  --input ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv \
+  --output ./report_2024.xlsx \
+  --fx-table ./fx_rates.csv \
+  --locale EN  # or PT
+#+end_src
+
+If you omit =--output=, the tool writes =report_<year>.xlsx= in the current folder. To generate ODS instead of XLSX, use =--format ods= (writing ODS is not implemented yet).
+
+* FX Data (EUR base)
+
+EUR conversion is optional, but recommended so the workbook contains EUR amounts for non-EUR trades and income. The tool expects a CSV with the following schema:
+
+#+begin_src csv
+date,currency,rate
+1999-01-04,USD,1.1789
+1999-01-04,GBP,0.7111
+#+end_src
+
+- =rate= is "target currency units per EUR” (e.g., USD per EUR).
+- The tool internally computes "EUR per 1 unit of currency” and does weekend/holiday fallback to the most recent prior date when an exact date isn’t available.
+
+Tip: you can easily obtain a Forex dataset compatible with this tool using the =bdpfxtract= utility:
+- Project: https://github.com/midsbie/bdpfxtract/
+- Example command (produces =date,currency,rate= with EUR base): see the project’s README for instructions and options.
+
+* Development
+
+- Python 3.9+
+- Install with dev extras (optional):
+  - =pip install -e .[dev]=
+- Run tests (pytest):
+  - =pytest -q=
+
+* Notes
+
+- The tool relies on the "Activity Statement” CSV exported from IBKR (not Flex queries). Keep the CSV structure intact.
+- Some sanitized exports include elided values ("...”), and are treated as zeroes with warnings.
+- SYEP totals rows in the CSV are ignored; the per-day interest details are listed in the "SYEP Interest” sheet.
+
+* License
+Released under the MIT license; refer to =LICENSE= for more details.
