@@ -56,7 +56,7 @@ from capitangains.reporting import (
     parse_withholding_tax,
     reconcile_with_ibkr_summary,
 )
-from capitangains.reporting.report_sink import ExcelReportSink, OdsReportSink
+from capitangains.reporting.report_sink import ExcelReportSink
 
 # Monetary precision and rounding
 getcontext().prec = 28
@@ -81,7 +81,7 @@ def process_files(args):
     merge_reports(reports).log_with(logger)
 
     # Extract data
-    trades = parse_trades_stocklike(model, asset_scope=args.asset_scope)
+    trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
     dividends = parse_dividends(model)
     withholding = parse_withholding_tax(model)
     syep_interest = parse_syep_interest_details(model)
@@ -149,16 +149,10 @@ def process_files(args):
     if args.output:
         out_path = Path(args.output)
     else:
-        ext = "xlsx" if args.format == "xlsx" else "ods"
-        out_path = Path(f"report_{args.year}.{ext}")
+        out_path = Path(f"report_{args.year}.xlsx")
 
     # Write outputs via sink
-    if args.format == "xlsx":
-        sink = ExcelReportSink(out_path=out_path, locale=args.locale)
-    elif args.format == "ods":
-        sink = OdsReportSink(out_path=out_path)
-    else:
-        raise ValueError(f"Unknown output format: {args.format}")
+    sink = ExcelReportSink(out_path=out_path, locale=args.locale)
     out_path = sink.write(rb)
     logger.info("Wrote workbook to %s", out_path)
 
@@ -178,13 +172,6 @@ def build_argparser():
         help="One or more Activity Statement CSV paths (include prior years for FIFO)",
     )
     p.add_argument(
-        "--asset-scope",
-        type=str,
-        default="stocks",
-        choices=["stocks", "etfs", "stocks_etfs", "all"],
-        help="Asset filter scope",
-    )
-    p.add_argument(
         "--fx-table",
         type=str,
         default=None,
@@ -194,24 +181,17 @@ def build_argparser():
         ),
     )
     p.add_argument(
-        "--format",
-        type=str,
-        default="xlsx",
-        choices=["xlsx", "ods"],
-        help="Output workbook format",
-    )
-    p.add_argument(
         "--locale",
         type=str,
-        default="PT",
-        choices=["PT", "EN"],
-        help="Locale for headers and sheet names (PT or EN)",
+        default="EN",
+        choices=["EN", "PT"],
+        help="Locale for headers and sheet names",
     )
     p.add_argument(
         "--output",
         type=str,
         default=None,
-        help="Output filename (e.g., report.xlsx). If omitted, uses report_<year>.<ext>",
+        help="Output filename (e.g., report.xlsx). If omitted, uses report_<year>.xlsx",
     )
     return p
 
