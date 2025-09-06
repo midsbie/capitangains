@@ -63,3 +63,7 @@ skip_covered = true
 
 [tool.coverage.html]
 directory = "htmlcov"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-q"]
