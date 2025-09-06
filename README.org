@@ -4,6 +4,12 @@
 
 CapitaNGains is intended to produce capital gains reports from broker annual statements, and was primarily developed to aid tax reporting for residents in Portugal. At the moment it supports only Interactive Brokers (IBKR) Activity Statement exports in CSV format, from which it generates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account interest, SYEP interest details, withholding tax, and an Annex-G helper sheet localized in Portuguese or English.
 
+* Important Disclaimer
+- This tool is experimental and may generate inconsistent or invalid reports.
+- Always double-check all figures against your broker statements and the applicable tax rules/law.
+- FX conversions rely on your input dataset and approximations (e.g., weekend/holiday fallback) and may differ from broker or tax authority calculations.
+- No warranty and no tax advice is provided; use at your own risk.
+
 * Highlights
 - FIFO realized gains with buy-lot audit trail
 - EUR conversion per date using an external FX table (optional)
@@ -37,7 +43,7 @@ date,currency,rate
 - =rate= is "target currency units per EUR” (e.g., USD per EUR).
 - The tool internally computes "EUR per 1 unit of currency” and does weekend/holiday fallback to the most recent prior date when an exact date isn’t available.
 
-Tip: you can easily obtain a Forex dataset compatible with this tool using the =bdpfxtract= utility:
+Tip: you can easily obtain a Forex dataset compatible with this tool containing official /Banco de Portugal/ rates using the =bdpfxtract= utility:
 - Project: https://github.com/midsbie/bdpfxtract/
 - Example command (produces =date,currency,rate= with EUR base): see the project’s README for instructions and options.
 
