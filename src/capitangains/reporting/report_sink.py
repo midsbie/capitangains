@@ -100,6 +100,7 @@ class ExcelReportSink:
                     "date": "Date",
                     "currency": "Currency",
                     "desc": "Description",
+                    "type": "Type",
                     "amount": "Amount (Currency)",
                     "amount_eur": "Amount (EUR)",
                     "code": "Tax Code",
@@ -193,6 +194,7 @@ class ExcelReportSink:
                 "date": "Data",
                 "currency": "Moeda",
                 "desc": "Descrição",
+                "type": "Tipo",
                 "amount": "Montante (Moeda)",
                 "amount_eur": "Montante (EUR)",
                 "code": "Código de Imposto",
@@ -578,6 +580,7 @@ class ExcelReportSink:
                     labels["withholding"]["date"],
                     labels["withholding"]["currency"],
                     labels["withholding"]["desc"],
+                    labels["withholding"]["type"],
                     labels["withholding"]["amount"],
                     labels["withholding"]["amount_eur"],
                     labels["withholding"]["code"],
@@ -589,6 +592,7 @@ class ExcelReportSink:
                         d["date"],
                         d["currency"],
                         d["description"],
+                        d.get("type", ""),
                         float(d["amount"]),
                         (
                             None
@@ -600,10 +604,10 @@ class ExcelReportSink:
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
-                ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
+                ws.cell(row=r, column=5).number_format = money_fmt_for_currency(
                     d["currency"]
                 )
-                ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
+                ws.cell(row=r, column=6).number_format = money_fmt_for_currency("EUR")
 
         def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
             header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []

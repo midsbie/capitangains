@@ -174,6 +174,19 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
         amt = to_dec(r.get("Amount", ""))
         code = r.get("Code", "").strip() if "Code" in r else ""
         if cur and date_s and desc:
+            dlow = desc.lower()
+            wtype = ""
+            if (
+                "credit interest" in dlow
+                or "interest" in dlow
+                and "dividend" not in dlow
+            ):
+                wtype = "Interest"
+            elif "cash dividend" in dlow or "payment in lieu of dividend" in dlow:
+                wtype = "Dividend"
+            else:
+                # default bucket: Dividend if it references dividend; otherwise leave empty
+                wtype = "Dividend" if "dividend" in dlow else ""
             out.append(
                 {
                     "currency": cur,
@@ -181,6 +194,7 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
                     "description": desc,
                     "amount": amt,
                     "code": code,
+                    "type": wtype,
                 }
             )
     return out
