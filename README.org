@@ -2,7 +2,7 @@
 #+author: 
 #+options: toc:t num:nil
 
-CapitaNGains is intended to produce capital gains reports from broker annual statements. At the moment it supports only Interactive Brokers (IBKR) Activity Statement exports in CSV format, from which it generates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account interest, SYEP interest details, withholding tax, and an Annex-G helper sheet localized in Portuguese or English.
+CapitaNGains is intended to produce capital gains reports from broker annual statements, and was primarily developed to aid tax reporting for residents in Portugal. At the moment it supports only Interactive Brokers (IBKR) Activity Statement exports in CSV format, from which it generates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account interest, SYEP interest details, withholding tax, and an Annex-G helper sheet localized in Portuguese or English.
 
 * Highlights
 - FIFO realized gains with buy-lot audit trail
