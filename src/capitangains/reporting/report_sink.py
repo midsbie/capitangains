@@ -101,9 +101,9 @@ class ExcelReportSink:
                     "currency": "Currency",
                     "desc": "Description",
                     "type": "Type",
+                    "country": "Country",
                     "amount": "Amount (Currency)",
                     "amount_eur": "Amount (EUR)",
-                    "code": "Tax Code",
                 },
                 "syep": {
                     "date": "Value Date",
@@ -195,9 +195,9 @@ class ExcelReportSink:
                 "currency": "Moeda",
                 "desc": "Descrição",
                 "type": "Tipo",
+                "country": "País",
                 "amount": "Montante (Moeda)",
                 "amount_eur": "Montante (EUR)",
-                "code": "Código de Imposto",
             },
             "syep": {
                 "date": "Data",
@@ -581,9 +581,9 @@ class ExcelReportSink:
                     labels["withholding"]["currency"],
                     labels["withholding"]["desc"],
                     labels["withholding"]["type"],
+                    labels["withholding"]["country"],
                     labels["withholding"]["amount"],
                     labels["withholding"]["amount_eur"],
-                    labels["withholding"]["code"],
                 ]
             )
             for d in report.withholding:
@@ -593,21 +593,21 @@ class ExcelReportSink:
                         d["currency"],
                         d["description"],
                         d.get("type", ""),
+                        d.get("country", ""),
                         float(d["amount"]),
                         (
                             None
                             if d.get("amount_eur") is None
                             else float(d["amount_eur"])
                         ),
-                        d.get("code", ""),
                     ]
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
-                ws.cell(row=r, column=5).number_format = money_fmt_for_currency(
+                ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
                     d["currency"]
                 )
-                ws.cell(row=r, column=6).number_format = money_fmt_for_currency("EUR")
+                ws.cell(row=r, column=7).number_format = money_fmt_for_currency("EUR")
 
         def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
             header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []

@@ -4,6 +4,7 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+import re
 
 from capitangains.conv import parse_date, to_dec
 from capitangains.logging import configure_logging
@@ -187,6 +188,12 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
             else:
                 # default bucket: Dividend if it references dividend; otherwise leave empty
                 wtype = "Dividend" if "dividend" in dlow else ""
+
+            # Extract country from suffix like " - US Tax" or " - NL Tax"
+            country = ""
+            m = re.search(r"-\s+([A-Z]{2})\s+Tax\b", desc)
+            if m:
+                country = m.group(1)
             out.append(
                 {
                     "currency": cur,
@@ -195,6 +202,7 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
                     "amount": amt,
                     "code": code,
                     "type": wtype,
+                    "country": country,
                 }
             )
     return out
