@@ -87,15 +87,13 @@ date,currency,rate
 - =rate= is "target currency units per EUR” (e.g., USD per EUR).
 - The tool internally computes "EUR per 1 unit of currency” and does weekend/holiday fallback to the most recent prior date when an exact date isn’t available.
 
-Tip: you can easily obtain a Forex dataset compatible with this tool from official /Banco de Portugal/ rates using the =bdpfxtract= utility:
-- Project: https://github.com/midsbie/bdpfxtract/
-- Example command (produces =date,currency,rate= with EUR base): see the project’s README for instructions and options.
+Tip: you can easily obtain a Forex dataset compatible with this tool from official /Banco de Portugal/ rates using the [[https://github.com/midsbie/bdpfxtract/][bdpfxtract]] utility; see the project’s README for instructions and options.
 
 * Development
 
 - Python 3.9+
-- Install with dev extras (optional):
-  - =pip install -e .[dev]=
+- Install:
+  - =make setup=
 - Run tests (pytest):
   - =pytest -q=
 
