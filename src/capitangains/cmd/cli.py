@@ -15,16 +15,16 @@ Usage
     # Single year input
     python -m capitangains.cmd.generate_ibkr_report \
         --year 2024 \
-        --input /path/to/ActivityStatement_2024.csv \
         --output ./out.xlsx \
-        --fx-table ./fx_rates.csv
+        --fx-table ./fx_rates.csv \
+        /path/to/ActivityStatement_2024.csv
 
     # Multi-year input (include prior years so FIFO has buys)
     python -m capitangains.cmd.generate_ibkr_report \
         --year 2024 \
-        --input /path/ActivityStatement_2023.csv /path/ActivityStatement_2024.csv \
         --output ./out.xlsx \
-        --fx-table ./fx_rates.csv
+        --fx-table ./fx_rates.csv \
+        /path/ActivityStatement_2023.csv /path/ActivityStatement_2024.csv
 
 Forex CSV schema (base EUR):
     date,currency,rate
@@ -165,10 +165,9 @@ def build_argparser():
         "--year", type=int, required=True, help="Calendar year to report (YYYY)"
     )
     p.add_argument(
-        "--input",
+        "input",
         type=str,
         nargs="+",
-        required=True,
         help="One or more Activity Statement CSV paths (include prior years for FIFO)",
     )
     p.add_argument(

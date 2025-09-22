@@ -46,7 +46,7 @@ capitangains --help
 
 * CLI Usage
 
-You can pass one or more CSV files via =--input=. It is often necessary to include prior years so FIFO can match sales against earlier buys. Otherwise, sales in the report year that were opened in previous years may be treated as zero-cost (distorting proceeds, allocated cost, and realized P/L).
+You can pass one or more CSV files as positional arguments. It is often necessary to include prior years so FIFO can match sales against earlier buys. Otherwise, sales in the report year that were opened in previous years may be treated as zero-cost (distorting proceeds, allocated cost, and realized P/L).
 
 Examples:
 
@@ -55,10 +55,10 @@ Examples:
   #+begin_src sh
   python -m capitangains.cmd \
     --year 2024 \
-    --input ./U1234567_2024_2024.csv \
     --output ./report_2024.xlsx \
     --fx-table ./fx_rates.csv \
-    --locale EN  # or PT; optional
+    --locale EN \
+    ./U1234567_2024_2024.csv
   #+end_src
 
 - Multi-year (recommended when sales match prior-year buys):
@@ -66,10 +66,10 @@ Examples:
   #+begin_src sh
   python -m capitangains.cmd \
     --year 2024 \
-    --input ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv \
     --output ./report_2024.xlsx \
     --fx-table ./fx_rates.csv \
-    --locale EN  # or PT; optional
+    --locale EN \
+    ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv
   #+end_src
 
 If you omit =--output=, the tool writes =report_<year>.xlsx= in the current folder.
