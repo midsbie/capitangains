@@ -67,6 +67,7 @@ logger = configure_logging()
 
 def process_files(args):
     # Parse one or more CSVs
+    fix_sell_gaps = getattr(args, "auto_fix_sell_gaps", False)
     inputs = args.input if isinstance(args.input, list) else [args.input]
     logger.info("Reading %d file(s): %s", len(inputs), ", ".join(inputs))
 
@@ -88,12 +89,29 @@ def process_files(args):
     interest = parse_interest(model)
 
     # Build FIFO realized
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)
     realized = []
     for tr in trades:
         rl = matcher.ingest(tr)
         if rl is not None and rl.sell_date.year == args.year:
             realized.append(rl)
+
+    # If auto-fix is disabled and there were unmatched sells, abort without writing outputs
+    if not fix_sell_gaps and matcher.gap_events:
+        for ge in matcher.gap_events:
+            logger.error(
+                "Unmatched SELL: symbol=%s date=%s qty=%s currency=%s | %s",
+                ge.symbol,
+                ge.date,
+                ge.remaining_qty,
+                ge.currency,
+                ge.message,
+            )
+        logger.error(
+            "Encountered %d unmatched sell(s). Rerun with --auto-fix-sell-gaps to synthesize residual lots from IBKR Basis.",
+            len(matcher.gap_events),
+        )
+        raise SystemExit(2)
 
     # Build report
     rb = ReportBuilder(year=args.year)
@@ -191,6 +209,13 @@ def build_argparser():
         type=str,
         default=None,
         help="Output filename (e.g., report.xlsx). If omitted, uses report_<year>.xlsx",
+    )
+    p.add_argument(
+        "--auto-fix-sell-gaps",
+        action="store_true",
+        help=(
+            "When a SELL lacks sufficient buy lots, use IBKR per-trade Basis to synthesize a residual lot for the remaining quantity."
+        ),
     )
     return p
 

@@ -28,7 +28,6 @@ class IbkrModel:
 
     sections: dict[str, list[Subtable]] = field(default_factory=dict)
 
-    # --- Query helpers (same spirit as your original API) ---
     def get_subtables(self, section_name: str) -> list[Mapping[str, Any]]:
         """Return the subtables for a section (as list of Subtable)."""
         return self.sections.get(section_name, [])
@@ -104,7 +103,6 @@ class IbkrStatementCsvParser:
         self, rows: Iterable[Sequence[str]]
     ) -> tuple[IbkrModel, ParseReport]:
         report = ParseReport()
-        # We'll build mutable structures, then freeze into dataclasses at the end.
         sections_acc: dict[str, list[_MutableSubtable]] = {}
 
         current_section: str | None = None
@@ -125,7 +123,7 @@ class IbkrStatementCsvParser:
                 )
                 continue
 
-            # Strip BOM on first cell if present (do NOT mutate the original row object)
+            # Strip BOM on first cell if present
             section = (row[0] or "").lstrip("\ufeff")
             kind = (row[1] or "").strip()
             payload = list(row[2:])  # copy
@@ -176,7 +174,6 @@ class _MutableSubtable:
     rows: list[RowDict] = field(default_factory=list)
 
     def freeze(self) -> Subtable:
-        # Store as tuples for a slightly more persistent/immutable representation
         return Subtable(header=self.header, rows=tuple(self.rows))
 
 
@@ -195,7 +192,7 @@ def merge_models(models: Sequence[IbkrModel]) -> IbkrModel:
 
     Order is preserved by input sequence, then by original subtable order. No de-duplication.
     """
-    sections: Dict[str, List[Subtable]] = {}
+    sections: dict[str, list[Subtable]] = {}
     for m in models:
         for sec, subs in m.sections.items():
             sections.setdefault(sec, []).extend(subs)

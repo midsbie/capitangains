@@ -28,6 +28,8 @@ class TradeRow:
     proceeds: Decimal  # signed: negative buy cash, positive sell cash
     comm_fee: Decimal  # signed: negative fee/commission, rarely positive rebates
     code: str
+    basis_ccy: Decimal | None = None  # signed; sells are negative
+    realized_pl_ccy: Decimal | None = None
 
 
 def parse_trades_stocklike(
@@ -68,6 +70,7 @@ def parse_trades_stocklike(
                 "MTM P/L",
                 "MTM in EUR",
                 "Basis",
+                "Realized P/L",
             ]
         }
         for name in col:
@@ -116,6 +119,19 @@ def parse_trades_stocklike(
             else:
                 comm_s = ""
 
+            # Optional Basis and Realized P/L if present
+            basis_opt: Decimal | None = None
+            if col.get("Basis") is not None:
+                bs = r.get("Basis", "").strip()
+                if bs != "":
+                    basis_opt = to_dec(bs)
+
+            realized_opt: Decimal | None = None
+            if col.get("Realized P/L") is not None:
+                rs = r.get("Realized P/L", "").strip()
+                if rs != "":
+                    realized_opt = to_dec(rs)
+
             try:
                 trade = TradeRow(
                     section="Trades",
@@ -129,6 +145,8 @@ def parse_trades_stocklike(
                     proceeds=to_dec(proceeds_s),
                     comm_fee=to_dec(comm_s),
                     code=code,
+                    basis_ccy=basis_opt,
+                    realized_pl_ccy=realized_opt,
                 )
             except Exception:
                 logger.exception("Failed to parse trade row %s", r)
@@ -141,7 +159,7 @@ def parse_trades_stocklike(
             trades.append(trade)
 
     # Sort by actual execution date/time for deterministic FIFO (buys before sells if
-    # same timestamp? use quantity sign)
+    # same timestamp use quantity sign)
     trades.sort(key=lambda tr: (tr.date, tr.datetime_str, tr.quantity <= 0))
     return trades
 
@@ -211,7 +229,7 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
 def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
     """Parse 'Stock Yield Enhancement Program Securities Lent Interest Details'.
 
-    Expected header (as observed):
+    Expected header:
       Currency, Value Date, Symbol, Start Date, Quantity, Collateral Amount,
       Market-based Rate (%), Interest Rate on Customer Collateral (%),
       Interest Paid to Customer, Code
