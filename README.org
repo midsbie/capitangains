@@ -1,32 +1,26 @@
-#+title: CapitaNGains - Capital Gains and Income Report (PT/EN)
-#+author: 
+#+title: CapitaNGains - Capital Gains Tool for IBKR Statements
 #+options: toc:t num:nil
 
-CapitaNGains is intended to produce capital gains reports from broker annual statements, and was primarily developed to aid tax reporting for residents in Portugal. At the moment it supports only Interactive Brokers (IBKR) Activity Statement exports in CSV format, from which it generates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account interest, SYEP interest details, withholding tax, and an Annex-G helper sheet localized in Portuguese or English.
+CapitaNGains generates capital gains reports from broker annual statements. It is designed for Portuguese tax residents and currently supports Interactive Brokers (IBKR) Activity Statement CSV exports. The tool creates an XLSX workbook with realized trades (FIFO), symbol summaries, dividends, account interest, SYEP interest, withholding tax, and an Annex-G helper sheet in Portuguese or English.
 
-* Important Disclaimer
-- This tool is experimental and may generate inconsistent or invalid reports.
-- Always double-check all figures against your broker statements and the applicable tax rules/law.
-- FX conversions rely on your input dataset and approximations (e.g., weekend/holiday fallback) and may differ from broker or tax authority calculations.
-- No warranty and no tax advice is provided; use at your own risk.
+* Disclaimer
 
-* Highlights
-- FIFO realized gains with buy-lot audit trail
-- EUR conversion per date using an external FX table (optional)
-- Clear sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, and Lot-Level EUR Breakdown for convenient reporting in /Anexo G/ of the Portuguese IRS tax return.
+This software is experimental and *may produce inconsistent or invalid results*. Always verify figures against broker statements and applicable tax rules. FX conversions rely on provided data and approximations and may differ from broker or tax authority calculations. *No warranty or tax advice is provided*.
+
+* Features
+
+- FIFO realized gains with buy-lot audit trail.
+- Optional EUR conversion per date using an external FX table.
+- Output sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, Lot-Level EUR Breakdown.
 
 * Installation
 
-Install from source:
-
 1. Clone the repository
-   #+begin_src sh
-   git clone https://github.com/midsbie/capitangains.git
-   cd capitangains
-   #+end_src
+   git clone [[https://github.com/midsbie/capitangains.git][https://github.com/midsbie/capitangains.git]]
 
-2. (Recommended) Create a virtual environment
+2. Create a virtual environment
    #+begin_src sh
+   cd capitangains
    python3 -m venv .venv
    source .venv/bin/activate
    #+end_src
@@ -36,72 +30,44 @@ Install from source:
    make setup
    #+end_src
 
-After installation, the CLI is available as:
-
-#+begin_src sh
-python -m capitangains.cmd --help
-# or if entry points are configured in your environment
-capitangains --help
-#+end_src
-
 * CLI Usage
 
-You can pass one or more CSV files as positional arguments. It is often necessary to include prior years so FIFO can match sales against earlier buys. Otherwise, sales in the report year that were opened in previous years may be treated as zero-cost (distorting proceeds, allocated cost, and realized P/L).
+Pass one or more CSV files as arguments. Include prior years so FIFO can match sales with earlier buys. If sales reference missing buys, the tool aborts unless auto-fix is enabled. Output defaults to =report_<year>.xlsx= in the current directory.
 
-Examples:
-
-- Single year (only if all buys and sells are within the same year):
-
+** Examples
+- Single year:
   #+begin_src sh
-  python -m capitangains.cmd \
-    --year 2024 \
-    --output ./report_2024.xlsx \
-    --fx-table ./fx_rates.csv \
-    --locale EN \
-    ./U1234567_2024_2024.csv
+    python -m capitangains.cmd \
+           --year 2024 \
+           --output ./report_2024.xlsx \
+           --fx-table ./fx_rates.csv \
+           --locale EN \
+           ./U1234567_2024_2024.csv
   #+end_src
 
-- Multi-year (recommended when sales match prior-year buys):
-
+- Multi-year:
   #+begin_src sh
-  python -m capitangains.cmd \
-    --year 2024 \
-    --output ./report_2024.xlsx \
-    --fx-table ./fx_rates.csv \
-    --locale EN \
-    ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv
+    python -m capitangains.cmd \
+           --year 2024 \
+           --output ./report_2024.xlsx \
+           --fx-table ./fx_rates.csv \
+           --locale EN \
+           ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv
   #+end_src
 
-If you omit =--output=, the tool writes =report_<year>.xlsx= in the current folder.
+** Handling unmatched SELLs
 
-* FX Data (EUR base)
+By default, the tool aborts on unmatched SELLs. With =--auto-fix-sell-gaps=, it synthesizes residual lots using IBKR per-trade /Basis/ values. Synthetic legs are marked in the Realized Trades sheet for auditability. If Basis is missing or inconsistent, zero-cost allocation is applied with logged warnings.
 
-EUR conversion is optional, but recommended so the workbook contains EUR amounts for non-EUR trades and income. The tool expects a CSV with the following schema:
+* FX Data
 
-#+begin_src csv
-date,currency,rate
-1999-01-04,USD,1.1789
-1999-01-04,GBP,0.7111
-#+end_src
-
-- =rate= is "target currency units per EUR” (e.g., USD per EUR).
-- The tool internally computes "EUR per 1 unit of currency” and does weekend/holiday fallback to the most recent prior date when an exact date isn’t available.
-
-Tip: you can easily obtain a Forex dataset compatible with this tool from official /Banco de Portugal/ rates using the [[https://github.com/midsbie/bdpfxtract/][bdpfxtract]] utility; see the project’s README for instructions and options.
-
-* Development
-
-- Python 3.9+
-- Install:
-  - =make setup=
-- Run tests (pytest):
-  - =pytest -q=
+EUR conversion requires a CSV with columns: =date=, =currency=, =rate=. Rate is expressed as target currency units per EUR. The tool computes EUR per unit and applies fallback to prior dates when exact rates are missing. Compatible datasets can be extracted from Banco de Portugal using [[https://github.com/midsbie/bdpfxtract/][bdpfxtract]].
 
 * Notes
 
-- The tool relies on the "Activity Statement” CSV exported from IBKR (not Flex queries). Keep the CSV structure intact.
-- Some sanitized exports include elided values ("...”), and are treated as zeroes with warnings.
-- SYEP totals rows in the CSV are ignored; the per-day interest details are listed in the "SYEP Interest” sheet.
+- Input must be an Activity Statement CSV from IBKR, not Flex queries
+- Missing or elided values are treated as zero with warnings
+- SYEP totals rows are ignored; per-day details are included
 
 * License
-Released under the MIT license; refer to =LICENSE= for more details.
+MIT license, see LICENSE file.
