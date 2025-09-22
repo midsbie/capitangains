@@ -173,3 +173,99 @@ def test_excel_report_sink_serializes_legs(tmp_path):
     ws = wb["Realized Trades"]
     legs_json = ws.cell(row=2, column=15).value
     assert "\"buy_date\": \"2023-01-01\"" in legs_json
+
+
+def test_excel_report_sink_sorts_dividends_by_description(tmp_path):
+    rb = ReportBuilder(year=2024)
+    rb.set_dividends(
+        [
+            {
+                "currency": "USD",
+                "date": dt.date(2024, 1, 2),
+                "description": "Zulu",
+                "amount": Decimal("2"),
+            },
+            {
+                "currency": "USD",
+                "date": dt.date(2024, 1, 1),
+                "description": "Alpha",
+                "amount": Decimal("1"),
+            },
+        ]
+    )
+
+    out_path = tmp_path / "dividends_sorted.xlsx"
+    sink = ExcelReportSink(out_path=out_path, locale="EN")
+    sink.write(rb)
+
+    wb = load_workbook(out_path)
+    ws = wb["Dividends"]
+    descriptions = [ws.cell(row=i, column=3).value for i in range(2, ws.max_row + 1)]
+    assert descriptions == sorted(descriptions)
+
+
+def test_excel_report_sink_sorts_account_interest(tmp_path):
+    rb = ReportBuilder(year=2024)
+    rb.set_interest(
+        [
+            {
+                "currency": "USD",
+                "date": dt.date(2024, 1, 2),
+                "description": "Zulu",
+                "amount": Decimal("2"),
+            },
+            {
+                "currency": "USD",
+                "date": dt.date(2024, 1, 1),
+                "description": "Alpha",
+                "amount": Decimal("1"),
+            },
+        ]
+    )
+
+    out_path = tmp_path / "interest_sorted.xlsx"
+    sink = ExcelReportSink(out_path=out_path, locale="EN")
+    sink.write(rb)
+
+    wb = load_workbook(out_path)
+    ws = wb["Account Interest"]
+    descriptions = [ws.cell(row=i, column=3).value for i in range(2, ws.max_row + 1)]
+    assert descriptions == sorted(descriptions)
+
+
+def test_excel_report_sink_sorts_withholding(tmp_path):
+    rb = ReportBuilder(year=2024)
+    rb.set_withholding(
+        [
+            {
+                "currency": "USD",
+                "date": dt.date(2024, 1, 3),
+                "description": "Bravo",
+                "amount": Decimal("-2"),
+            },
+            {
+                "currency": "EUR",
+                "date": dt.date(2024, 1, 1),
+                "description": "Zulu",
+                "amount": Decimal("-1"),
+            },
+            {
+                "currency": "EUR",
+                "date": dt.date(2024, 1, 2),
+                "description": "Alpha",
+                "amount": Decimal("-1.5"),
+            },
+        ]
+    )
+
+    out_path = tmp_path / "withholding_sorted.xlsx"
+    sink = ExcelReportSink(out_path=out_path, locale="EN")
+    sink.write(rb)
+
+    wb = load_workbook(out_path)
+    ws = wb["Withholding Tax"]
+    rows = [
+        (ws.cell(row=i, column=2).value, ws.cell(row=i, column=3).value)
+        for i in range(2, ws.max_row + 1)
+    ]
+    assert rows == sorted(rows, key=lambda r: (r[0], r[1]))

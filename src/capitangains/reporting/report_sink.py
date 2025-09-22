@@ -459,7 +459,11 @@ class ExcelReportSink:
                     labels["dividends"]["amount_eur"],
                 ]
             )
-            for d in report.dividends:
+            sorted_divs = sorted(
+                report.dividends,
+                key=lambda row: (row.get("description") or "").lower(),
+            )
+            for d in sorted_divs:
                 ws.append(
                     [
                         d["date"],
@@ -493,7 +497,11 @@ class ExcelReportSink:
                         labels["interest"]["amount_eur"],
                     ]
                 )
-                for d in report.interest:
+                sorted_interest = sorted(
+                    report.interest,
+                    key=lambda row: (row.get("description") or "").lower(),
+                )
+                for d in sorted_interest:
                     ws.append(
                         [
                             d["date"],
@@ -586,7 +594,14 @@ class ExcelReportSink:
                     labels["withholding"]["amount_eur"],
                 ]
             )
-            for d in report.withholding:
+            sorted_withholding = sorted(
+                report.withholding,
+                key=lambda row: (
+                    (row.get("currency") or "").upper(),
+                    (row.get("description") or "").lower(),
+                ),
+            )
+            for d in sorted_withholding:
                 ws.append(
                     [
                         d["date"],
