@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 import re
 
 from capitangains.conv import parse_date, to_dec
-from capitangains.logging import configure_logging
 from capitangains.model import IbkrModel
 
-logger = configure_logging()
+
+logger = logging.getLogger(__name__)
+
 
 ASSET_STOCK_LIKE = {"Stocks", "Stock", "ETFs", "ETF", "ETCs", "ETP"}
 

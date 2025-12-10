@@ -16,7 +16,7 @@ class ProfessionalFormatter(logging.Formatter):
             "CRITICAL": "CRT",
         }
 
-    def format(self, record):
+    def format(self, record) -> str:
         record.shortlevel = self.shortmap.get(record.levelname, "???")
         return super().format(record)
 
@@ -30,13 +30,13 @@ class ShortLevelFormatter(logging.Formatter):
             datefmt="%Y-%m-%d %H:%M:%S",
         )
 
-    def format(self, record):
+    def format(self, record) -> str:
         # Replace levelname with its first character (e.g., 'INFO' -> 'I')
         record.shortlevel = record.levelname[0]
         return super().format(record)
 
 
-def configure_logging(level=logging.INFO):
+def configure_logging(level=logging.WARNING) -> logging.Logger:
     """Set up logging configuration with short level names and return a logger."""
     handler = logging.StreamHandler()
     handler.setFormatter(ProfessionalFormatter())

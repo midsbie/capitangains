@@ -35,6 +35,7 @@ Forex CSV schema (base EUR):
 from __future__ import annotations
 
 import argparse
+import logging
 from decimal import ROUND_HALF_UP, Decimal, getcontext
 from typing import Optional
 from pathlib import Path
@@ -58,14 +59,16 @@ from capitangains.reporting import (
 )
 from capitangains.reporting.report_sink import ExcelReportSink
 
+
 # Monetary precision and rounding
 getcontext().prec = 28
 getcontext().rounding = ROUND_HALF_UP
 
-logger = configure_logging()
-
 
 def process_files(args):
+    # Get logger for this module
+    logger = logging.getLogger(__name__)
+
     # Parse one or more CSVs
     fix_sell_gaps = getattr(args, "auto_fix_sell_gaps", False)
     inputs = args.input if isinstance(args.input, list) else [args.input]
@@ -217,12 +220,29 @@ def build_argparser():
             "When a SELL lacks sufficient buy lots, use IBKR per-trade Basis to synthesize a residual lot for the remaining quantity."
         ),
     )
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity: -v (INFO), -vv (DEBUG)",
+    )
     return p
 
 
 def main():
     parser = build_argparser()
     args = parser.parse_args()
+
+    # Configure logging based on verbosity
+    verbosity_map = {
+        0: logging.WARNING,  # Default: quiet
+        1: logging.INFO,  # -v: informational
+        2: logging.DEBUG,  # -vv and above: debug
+    }
+    level = verbosity_map.get(min(args.verbose, 2), logging.WARNING)
+    configure_logging(level=level)
+
     process_files(args)
 
 

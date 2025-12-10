@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import re
 from decimal import Decimal, InvalidOperation
-
-from capitangains.logging import configure_logging
 
 NUM_CLEAN_RE = re.compile(r"[,\s]")  # remove thousands separators, spaces
 
 
-logger = configure_logging()
+logger = logging.getLogger(__name__)
 
 
 def to_dec(s: str | float | int | Decimal | None) -> Decimal:

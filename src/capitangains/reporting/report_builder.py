@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from capitangains.logging import configure_logging
 from .fifo import RealizedLine
 from .fx import FxTable
 
-logger = configure_logging()
+logger = logging.getLogger(__name__)
 
 
 @dataclass

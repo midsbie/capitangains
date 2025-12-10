@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -10,6 +11,8 @@ from .money import abs_decimal
 from .positions import PositionBook
 from .realized_builder import build_realized_line
 from .trade_math import buy_cost_ccy
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_GAP_TOLERANCE = Decimal("0.02")
 
