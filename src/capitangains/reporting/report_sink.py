@@ -714,5 +714,6 @@ class OdsReportSink:
 
     def write(self, report: ReportBuilder) -> Path:  # pragma: no cover - placeholder
         raise NotImplementedError(
-            "ODS output not implemented yet. Consider using XLSX or extending ReportSink."
+            "ODS output not implemented yet. "
+            "Consider using XLSX or extending ReportSink."
         )

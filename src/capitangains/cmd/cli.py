@@ -55,7 +55,6 @@ from capitangains.reporting import (
 )
 from capitangains.reporting.report_sink import ExcelReportSink
 
-
 # Monetary precision and rounding
 getcontext().prec = 28
 getcontext().rounding = ROUND_HALF_UP
@@ -105,7 +104,7 @@ def process_files(args):
         if rl is not None and rl.sell_date.year == args.year:
             realized.append(rl)
 
-    # If auto-fix is disabled and there were unmatched sells, abort without writing outputs
+    # If auto-fix is disabled and there were unmatched sells, abort
     if not fix_sell_gaps and matcher.gap_events:
         for ge in matcher.gap_events:
             logger.error(
@@ -117,7 +116,9 @@ def process_files(args):
                 ge.message,
             )
         logger.error(
-            "Encountered %d unmatched sell(s). Rerun with --auto-fix-sell-gaps to synthesize residual lots from IBKR Basis.",
+            "Encountered %d unmatched sell(s). "
+            "Rerun with --auto-fix-sell-gaps to synthesize residual lots "
+            "from IBKR Basis.",
             len(matcher.gap_events),
         )
         raise SystemExit(2)
@@ -158,9 +159,10 @@ def process_files(args):
                 mismatches = []
                 for sym, ibkr_val in ibkr_sum.items():
                     my_val = rb.symbol_totals.get(sym, {}).get("realized_eur", None)
-                    if my_val is not None:
-                        if (my_val - ibkr_val).copy_abs() > Decimal("0.05"):
-                            mismatches.append((sym, my_val, ibkr_val))
+                    if my_val is not None and (my_val - ibkr_val).copy_abs() > Decimal(
+                        "0.05"
+                    ):
+                        mismatches.append((sym, my_val, ibkr_val))
                 if mismatches:
                     logger.warning(
                         "Reconciliation mismatches (my EUR vs IBKR EUR): %s",
@@ -170,14 +172,12 @@ def process_files(args):
             logger.exception("Reconciliation failed; continuing without it.")
     else:
         logger.info(
-            "Skipping IBKR summary reconciliation for multi-file input (spans multiple periods)."
+            "Skipping IBKR summary reconciliation for multi-file input "
+            "(spans multiple periods)."
         )
 
     # Determine output path
-    if args.output:
-        out_path = Path(args.output)
-    else:
-        out_path = Path(f"report_{args.year}.xlsx")
+    out_path = Path(args.output) if args.output else Path(f"report_{args.year}.xlsx")
 
     # Write outputs via sink
     sink = ExcelReportSink(out_path=out_path, locale=args.locale)
@@ -224,7 +224,8 @@ def build_argparser():
         "--auto-fix-sell-gaps",
         action="store_true",
         help=(
-            "When a SELL lacks sufficient buy lots, use IBKR per-trade Basis to synthesize a residual lot for the remaining quantity."
+            "When a SELL lacks sufficient buy lots, use IBKR per-trade Basis "
+            "to synthesize a residual lot for the remaining quantity."
         ),
     )
     p.add_argument(

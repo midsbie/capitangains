@@ -20,7 +20,8 @@ def _make_fx(rates: dict[tuple[str, str], Decimal]) -> FxTable:
 def _buy(
     symbol: str, date: dt.date, qty: str, proceeds: str, comm: str, ccy: str = "USD"
 ) -> TradeRow:
-    # For buys, proceeds negative; comm negative. Basis allocation computed from these by matcher
+    # For buys, proceeds negative; comm negative.  Basis allocation computed from these
+    # by matcher
     return TradeRow(
         section="Trades",
         asset_category="Stocks",
@@ -128,7 +129,8 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     m = FifoMatcher(fix_sell_gaps=True, gap_tolerance=Decimal("0.02"))
     # Buy 90 cost 900
     m.ingest(_buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
-    # SELL 100 with IBKR Basis slightly less than matched alloc (residual = -0.01 -> clamp to 0)
+    # SELL 100 with IBKR Basis slightly less than matched alloc
+    # (residual = -0.01 -> clamp to 0)
     rl = m.ingest(
         _sell("CLP", dt.date(2024, 2, 1), "-100", "1000", "0", "-899.99", "USD")
     )

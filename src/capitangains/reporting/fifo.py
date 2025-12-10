@@ -102,8 +102,8 @@ class FifoMatcher:
                 )
                 if qty_remaining > 0:
                     logger.warning(
-                        "Transfer OUT of %s shares of %s on %s, but only %s shares available. "
-                        "Position book may be incomplete.",
+                        "Transfer OUT of %s shares of %s on %s, but only %s shares "
+                        "available. Position book may be incomplete.",
                         qty_to_remove,
                         transfer.symbol,
                         transfer.date,

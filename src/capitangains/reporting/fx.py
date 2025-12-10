@@ -49,7 +49,8 @@ class FxTable:
                 units_per_eur = to_dec_strict(row["rate"])  # e.g., 1 EUR = 1.91 AUD
                 if units_per_eur <= 0:
                     raise ValueError(
-                        f"Encountered non-positive FX rate {units_per_eur} for {ccy} on {d}"
+                        f"Encountered non-positive FX rate {units_per_eur} for {ccy} "
+                        f"on {d}"
                     )
                 try:
                     eur_per_unit = Decimal("1") / units_per_eur

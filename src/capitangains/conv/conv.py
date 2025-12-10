@@ -56,9 +56,10 @@ def to_dec(
 
 
 def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
-    """Convert IBKR numeric strings to Decimal, raising ValueError on invalid/missing data.
+    """Convert IBKR numeric strings to Decimal.
 
-    Use this for critical fields (Quantity, Proceeds) where 0 is not a safe default.
+    Raises ValueError on invalid/missing data.
+    Use this for critical fields (Quantity, Proceeds) where 0 is not safe.
     """
     if s is None:
         raise ValueError("Value is None")

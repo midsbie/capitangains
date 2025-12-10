@@ -217,4 +217,4 @@ def test_per_symbol_summary_trade_and_eur(tmp_path):
             assert float(row[7]) == 720.0
             break
     else:
-        assert False, "GOOGL row not found in Per Symbol Summary"
+        raise AssertionError("GOOGL row not found in Per Symbol Summary")

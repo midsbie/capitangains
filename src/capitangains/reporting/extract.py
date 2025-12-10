@@ -347,11 +347,13 @@ def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
 
 
 def parse_interest(model: IbkrModel) -> list[InterestRow]:
-    """Parse 'Interest' section: credit/debit interest and monthly SYEP interest summaries.
+    """Parse 'Interest' section: credit/debit interest and monthly SYEP interest
+    summaries.
 
     Header: Currency, Date, Description, Amount
 
     Excludes CSV total rows (e.g., 'Total', 'Total in EUR').
+
     """
     out: list[InterestRow] = []
     for r in model.iter_rows("Interest"):
@@ -388,25 +390,17 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
     Assumptions / invariants:
     - Only stock-like asset categories are considered (ASSET_STOCK_LIKE).
     - Direction must be 'In' or 'Out' (case-insensitive); other values are rejected.
-    - Quantity must be strictly positive; zero/negative quantities are treated as errors.
-    - For 'In' transfers, Market Value / Cost Basis must be present and parseable; missing
-      or placeholder basis is treated as an error.
+    - Quantity must be strictly positive; zero/negative quantities are treated as
+      errors.
+    - For 'In' transfers, Market Value / Cost Basis must be present and parseable;
+      missing or placeholder basis is treated as an error.
     - Transfers are applied as pre-period position seeding before processing trades.
     - Until Open Positions support is implemented, Market Value at transfer date is used
       as a proxy for cost basis, which may differ from IBKR's internal basis.
     """
     out: list[TransferRow] = []
 
-    # "Transfers" section contains fields like:
-    # Asset Category, Currency, Symbol, Date, Type, Direction, Qty, Cost Price, Cost Basis, Close Price, Market Value, Cash Amount, Code
-    # The field names can vary. Key fields we need: Symbol, Date, Direction, Qty, Market Value (or Cost Basis?)
-
-    # Based on user CSV:
-    # Asset Category,Currency,Symbol,Date,Type,Direction,Xfer Company,Xfer Account,Qty,Xfer Price,Market Value,Realized P/L,Cash Amount,Code
-    # Transfers,Data,Stocks,GBP,AZN,2021-10-15,Internal,In,--,U4842277,10,--,881.40,0.00,0.00,
-
     for sub in model.get_subtables("Transfers"):
-        header = [h.strip() for h in sub.header]
         rows = sub.rows
 
         # We only care about stock-like transfers
@@ -423,12 +417,14 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
                 qty_s = r.get("Quantity", "").strip()
 
             # For incoming transfers, we need the initial cost basis.
-            # Usually "Market Value" at transfer time is used if no other basis is provided,
-            # BUT legally, for internal transfers, the original cost basis should persist.
+            # Usually "Market Value" at transfer time is used if no other basis is
+            # provided, BUT legally, for internal transfers, the original cost basis
+            # should persist.
+            #
             # IBKR CSV might show "Cost Basis" or "Market Value".
             # The sample CSV shows "Market Value" populated, but "Xfer Price" is "--".
-            # It seems we must use Market Value as the best proxy for basis if it's an internal transfer
-            # where the user didn't provide cost basis data to IBKR.
+            # It seems we must use Market Value as the best proxy for basis if it's an
+            # internal transfer where the user didn't provide cost basis data to IBKR.
             # Or perhaps there is a "Cost Basis" column in other variants.
 
             # Let's try to find a value field
@@ -455,8 +451,8 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
                     f"{quantity}"
                 )
 
-            # For incoming transfers, a valid basis is mandatory; treat missing/placeholder
-            # Market Value / Cost Basis as a hard error.
+            # For incoming transfers, a valid basis is mandatory; treat missing/
+            # placeholder Market Value / Cost Basis as a hard error.
             if direction_norm == "in":
                 if not val_s:
                     raise ValueError(
@@ -465,7 +461,8 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
                     )
                 market_value = to_dec_strict(val_s)
             else:
-                # For OUT (or other) transfers, the market value is not used in FIFO matching.
+                # For OUT (or other) transfers, the market value is not used in FIFO
+                # matching.
                 market_value = to_dec(val_s) if val_s else Decimal("0")
 
             t = TransferRow(

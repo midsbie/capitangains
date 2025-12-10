@@ -186,9 +186,10 @@ def _map_row_to_header(data_vals: Sequence[str], header: Sequence[str]) -> RowDi
 
 
 def merge_models(models: Sequence[IbkrModel]) -> IbkrModel:
-    """Merge multiple IbkrModel instances into one by concatenating subtables per section.
+    """Merge multiple IbkrModel instances by concatenating subtables.
 
-    Order is preserved by input sequence, then by original subtable order. No de-duplication.
+    Order is preserved by input sequence, then by original subtable order.
+    No de-duplication.
     """
     sections: dict[str, list[Subtable]] = {}
     for m in models:

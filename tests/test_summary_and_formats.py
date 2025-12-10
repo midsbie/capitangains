@@ -76,7 +76,8 @@ def test_summary_sheet_contents(tmp_path):
     wb = load_workbook(out)
     ws = wb["Trading Totals"]
     rows = list(ws.iter_rows(values_only=True))
-    # Expect header + at least 4 lines: total P/L EUR, proceeds EUR, alloc EUR, USD breakdown
+    # Expect header + at least 4 lines:
+    # total P/L EUR, proceeds EUR, alloc EUR, USD breakdown
     labels = [r[0] for r in rows[1:4]]
     assert "Total Realized P/L (EUR)" in labels
     assert "Total Net Proceeds (EUR)" in labels
@@ -110,7 +111,7 @@ def test_per_symbol_number_formats(tmp_path):
             assert row[7].number_format.startswith("€")
             break
     else:
-        assert False, "AMD row not found"
+        raise AssertionError("AMD row not found")
 
     # Find ASML (EUR) row and assert formats are EUR across both sets
     for row in ws.iter_rows(min_row=2):
@@ -123,4 +124,4 @@ def test_per_symbol_number_formats(tmp_path):
             assert row[7].number_format.startswith("€")
             break
     else:
-        assert False, "ASML row not found"
+        raise AssertionError("ASML row not found")

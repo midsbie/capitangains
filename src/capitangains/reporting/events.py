@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import List
 
 from .fifo_domain import GapEvent
 
@@ -10,7 +9,7 @@ class EventRecorder:
     """Collect gap events without side effects."""
 
     def __init__(self) -> None:
-        self._gap_events: List[GapEvent] = []
+        self._gap_events: list[GapEvent] = []
 
     def record_gap(self, event: GapEvent) -> None:
         self._gap_events.append(event)

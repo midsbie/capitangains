@@ -30,7 +30,10 @@ class StrictGapPolicy:
         legs: list[SellMatchLeg],
         alloc_cost_so_far: Decimal,
     ) -> tuple[list[SellMatchLeg], Decimal, GapEvent]:
-        message = f"Unmatched SELL for {trade.symbol} on {trade.date}; remaining qty={qty_remaining}."
+        message = (
+            f"Unmatched SELL for {trade.symbol} on {trade.date}; "
+            f"remaining qty={qty_remaining}."
+        )
         self._append_zero_cost_leg(trade, qty_remaining, legs)
         return (
             legs,
@@ -80,7 +83,10 @@ class BasisSynthesisPolicy:
     ) -> tuple[list[SellMatchLeg], Decimal, GapEvent]:
         basis = self._basis_getter(trade)
         if basis is None:
-            message = f"Cannot auto-fix SELL for {trade.symbol} on {trade.date}: missing Basis; remaining qty={qty_remaining}."
+            message = (
+                f"Cannot auto-fix SELL for {trade.symbol} on {trade.date}: "
+                f"missing Basis; remaining qty={qty_remaining}."
+            )
             StrictGapPolicy._append_zero_cost_leg(trade, qty_remaining, legs)
             return (
                 legs,
@@ -103,8 +109,8 @@ class BasisSynthesisPolicy:
             else:
                 message = (
                     "Auto-fix guardrail: negative residual alloc for "
-                    f"{trade.symbol} on {trade.date}: {residual}. Falling back to zero-cost remainder "
-                    f"for qty={qty_remaining}."
+                    f"{trade.symbol} on {trade.date}: {residual}. "
+                    f"Falling back to zero-cost remainder for qty={qty_remaining}."
                 )
                 StrictGapPolicy._append_zero_cost_leg(trade, qty_remaining, legs)
                 return (
@@ -133,7 +139,8 @@ class BasisSynthesisPolicy:
         alloc_cost = alloc_cost_so_far + synth_cost
         message = (
             "Auto-fixed SELL gap for "
-            f"{trade.symbol} on {trade.date}; qty={qty_remaining}, alloc={synth_cost} (target={target_alloc})"
+            f"{trade.symbol} on {trade.date}; qty={qty_remaining}, "
+            f"alloc={synth_cost} (target={target_alloc})"
         )
         return (
             legs,
