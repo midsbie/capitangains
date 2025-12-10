@@ -5,7 +5,13 @@ import pytest
 from openpyxl import load_workbook
 
 from capitangains.model.ibkr import IbkrStatementCsvParser
-from capitangains.reporting.extract import parse_interest, parse_syep_interest_details
+from capitangains.reporting.extract import (
+    parse_interest,
+    parse_syep_interest_details,
+    DividendRow,
+    WithholdingRow,
+    SyepInterestRow,
+)
 from capitangains.reporting.fifo import RealizedLine
 from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
@@ -73,10 +79,10 @@ def test_syep_interest_parsing_excludes_totals():
     parsed = parse_syep_interest_details(model)
     assert len(parsed) == 1
     r = parsed[0]
-    assert r["currency"] == "USD"
-    assert r["symbol"] == "BANC"
-    assert r["value_date"].isoformat() == "2024-06-10"
-    assert r["interest_paid"] == Decimal("0.01")
+    assert r.currency == "USD"
+    assert r.symbol == "BANC"
+    assert r.value_date.isoformat() == "2024-06-10"
+    assert r.interest_paid == Decimal("0.01")
 
 
 def test_interest_parsing_excludes_totals():
@@ -96,8 +102,8 @@ def test_interest_parsing_excludes_totals():
     model, _ = IbkrStatementCsvParser().parse_rows(rows)
     parsed = parse_interest(model)
     assert len(parsed) == 1
-    assert parsed[0]["currency"] == "EUR"
-    assert parsed[0]["amount"] == Decimal("139.06")
+    assert parsed[0].currency == "EUR"
+    assert parsed[0].amount == Decimal("139.06")
 
 
 def test_convert_eur_for_income_rows(tmp_path):
@@ -105,46 +111,48 @@ def test_convert_eur_for_income_rows(tmp_path):
     # dividends, withholding, syep interest
     rb.set_dividends(
         [
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 1),
-                "description": "Test Div",
-                "amount": Decimal("100"),
-            }
+            DividendRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="Test Div",
+                amount=Decimal("100"),
+            )
         ]
     )
     rb.set_withholding(
         [
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 1),
-                "description": "Test WHT",
-                "amount": Decimal("50"),
-                "code": "WHT",
-            }
+            WithholdingRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="Test WHT",
+                amount=Decimal("50"),
+                code="WHT",
+                type="",
+                country="",
+            )
         ]
     )
     rb.set_syep_interest(
         [
-            {
-                "currency": "USD",
-                "value_date": dt.date(2024, 1, 1),
-                "symbol": "ABC",
-                "start_date": dt.date(2024, 1, 1),
-                "quantity": Decimal("-10"),
-                "collateral_amount": Decimal("1000"),
-                "market_rate_pct": Decimal("0.1"),
-                "customer_rate_pct": Decimal("0.05"),
-                "interest_paid": Decimal("1.23"),
-                "code": "Po",
-            }
+            SyepInterestRow(
+                currency="USD",
+                value_date=dt.date(2024, 1, 1),
+                symbol="ABC",
+                start_date=dt.date(2024, 1, 1),
+                quantity=Decimal("-10"),
+                collateral_amount=Decimal("1000"),
+                market_rate_pct=Decimal("0.1"),
+                customer_rate_pct=Decimal("0.05"),
+                interest_paid=Decimal("1.23"),
+                code="Po",
+            )
         ]
     )
     fx = make_fx({("USD", "2024-01-01"): Decimal("0.9")})
     rb.convert_eur(fx)
-    assert rb.dividends[0]["amount_eur"] == Decimal("90.00")
-    assert rb.withholding[0]["amount_eur"] == Decimal("45.00")
-    assert rb.syep_interest[0]["interest_paid_eur"] == Decimal("1.11")
+    assert rb.dividends[0].amount_eur == Decimal("90.00")
+    assert rb.withholding[0].amount_eur == Decimal("45.00")
+    assert rb.syep_interest[0].interest_paid_eur == Decimal("1.11")
 
     # Write and verify SYEP sheet headers include EUR column
     out = tmp_path / "out.xlsx"
@@ -161,12 +169,15 @@ def test_convert_eur_for_income_rows(tmp_path):
 def test_per_symbol_summary_trade_and_eur(tmp_path):
     rb = ReportBuilder(year=2024)
     # Build one realized line in USD
+    from capitangains.reporting.fifo_domain import SellMatchLeg
+
     legs = [
-        {
-            "buy_date": dt.date(2024, 1, 1),
-            "qty": Decimal("10"),
-            "alloc_cost_ccy": Decimal("800"),
-        }
+        SellMatchLeg(
+            buy_date=dt.date(2024, 1, 1),
+            qty=Decimal("10"),
+            lot_qty_before=Decimal("10"),
+            alloc_cost_ccy=Decimal("800"),
+        )
     ]
     rl = RealizedLine(
         symbol="GOOGL",

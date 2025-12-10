@@ -4,6 +4,7 @@ from decimal import Decimal
 from openpyxl import load_workbook
 
 from capitangains.reporting.fifo import RealizedLine
+from capitangains.reporting.fifo_domain import SellMatchLeg
 from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
@@ -30,11 +31,12 @@ def build_rb_for_summary():
         sell_comm_ccy=Decimal("-1.00"),
         sell_net_ccy=Decimal("999.00"),
         legs=[
-            {
-                "buy_date": dt.date(2023, 12, 1),
-                "qty": Decimal("10"),
-                "alloc_cost_ccy": Decimal("800.00"),
-            }
+            SellMatchLeg(
+                buy_date=dt.date(2023, 12, 1),
+                qty=Decimal("10"),
+                lot_qty_before=Decimal("10"),
+                alloc_cost_ccy=Decimal("800.00"),
+            )
         ],
         realized_pl_ccy=Decimal("199.00"),
     )
@@ -50,11 +52,12 @@ def build_rb_for_summary():
         sell_comm_ccy=Decimal("0"),
         sell_net_ccy=Decimal("500"),
         legs=[
-            {
-                "buy_date": dt.date(2023, 6, 1),
-                "qty": Decimal("5"),
-                "alloc_cost_ccy": Decimal("400.00"),
-            }
+            SellMatchLeg(
+                buy_date=dt.date(2023, 6, 1),
+                qty=Decimal("5"),
+                lot_qty_before=Decimal("5"),
+                alloc_cost_ccy=Decimal("400.00"),
+            )
         ],
         realized_pl_ccy=Decimal("100.00"),
     )

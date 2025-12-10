@@ -33,14 +33,13 @@ class PositionBook:
             lot = lots[0]
             take = min(qty_remaining, lot.qty)
             cost_piece = round_cost_piece(lot.basis_ccy, take, lot.qty)
-            leg: SellMatchLeg = {
-                "buy_date": lot.buy_date,
-                "qty": take,
-                "lot_qty_before": lot.qty,
-                "alloc_cost_ccy": cost_piece,
-            }
-            if lot.transferred:
-                leg["transferred"] = True
+            leg = SellMatchLeg(
+                buy_date=lot.buy_date,
+                qty=take,
+                lot_qty_before=lot.qty,
+                alloc_cost_ccy=cost_piece,
+                transferred=lot.transferred,
+            )
             legs.append(leg)
             alloc_cost_ccy += cost_piece
 

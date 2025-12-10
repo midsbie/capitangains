@@ -3,23 +3,18 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TypedDict
-
-try:
-    from typing import NotRequired
-except ImportError:  # pragma: no cover
-    from typing_extensions import NotRequired  # type: ignore
 
 
-class SellMatchLeg(TypedDict, total=False):
+@dataclass
+class SellMatchLeg:
     buy_date: dt.date | None
     qty: Decimal
     lot_qty_before: Decimal
     alloc_cost_ccy: Decimal
-    synthetic: NotRequired[bool]
-    transferred: NotRequired[bool]
-    alloc_cost_eur: NotRequired[Decimal]
-    proceeds_share_eur: NotRequired[Decimal]
+    synthetic: bool = False
+    transferred: bool = False
+    alloc_cost_eur: Decimal | None = None
+    proceeds_share_eur: Decimal | None = None
 
 
 @dataclass

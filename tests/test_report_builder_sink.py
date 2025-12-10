@@ -7,6 +7,12 @@ from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
+from capitangains.reporting.extract import (
+    DividendRow,
+    WithholdingRow,
+    SyepInterestRow,
+    InterestRow,
+)
 
 
 def _make_fx(rates):
@@ -19,7 +25,16 @@ def _make_fx(rates):
 
 
 def _realized(symbol: str, currency: str, sell_date: dt.date, legs: list[SellMatchLeg]):
-    sell_qty = sum((leg["qty"] for leg in legs), Decimal("0"))
+    leg_objs = [
+        SellMatchLeg(
+            buy_date=leg["buy_date"],
+            qty=leg["qty"],
+            lot_qty_before=leg.get("lot_qty_before", leg["qty"]),
+            alloc_cost_ccy=leg["alloc_cost_ccy"],
+        )
+        for leg in legs
+    ]
+    sell_qty = sum((leg.qty for leg in leg_objs), Decimal("0"))
     sell_net = Decimal("100")
     sell_gross = sell_net
     return RealizedLine(
@@ -30,8 +45,10 @@ def _realized(symbol: str, currency: str, sell_date: dt.date, legs: list[SellMat
         sell_gross_ccy=sell_gross,
         sell_comm_ccy=Decimal("0"),
         sell_net_ccy=sell_net,
-        legs=legs,
-        realized_pl_ccy=sell_net - sum((leg["alloc_cost_ccy"] for leg in legs), Decimal("0")),
+        legs=leg_objs,
+        realized_pl_ccy=sell_net - sum(
+            (leg.alloc_cost_ccy for leg in leg_objs), Decimal("0")
+        ),
     )
 
 
@@ -87,7 +104,7 @@ def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
     rb.convert_eur(fx)
 
     # USD trade should convert using fallback rate for missing buy date leg
-    allocs = [leg.get("alloc_cost_eur") for leg in rl_usd.legs]
+    allocs = [leg.alloc_cost_eur for leg in rl_usd.legs]
     assert all(val is not None for val in allocs)
     assert rb.fx_missing is True  # GBP missing rate sets this flag
 
@@ -100,44 +117,76 @@ def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
         sell_gross_ccy=Decimal("0"),
         sell_comm_ccy=Decimal("0"),
         sell_net_ccy=Decimal("0"),
-        legs=[{"buy_date": None, "qty": Decimal("0"), "alloc_cost_ccy": Decimal("0")}],
+        legs=[
+            SellMatchLeg(
+                buy_date=None,
+                qty=Decimal("0"),
+                lot_qty_before=Decimal("0"),
+                alloc_cost_ccy=Decimal("0"),
+            )
+        ],
         realized_pl_ccy=Decimal("0"),
     )
     rb.add_realized(zero_qty_rl)
     rb.convert_eur(fx)
-    assert "proceeds_share_eur" not in zero_qty_rl.legs[0]
+    assert zero_qty_rl.legs[0].proceeds_share_eur is None
 
 
 def test_report_builder_income_conversion():
     rb = ReportBuilder(year=2024)
     rb.set_dividends(
         [
-            {"currency": "USD", "date": dt.date(2024, 1, 1), "amount": Decimal("10")},
-            {"currency": "EUR", "date": dt.date(2024, 1, 2), "amount": Decimal("5")},
+            DividendRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="Div USD",
+                amount=Decimal("10"),
+            ),
+            DividendRow(
+                currency="EUR",
+                date=dt.date(2024, 1, 2),
+                description="Div EUR",
+                amount=Decimal("5"),
+            ),
         ]
     )
     rb.set_withholding(
         [
-            {"currency": "USD", "date": dt.date(2024, 1, 1), "amount": Decimal("-2")},
+            WithholdingRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="Tax",
+                amount=Decimal("-2"),
+                code="",
+                type="",
+                country="",
+            ),
         ]
     )
     rb.set_syep_interest(
         [
-            {
-                "currency": "USD",
-                "value_date": dt.date(2024, 1, 1),
-                "interest_paid": Decimal("1"),
-            }
+            SyepInterestRow(
+                currency="USD",
+                value_date=dt.date(2024, 1, 1),
+                symbol="SYEP",
+                start_date=None,
+                quantity=Decimal("-1"),
+                collateral_amount=Decimal("0"),
+                market_rate_pct=Decimal("0"),
+                customer_rate_pct=Decimal("0"),
+                interest_paid=Decimal("1"),
+                code="",
+            )
         ]
     )
 
     fx = _make_fx({("USD", "2024-01-01"): Decimal("0.9")})
     rb.convert_eur(fx)
 
-    assert rb.dividends[0]["amount_eur"] == Decimal("9.00")
-    assert rb.dividends[1]["amount_eur"] == Decimal("5.00")
-    assert rb.withholding[0]["amount_eur"] == Decimal("-1.80")
-    assert rb.syep_interest[0]["interest_paid_eur"] == Decimal("0.90")
+    assert rb.dividends[0].amount_eur == Decimal("9.00")
+    assert rb.dividends[1].amount_eur == Decimal("5.00")
+    assert rb.withholding[0].amount_eur == Decimal("-1.80")
+    assert rb.syep_interest[0].interest_paid_eur == Decimal("0.90")
 
 
 def test_excel_report_sink_handles_empty_report(tmp_path):
@@ -179,18 +228,18 @@ def test_excel_report_sink_sorts_dividends_by_description(tmp_path):
     rb = ReportBuilder(year=2024)
     rb.set_dividends(
         [
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 2),
-                "description": "Zulu",
-                "amount": Decimal("2"),
-            },
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 1),
-                "description": "Alpha",
-                "amount": Decimal("1"),
-            },
+            DividendRow(
+                currency="USD",
+                date=dt.date(2024, 1, 2),
+                description="Zulu",
+                amount=Decimal("2"),
+            ),
+            DividendRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="Alpha",
+                amount=Decimal("1"),
+            ),
         ]
     )
 
@@ -208,18 +257,18 @@ def test_excel_report_sink_sorts_account_interest(tmp_path):
     rb = ReportBuilder(year=2024)
     rb.set_interest(
         [
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 2),
-                "description": "Zulu",
-                "amount": Decimal("2"),
-            },
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 1),
-                "description": "Alpha",
-                "amount": Decimal("1"),
-            },
+            InterestRow(
+                currency="USD",
+                date=dt.date(2024, 1, 2),
+                description="Zulu",
+                amount=Decimal("2"),
+            ),
+            InterestRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="Alpha",
+                amount=Decimal("1"),
+            ),
         ]
     )
 
@@ -237,24 +286,33 @@ def test_excel_report_sink_sorts_withholding(tmp_path):
     rb = ReportBuilder(year=2024)
     rb.set_withholding(
         [
-            {
-                "currency": "USD",
-                "date": dt.date(2024, 1, 3),
-                "description": "Bravo",
-                "amount": Decimal("-2"),
-            },
-            {
-                "currency": "EUR",
-                "date": dt.date(2024, 1, 1),
-                "description": "Zulu",
-                "amount": Decimal("-1"),
-            },
-            {
-                "currency": "EUR",
-                "date": dt.date(2024, 1, 2),
-                "description": "Alpha",
-                "amount": Decimal("-1.5"),
-            },
+            WithholdingRow(
+                currency="USD",
+                date=dt.date(2024, 1, 3),
+                description="Bravo",
+                amount=Decimal("-2"),
+                code="",
+                type="",
+                country="",
+            ),
+            WithholdingRow(
+                currency="EUR",
+                date=dt.date(2024, 1, 1),
+                description="Zulu",
+                amount=Decimal("-1"),
+                code="",
+                type="",
+                country="",
+            ),
+            WithholdingRow(
+                currency="EUR",
+                date=dt.date(2024, 1, 2),
+                description="Alpha",
+                amount=Decimal("-1.5"),
+                code="",
+                type="",
+                country="",
+            ),
         ]
     )
 

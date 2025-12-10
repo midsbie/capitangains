@@ -323,17 +323,13 @@ class ExcelReportSink:
         )
 
         for rl in report.realized_lines:
-            alloc_cost_ccy = sum(
-                (leg["alloc_cost_ccy"] for leg in rl.legs), Decimal("0")
-            )
+            alloc_cost_ccy = sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
             legs_json = json.dumps(
                 [
                     {
-                        "buy_date": (
-                            ld["buy_date"].isoformat() if ld["buy_date"] else None
-                        ),
-                        "qty": str(ld["qty"]),
-                        "alloc_cost_ccy": str(ld["alloc_cost_ccy"]),
+                        "buy_date": (ld.buy_date.isoformat() if ld.buy_date else None),
+                        "qty": str(ld.qty),
+                        "alloc_cost_ccy": str(ld.alloc_cost_ccy),
                     }
                     for ld in rl.legs
                 ]
@@ -386,20 +382,20 @@ class ExcelReportSink:
         )
         for rl in report.realized_lines:
             for leg in rl.legs:
-                alloc_eur = leg.get("alloc_cost_eur")
-                proceeds_eur = leg.get("proceeds_share_eur")
+                alloc_eur = leg.alloc_cost_eur
+                proceeds_eur = leg.proceeds_share_eur
                 pl_eur = None
                 if alloc_eur is not None and proceeds_eur is not None:
                     pl_eur = (proceeds_eur - alloc_eur).quantize(Decimal("0.01"))
                 # Check if lot was from a transfer
-                is_transferred = leg.get("transferred", False)
+                is_transferred = leg.transferred
                 ws.append(
                     [
                         rl.symbol,
                         rl.currency,
-                        leg.get("buy_date"),
+                        leg.buy_date,
                         rl.sell_date,
-                        float(leg.get("qty", 0)),
+                        float(leg.qty),
                         (None if alloc_eur is None else float(alloc_eur)),
                         (None if proceeds_eur is None else float(proceeds_eur)),
                         (None if pl_eur is None else float(pl_eur)),
@@ -486,27 +482,22 @@ class ExcelReportSink:
                 ]
             )
             sorted_divs = sorted(
-                report.dividends,
-                key=lambda row: (row.get("description") or "").lower(),
+                report.dividends, key=lambda row: row.description.lower()
             )
             for d in sorted_divs:
                 ws.append(
                     [
-                        d["date"],
-                        d["currency"],
-                        d["description"],
-                        float(d["amount"]),
-                        (
-                            None
-                            if d.get("amount_eur") is None
-                            else float(d["amount_eur"])
-                        ),
+                        d.date,
+                        d.currency,
+                        d.description,
+                        float(d.amount),
+                        (None if d.amount_eur is None else float(d.amount_eur)),
                     ]
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
                 ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
-                    d["currency"]
+                    d.currency
                 )
                 ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
 
@@ -525,26 +516,22 @@ class ExcelReportSink:
                 )
                 sorted_interest = sorted(
                     report.interest,
-                    key=lambda row: (row.get("description") or "").lower(),
+                    key=lambda row: row.description.lower(),
                 )
                 for d in sorted_interest:
                     ws.append(
                         [
-                            d["date"],
-                            d["currency"],
-                            d["description"],
-                            float(d["amount"]),
-                            (
-                                None
-                                if d.get("amount_eur") is None
-                                else float(d["amount_eur"])
-                            ),
+                            d.date,
+                            d.currency,
+                            d.description,
+                            float(d.amount),
+                            (None if d.amount_eur is None else float(d.amount_eur)),
                         ]
                     )
                     r = ws.max_row
                     ws.cell(row=r, column=1).number_format = date_fmt
                     ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
-                        d["currency"]
+                        d.currency
                     )
                     ws.cell(row=r, column=5).number_format = money_fmt_for_currency(
                         "EUR"
@@ -573,21 +560,21 @@ class ExcelReportSink:
                 for row in report.syep_interest:
                     ws.append(
                         [
-                            row.get("value_date"),
-                            row.get("currency"),
-                            row.get("symbol"),
-                            row.get("start_date"),
-                            float(row.get("quantity", 0)),
-                            float(row.get("collateral_amount", 0)),
-                            float(row.get("market_rate_pct", 0)),
-                            float(row.get("customer_rate_pct", 0)),
-                            float(row.get("interest_paid", 0)),
+                            row.value_date,
+                            row.currency,
+                            row.symbol,
+                            row.start_date,
+                            float(row.quantity),
+                            float(row.collateral_amount),
+                            float(row.market_rate_pct),
+                            float(row.customer_rate_pct),
+                            float(row.interest_paid),
                             (
                                 None
-                                if row.get("interest_paid_eur") is None
-                                else float(row.get("interest_paid_eur"))
+                                if row.interest_paid_eur is None
+                                else float(row.interest_paid_eur)
                             ),
-                            row.get("code", ""),
+                            row.code,
                         ]
                     )
                     r = ws.max_row
@@ -595,12 +582,12 @@ class ExcelReportSink:
                     ws.cell(row=r, column=4).number_format = date_fmt
                     ws.cell(row=r, column=5).number_format = qty_fmt
                     ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
-                        row.get("currency", "")
+                        row.currency
                     )
                     ws.cell(row=r, column=7).number_format = pct_fmt
                     ws.cell(row=r, column=8).number_format = pct_fmt
                     ws.cell(row=r, column=9).number_format = money_fmt_for_currency(
-                        row.get("currency", "")
+                        row.currency
                     )
                     ws.cell(row=r, column=10).number_format = money_fmt_for_currency(
                         "EUR"
@@ -623,30 +610,26 @@ class ExcelReportSink:
             sorted_withholding = sorted(
                 report.withholding,
                 key=lambda row: (
-                    (row.get("currency") or "").upper(),
-                    (row.get("description") or "").lower(),
+                    row.currency.upper(),
+                    row.description.lower(),
                 ),
             )
             for d in sorted_withholding:
                 ws.append(
                     [
-                        d["date"],
-                        d["currency"],
-                        d["description"],
-                        d.get("type", ""),
-                        d.get("country", ""),
-                        float(d["amount"]),
-                        (
-                            None
-                            if d.get("amount_eur") is None
-                            else float(d["amount_eur"])
-                        ),
+                        d.date,
+                        d.currency,
+                        d.description,
+                        d.type,
+                        d.country,
+                        float(d.amount),
+                        (None if d.amount_eur is None else float(d.amount_eur)),
                     ]
                 )
                 r = ws.max_row
                 ws.cell(row=r, column=1).number_format = date_fmt
                 ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
-                    d["currency"]
+                    d.currency
                 )
                 ws.cell(row=r, column=7).number_format = money_fmt_for_currency("EUR")
 

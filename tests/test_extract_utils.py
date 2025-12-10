@@ -145,19 +145,17 @@ def test_parse_dividends_and_withholding_classification():
     model = _parse_rows(rows)
 
     dividends = parse_dividends(model)
-    assert dividends == [
-        {
-            "currency": "USD",
-            "date": dt.date(2024, 1, 5),
-            "description": "Test Div",
-            "amount": Decimal("10.00"),
-        }
-    ]
+    assert len(dividends) == 1
+    drow = dividends[0]
+    assert drow.currency == "USD"
+    assert drow.date == dt.date(2024, 1, 5)
+    assert drow.description == "Test Div"
+    assert drow.amount == Decimal("10.00")
 
     withholding = parse_withholding_tax(model)
-    assert withholding[0]["type"] == "Dividend"
-    assert withholding[0]["country"] == "US"
-    assert withholding[1]["type"] == "Interest"
+    assert withholding[0].type == "Dividend"
+    assert withholding[0].country == "US"
+    assert withholding[1].type == "Interest"
 
 
 def test_parse_syep_interest_skips_totals_and_coerces_numbers():
@@ -210,9 +208,9 @@ def test_parse_syep_interest_skips_totals_and_coerces_numbers():
     result = parse_syep_interest_details(model)
     assert len(result) == 1
     row = result[0]
-    assert row["quantity"] == Decimal("-100")
-    assert row["market_rate_pct"] == Decimal("0.1")
-    assert row["value_date"] == dt.date(2024, 2, 1)
+    assert row.quantity == Decimal("-100")
+    assert row.market_rate_pct == Decimal("0.1")
+    assert row.value_date == dt.date(2024, 2, 1)
 
 
 def test_parse_interest_skips_totals():
@@ -225,4 +223,4 @@ def test_parse_interest_skips_totals():
 
     interest = parse_interest(model)
     assert len(interest) == 1
-    assert interest[0]["amount"] == Decimal("1.23")
+    assert interest[0].amount == Decimal("1.23")

@@ -24,17 +24,17 @@ def test_position_book_fifo_consumption_and_residual_tracking():
     legs, alloc, remaining = book.consume_fifo("ABC", Decimal("120"))
     assert remaining == Decimal("0")
     assert len(legs) == 2
-    assert legs[0]["qty"] == Decimal("100")
-    assert legs[0]["alloc_cost_ccy"] == Decimal("1000.00000000")
-    assert legs[1]["qty"] == Decimal("20")
-    assert legs[1]["alloc_cost_ccy"] == Decimal("240.00000000")
+    assert legs[0].qty == Decimal("100")
+    assert legs[0].alloc_cost_ccy == Decimal("1000.00000000")
+    assert legs[1].qty == Decimal("20")
+    assert legs[1].alloc_cost_ccy == Decimal("240.00000000")
     assert alloc == Decimal("1240.00000000")
 
     legs2, alloc2, remaining2 = book.consume_fifo("ABC", Decimal("50"))
     # 30 available from previous lot, 20 shortage
     assert len(legs2) == 1
-    assert legs2[0]["qty"] == Decimal("30")
-    assert legs2[0]["alloc_cost_ccy"] == Decimal("360.00000000")
+    assert legs2[0].qty == Decimal("30")
+    assert legs2[0].alloc_cost_ccy == Decimal("360.00000000")
     assert alloc2 == Decimal("360.00000000")
     assert remaining2 == Decimal("20")
 
@@ -85,8 +85,8 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
         trade, Decimal("20"), legs, Decimal("1200.01000000")
     )
     assert event.fixed is True
-    assert legs_after[-1]["synthetic"] is True
-    assert legs_after[-1]["alloc_cost_ccy"] == Decimal("0.00000000")
+    assert legs_after[-1].synthetic is True
+    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
     assert alloc_after == Decimal("1200.01000000")
 
 
@@ -103,7 +103,7 @@ def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
         trade, Decimal("15"), legs, Decimal("950")
     )
     assert event.fixed is False
-    assert legs_after[-1]["alloc_cost_ccy"] == Decimal("0.00000000")
+    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
     assert alloc_after == Decimal("950")
 
 
@@ -120,7 +120,7 @@ def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
         trade, Decimal("5"), legs, Decimal("0")
     )
     assert event.fixed is False
-    assert legs_after[-1]["alloc_cost_ccy"] == Decimal("0.00000000")
+    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
     assert alloc_after == Decimal("0")
 
 
@@ -144,7 +144,7 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
         trade, Decimal("10"), legs, Decimal("1000.02000000")
     )
     assert event.fixed is True
-    assert legs_after[-1]["alloc_cost_ccy"] == Decimal("0.00000000")
+    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
     assert alloc_after == Decimal("1000.02000000")
 
 

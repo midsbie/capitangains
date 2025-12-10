@@ -4,9 +4,9 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
-from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
+from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
 from .fx import FxTable
 
@@ -23,10 +23,10 @@ class ReportBuilder:
         self.symbol_totals: defaultdict[str, dict[str, Decimal]] = defaultdict(
             lambda: defaultdict(Decimal)
         )
-        self.dividends: list[dict[str, Any]] = []
-        self.withholding: list[dict[str, Any]] = []
-        self.syep_interest: list[dict[str, Any]] = []
-        self.interest: list[dict[str, Any]] = []
+        self.dividends: list[DividendRow] = []
+        self.withholding: list[WithholdingRow] = []
+        self.syep_interest: list[SyepInterestRow] = []
+        self.interest: list[InterestRow] = []
         self.transfers: list[Any] = []  # TransferRow objects
 
         # flags
@@ -40,7 +40,7 @@ class ReportBuilder:
         t["realized_ccy:" + rl.currency] += rl.realized_pl_ccy
         t["proceeds_ccy:" + rl.currency] += rl.sell_net_ccy
         t["alloc_cost_ccy:" + rl.currency] += sum(
-            (leg["alloc_cost_ccy"] for leg in rl.legs), Decimal("0")
+            (leg.alloc_cost_ccy for leg in rl.legs), Decimal("0")
         )
         # EUR aggregations if present
         if rl.realized_pl_eur is not None:
@@ -48,16 +48,16 @@ class ReportBuilder:
             t["proceeds_eur"] += rl.sell_net_eur or Decimal("0")
             t["alloc_cost_eur"] += rl.alloc_cost_eur or Decimal("0")
 
-    def set_dividends(self, rows: list[dict[str, Any]]):
+    def set_dividends(self, rows: list[DividendRow]):
         self.dividends = rows
 
-    def set_withholding(self, rows: list[dict[str, Any]]):
+    def set_withholding(self, rows: list[WithholdingRow]):
         self.withholding = rows
 
-    def set_syep_interest(self, rows: list[dict[str, Any]]):
+    def set_syep_interest(self, rows: list[SyepInterestRow]):
         self.syep_interest = rows
 
-    def set_interest(self, rows: list[dict[str, Any]]):
+    def set_interest(self, rows: list[InterestRow]):
         self.interest = rows
 
     def set_transfers(self, transfers: list[Any]):
@@ -80,8 +80,8 @@ class ReportBuilder:
                 alloc_eur = Decimal("0")
                 # per-leg EUR breakdown (identity conversion)
                 for leg in rl.legs:
-                    leg["alloc_cost_eur"] = leg["alloc_cost_ccy"]
-                    alloc_eur += leg["alloc_cost_eur"]
+                    leg.alloc_cost_eur = leg.alloc_cost_ccy
+                    alloc_eur += leg.alloc_cost_eur
                 rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
                 rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
                     Decimal("0.01")
@@ -89,8 +89,8 @@ class ReportBuilder:
                 # allocate sale net EUR across legs by quantity share (helps Annex G)
                 if rl.sell_qty != 0:
                     for leg in rl.legs:
-                        share = leg["qty"] / rl.sell_qty
-                        leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
+                        share = leg.qty / rl.sell_qty
+                        leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
                             Decimal("0.01")
                         )
                 continue
@@ -113,13 +113,13 @@ class ReportBuilder:
 
             alloc_eur = Decimal("0")
             for leg in rl.legs:
-                bd = leg["buy_date"]
+                bd = leg.buy_date
                 if bd is None:
                     rate = sell_rate  # fallback
                 else:
                     rate = fx.get_rate(bd, rl.currency) or sell_rate
-                leg_eur = (leg["alloc_cost_ccy"] * rate).quantize(Decimal("0.01"))
-                leg["alloc_cost_eur"] = leg_eur
+                leg_eur = (leg.alloc_cost_ccy * rate).quantize(Decimal("0.01"))
+                leg.alloc_cost_eur = leg_eur
                 alloc_eur += leg_eur
             rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
             rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
@@ -128,21 +128,19 @@ class ReportBuilder:
             # allocate sale net EUR across legs by quantity share
             if rl.sell_qty != 0 and rl.sell_net_eur is not None:
                 for leg in rl.legs:
-                    share = leg["qty"] / rl.sell_qty
-                    leg["proceeds_share_eur"] = (rl.sell_net_eur * share).quantize(
+                    share = leg.qty / rl.sell_qty
+                    leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
                         Decimal("0.01")
                     )
 
         # Convert SYEP interest to EUR, if available
         if getattr(self, "syep_interest", None):
             for row in self.syep_interest:
-                cur = (row.get("currency") or "").upper()
-                amt = row.get("interest_paid")
-                d = row.get("value_date")
-                if amt is None:
-                    continue
+                cur = row.currency.upper()
+                amt = row.interest_paid
+                d = row.value_date
                 if cur == "EUR":
-                    row["interest_paid_eur"] = amt.quantize(Decimal("0.01"))
+                    row.interest_paid_eur = amt.quantize(Decimal("0.01"))
                     continue
                 if fx is None or d is None:
                     continue
@@ -150,18 +148,16 @@ class ReportBuilder:
                 if rate is None:
                     self.fx_missing = True
                     continue
-                row["interest_paid_eur"] = (amt * rate).quantize(Decimal("0.01"))
+                row.interest_paid_eur = (amt * rate).quantize(Decimal("0.01"))
 
         # Convert Withholding Tax amounts to EUR, if possible
         if getattr(self, "withholding", None):
             for row in self.withholding:
-                cur = (row.get("currency") or "").upper()
-                amt = row.get("amount")
-                d = row.get("date")
-                if amt is None:
-                    continue
+                cur = row.currency.upper()
+                amt = row.amount
+                d = row.date
                 if cur == "EUR":
-                    row["amount_eur"] = amt.quantize(Decimal("0.01"))
+                    row.amount_eur = amt.quantize(Decimal("0.01"))
                     continue
                 if fx is None or d is None:
                     continue
@@ -169,18 +165,16 @@ class ReportBuilder:
                 if rate is None:
                     self.fx_missing = True
                     continue
-                row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))
+                row.amount_eur = (amt * rate).quantize(Decimal("0.01"))
 
         # Convert Dividends amounts to EUR, if possible
         if getattr(self, "dividends", None):
             for row in self.dividends:
-                cur = (row.get("currency") or "").upper()
-                amt = row.get("amount")
-                d = row.get("date")
-                if amt is None:
-                    continue
+                cur = row.currency.upper()
+                amt = row.amount
+                d = row.date
                 if cur == "EUR":
-                    row["amount_eur"] = amt.quantize(Decimal("0.01"))
+                    row.amount_eur = amt.quantize(Decimal("0.01"))
                     continue
                 if fx is None or d is None:
                     continue
@@ -188,7 +182,7 @@ class ReportBuilder:
                 if rate is None:
                     self.fx_missing = True
                     continue
-                row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))
+                row.amount_eur = (amt * rate).quantize(Decimal("0.01"))
 
         # Recompute EUR aggregates per symbol after conversions
         # Clear prior EUR aggregates (they would have been zero before conversion)
@@ -212,13 +206,11 @@ class ReportBuilder:
         # Convert Interest amounts to EUR, if possible
         if getattr(self, "interest", None):
             for row in self.interest:
-                cur = (row.get("currency") or "").upper()
-                amt = row.get("amount")
-                d = row.get("date")
-                if amt is None:
-                    continue
+                cur = row.currency.upper()
+                amt = row.amount
+                d = row.date
                 if cur == "EUR":
-                    row["amount_eur"] = amt.quantize(Decimal("0.01"))
+                    row.amount_eur = amt.quantize(Decimal("0.01"))
                     continue
                 if fx is None or d is None:
                     continue
@@ -226,4 +218,4 @@ class ReportBuilder:
                 if rate is None:
                     self.fx_missing = True
                     continue
-                row["amount_eur"] = (amt * rate).quantize(Decimal("0.01"))
+                row.amount_eur = (amt * rate).quantize(Decimal("0.01"))

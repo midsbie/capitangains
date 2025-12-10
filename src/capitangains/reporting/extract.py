@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
-import re
 
 from capitangains.conv import parse_date, to_dec, to_dec_strict
 from capitangains.model import IbkrModel
-
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +78,51 @@ class TransferRow:
     quantity: Decimal
     market_value: Decimal  # Cost basis for incoming transfers
     code: str
+
+
+@dataclass
+class DividendRow:
+    currency: str
+    date: dt.date
+    description: str
+    amount: Decimal
+    amount_eur: Decimal | None = None
+
+
+@dataclass
+class WithholdingRow:
+    currency: str
+    date: dt.date
+    description: str
+    amount: Decimal
+    code: str
+    type: str
+    country: str
+    amount_eur: Decimal | None = None
+
+
+@dataclass
+class InterestRow:
+    currency: str
+    date: dt.date
+    description: str
+    amount: Decimal
+    amount_eur: Decimal | None = None
+
+
+@dataclass
+class SyepInterestRow:
+    currency: str
+    value_date: dt.date | None
+    symbol: str
+    start_date: dt.date | None
+    quantity: Decimal
+    collateral_amount: Decimal
+    market_rate_pct: Decimal
+    customer_rate_pct: Decimal
+    interest_paid: Decimal
+    code: str
+    interest_paid_eur: Decimal | None = None
 
 
 def parse_trades_stocklike_row(
@@ -181,8 +224,8 @@ def parse_trades_stocklike(
     return trades
 
 
-def parse_dividends(model: IbkrModel) -> list[dict[str, Any]]:
-    out = []
+def parse_dividends(model: IbkrModel) -> list[DividendRow]:
+    out: list[DividendRow] = []
     for r in model.iter_rows("Dividends"):
         # Header: Currency,Date,Description,Amount
         cur = r.get("Currency", "").strip()
@@ -195,18 +238,18 @@ def parse_dividends(model: IbkrModel) -> list[dict[str, Any]]:
         if cur and date_s and desc:
             amt = to_dec_strict(amount_s)
             out.append(
-                {
-                    "currency": cur,
-                    "date": parse_date(date_s),
-                    "description": desc,
-                    "amount": amt,
-                }
+                DividendRow(
+                    currency=cur,
+                    date=parse_date(date_s),
+                    description=desc,
+                    amount=amt,
+                )
             )
     return out
 
 
-def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
-    out = []
+def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
+    out: list[WithholdingRow] = []
     for r in model.iter_rows("Withholding Tax"):
         cur = r.get("Currency", "").strip()
         date_s = r.get("Date", "").strip()
@@ -238,20 +281,20 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
             if m:
                 country = m.group(1)
             out.append(
-                {
-                    "currency": cur,
-                    "date": parse_date(date_s),
-                    "description": desc,
-                    "amount": amt,
-                    "code": code,
-                    "type": wtype,
-                    "country": country,
-                }
+                WithholdingRow(
+                    currency=cur,
+                    date=parse_date(date_s),
+                    description=desc,
+                    amount=amt,
+                    code=code,
+                    type=wtype,
+                    country=country,
+                )
             )
     return out
 
 
-def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
+def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
     """Parse 'Stock Yield Enhancement Program Securities Lent Interest Details'.
 
     Expected header:
@@ -259,7 +302,7 @@ def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
       Market-based Rate (%), Interest Rate on Customer Collateral (%),
       Interest Paid to Customer, Code
     """
-    out: list[dict[str, Any]] = []
+    out: list[SyepInterestRow] = []
     section = "Stock Yield Enhancement Program Securities Lent Interest Details"
     for r in model.iter_rows(section):
         cur = r.get("Currency", "").strip()
@@ -286,30 +329,31 @@ def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
         customer_rate_pct = to_dec_strict(cust_rate_s)
         interest_paid = to_dec_strict(paid_s)
 
-        row: dict[str, Any] = {
-            "currency": cur,
-            "value_date": (parse_date(value_date_s) if value_date_s else None),
-            "symbol": sym,
-            "start_date": (parse_date(start_date_s) if start_date_s else None),
-            "quantity": quantity,
-            "collateral_amount": collateral_amount,
-            "market_rate_pct": market_rate_pct,
-            "customer_rate_pct": customer_rate_pct,
-            "interest_paid": interest_paid,
-            "code": code,
-        }
-        out.append(row)
+        out.append(
+            SyepInterestRow(
+                currency=cur,
+                value_date=(parse_date(value_date_s) if value_date_s else None),
+                symbol=sym,
+                start_date=(parse_date(start_date_s) if start_date_s else None),
+                quantity=quantity,
+                collateral_amount=collateral_amount,
+                market_rate_pct=market_rate_pct,
+                customer_rate_pct=customer_rate_pct,
+                interest_paid=interest_paid,
+                code=code,
+            )
+        )
     return out
 
 
-def parse_interest(model: IbkrModel) -> list[dict[str, Any]]:
+def parse_interest(model: IbkrModel) -> list[InterestRow]:
     """Parse 'Interest' section: credit/debit interest and monthly SYEP interest summaries.
 
     Header: Currency, Date, Description, Amount
 
     Excludes CSV total rows (e.g., 'Total', 'Total in EUR').
     """
-    out: list[dict[str, Any]] = []
+    out: list[InterestRow] = []
     for r in model.iter_rows("Interest"):
         cur = (r.get("Currency", "") or "").strip()
         if not cur or cur.lower().startswith("total"):
@@ -328,12 +372,12 @@ def parse_interest(model: IbkrModel) -> list[dict[str, Any]]:
         if cur and date_s and desc:
             amt = to_dec_strict(amount_s)
             out.append(
-                {
-                    "currency": cur,
-                    "date": parse_date(date_s),
-                    "description": desc,
-                    "amount": amt,
-                }
+                InterestRow(
+                    currency=cur,
+                    date=parse_date(date_s),
+                    description=desc,
+                    amount=amt,
+                )
             )
     return out
 

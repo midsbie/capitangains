@@ -73,10 +73,10 @@ def test_fifo_no_fix_records_gap_and_zero_cost():
     assert rl.gap_fixed is False
     # First leg allocates full buy cost; remainder is zero-cost
     assert len(rl.legs) == 2
-    assert rl.legs[0]["qty"] == Decimal("100")
-    assert rl.legs[0]["alloc_cost_ccy"] == Decimal("1000")
-    assert rl.legs[1]["qty"] == Decimal("20")
-    assert rl.legs[1]["alloc_cost_ccy"] == Decimal("0")
+    assert rl.legs[0].qty == Decimal("100")
+    assert rl.legs[0].alloc_cost_ccy == Decimal("1000")
+    assert rl.legs[1].qty == Decimal("20")
+    assert rl.legs[1].alloc_cost_ccy == Decimal("0")
     # Realized = 1200 - 1000
     assert rl.realized_pl_ccy == Decimal("200.00")
     # Gap event recorded
@@ -94,11 +94,11 @@ def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
     assert len(rl.legs) == 2
     # Synthetic leg flagged and dated at sell date
     synth = rl.legs[1]
-    assert synth.get("synthetic") is True
-    assert synth["buy_date"] == dt.date(2024, 2, 1)
-    assert synth["qty"] == Decimal("20")
+    assert synth.synthetic is True
+    assert synth.buy_date == dt.date(2024, 2, 1)
+    assert synth.qty == Decimal("20")
     # Residual cost brings total alloc to 1200
-    total_alloc = rl.legs[0]["alloc_cost_ccy"] + synth["alloc_cost_ccy"]
+    total_alloc = rl.legs[0].alloc_cost_ccy + synth.alloc_cost_ccy
     assert total_alloc == Decimal("1200.00000000")
     # Realized matches IBKR per-trade: 1200 net - 1200 alloc = 0.00
     assert rl.realized_pl_ccy == Decimal("0.00")
@@ -113,7 +113,7 @@ def test_fifo_auto_fix_missing_basis_falls_back_zero_cost():
     assert rl.has_gap is True
     assert rl.gap_fixed is False
     assert len(rl.legs) == 2
-    assert rl.legs[1]["alloc_cost_ccy"] == Decimal("0")
+    assert rl.legs[1].alloc_cost_ccy == Decimal("0")
     # Gap event recorded (not fixed)
     assert any(ev.fixed is False for ev in m.gap_events)
 
@@ -127,8 +127,8 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     assert rl is not None
     assert rl.has_gap is True
     assert rl.gap_fixed is True  # synthetic leg created (qty=10) but zero cost
-    assert rl.legs[-1]["qty"] == Decimal("10")
-    assert rl.legs[-1]["alloc_cost_ccy"] == Decimal("0.00000000")
+    assert rl.legs[-1].qty == Decimal("10")
+    assert rl.legs[-1].alloc_cost_ccy == Decimal("0.00000000")
 
 
 def test_fifo_auto_fix_negative_residual_beyond_tolerance_fallback():
@@ -140,8 +140,8 @@ def test_fifo_auto_fix_negative_residual_beyond_tolerance_fallback():
     assert rl is not None
     assert rl.has_gap is True
     assert rl.gap_fixed is False
-    assert rl.legs[-1]["qty"] == Decimal("10")
-    assert rl.legs[-1]["alloc_cost_ccy"] == Decimal("0")
+    assert rl.legs[-1].qty == Decimal("10")
+    assert rl.legs[-1].alloc_cost_ccy == Decimal("0")
 
 
 def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
@@ -167,5 +167,5 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
     assert rl.sell_net_eur == Decimal("960.00")
     assert rl.realized_pl_eur == Decimal("-100.00")
     # Legs should have per-leg EUR alloc and proceeds share
-    assert all("alloc_cost_eur" in leg for leg in rl.legs)
-    assert all("proceeds_share_eur" in leg for leg in rl.legs)
+    assert all(leg.alloc_cost_eur is not None for leg in rl.legs)
+    assert all(leg.proceeds_share_eur is not None for leg in rl.legs)
