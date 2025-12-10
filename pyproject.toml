@@ -22,6 +22,8 @@ dev = [
     "pytest",
     "pytest-mock",
     "ruff",
+    "mypy",
+    "types-openpyxl",
 ]
 
 [tool.setuptools.packages.find]
