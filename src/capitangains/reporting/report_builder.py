@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -141,48 +142,62 @@ class ReportBuilder:
                 )
 
     def _convert_syep_interest(self, fx: FxTable | None) -> None:
-        if not getattr(self, "syep_interest", None):
+        if not self.syep_interest:
             return
         for row in self.syep_interest:
-            self._convert_generic_row(row, "interest_paid", "interest_paid_eur", fx)
+            row.interest_paid_eur = self._convert_amount_to_eur(
+                row.currency, row.value_date, row.interest_paid, fx
+            )
 
     def _convert_withholding(self, fx: FxTable | None) -> None:
-        if not getattr(self, "withholding", None):
+        if not self.withholding:
             return
         for row in self.withholding:
-            self._convert_generic_row(row, "amount", "amount_eur", fx)
+            row.amount_eur = self._convert_amount_to_eur(
+                row.currency, row.date, row.amount, fx
+            )
 
     def _convert_dividends(self, fx: FxTable | None) -> None:
-        if not getattr(self, "dividends", None):
+        if not self.dividends:
             return
         for row in self.dividends:
-            self._convert_generic_row(row, "amount", "amount_eur", fx)
+            row.amount_eur = self._convert_amount_to_eur(
+                row.currency, row.date, row.amount, fx
+            )
 
     def _convert_interest(self, fx: FxTable | None) -> None:
-        if not getattr(self, "interest", None):
+        if not self.interest:
             return
         for row in self.interest:
-            self._convert_generic_row(row, "amount", "amount_eur", fx)
+            row.amount_eur = self._convert_amount_to_eur(
+                row.currency, row.date, row.amount, fx
+            )
 
-    def _convert_generic_row(
-        self, row: Any, attr_src: str, attr_dst: str, fx: FxTable | None
-    ) -> None:
-        cur = row.currency.upper()
-        amt = getattr(row, attr_src)
-        # FIXME: some rows use 'date', others 'value_date'
-        d = getattr(row, "date", getattr(row, "value_date", None))
+    def _convert_amount_to_eur(
+        self,
+        currency: str,
+        date: dt.date | None,
+        amount: Decimal,
+        fx: FxTable | None,
+    ) -> Decimal | None:
+        """Convert a single amount to EUR using FX rates.
+
+        Returns the EUR amount, or None if conversion is not possible (missing FX data).
+        """
+        cur = currency.upper()
 
         if cur == "EUR":
-            setattr(row, attr_dst, amt.quantize(Decimal("0.01")))
-            return
+            return amount.quantize(Decimal("0.01"))
 
-        if fx is None or d is None:
-            return
-        rate = fx.get_rate(d, cur)
+        if fx is None or date is None:
+            return None
+
+        rate = fx.get_rate(date, cur)
         if rate is None:
             self.fx_missing = True
-            return
-        setattr(row, attr_dst, (amt * rate).quantize(Decimal("0.01")))
+            return None
+
+        return (amount * rate).quantize(Decimal("0.01"))
 
     def _recompute_aggregates(self) -> None:
         # Recompute EUR aggregates per symbol after conversions
