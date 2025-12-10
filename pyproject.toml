@@ -45,6 +45,9 @@ lint.extend-select = [
 ]
 fix = true  # Auto-fix applicable lint issues
 
+[tool.ruff.lint.mccabe]
+max-complexity = 18
+
 [tool.isort]
 known_first_party = ["capitangains"]
 
