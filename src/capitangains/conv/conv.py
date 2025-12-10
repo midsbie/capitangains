@@ -11,31 +11,74 @@ NUM_CLEAN_RE = re.compile(r"[,\s]")  # remove thousands separators, spaces
 logger = logging.getLogger(__name__)
 
 
-def to_dec(s: str | float | int | Decimal | None) -> Decimal:
-    """Convert IBKR numeric strings to Decimal safely.
-    Accepts "1,234.56", "-101.93155704", "", None -> Decimal(0) if empty.
+def to_dec(
+    s: str | float | int | Decimal | None, default: Decimal = Decimal("0")
+) -> Decimal:
+    """Convert IBKR numeric strings to Decimal safely, coercing placeholders to default.
+
+    Handles:
+    - None, "" -> default
+    - "-", "--" -> default (common IBKR nulls)
+    - "...", "N/A" -> default (with warning for elided data)
+    - "1,234.56" -> Decimal("1234.56")
     """
     if s is None:
-        return Decimal("0")
+        return default
     if isinstance(s, Decimal):
         return s
     if isinstance(s, (int, float)):
         return Decimal(str(s))
-    s = s.strip()
-    if not s:
-        return Decimal("0")
-    # Some IBKR CSVs can contain "..." in sanitized exports. Treat as zero but warn.
-    if "..." in s:
+
+    s_stripped = s.strip()
+    if not s_stripped:
+        return default
+
+    # Silent placeholders
+    if s_stripped in {"-", "--"}:
+        return default
+
+    # Warn on elided/missing data
+    if s_stripped in {"...", "N/A", "n/a"}:
         logger.warning(
-            'Encountered elided numeric value "%s"; treating as 0 for safety.', s
+            'Encountered elided/unavailable value "%s"; treating as %s.',
+            s_stripped,
+            default,
         )
-        return Decimal("0")
+        return default
+
     try:
-        s_clean = NUM_CLEAN_RE.sub("", s)
+        s_clean = NUM_CLEAN_RE.sub("", s_stripped)
         return Decimal(s_clean)
     except InvalidOperation:
-        logger.exception(f"Failed to parse number from: {s!r}")
-        return Decimal("0")
+        # Log error but don't crash; return default
+        logger.error("Failed to parse number from: %r; using %s", s, default)
+        return default
+
+
+def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
+    """Convert IBKR numeric strings to Decimal, raising ValueError on invalid/missing data.
+
+    Use this for critical fields (Quantity, Proceeds) where 0 is not a safe default.
+    """
+    if s is None:
+        raise ValueError("Value is None")
+    if isinstance(s, Decimal):
+        return s
+    if isinstance(s, (int, float)):
+        return Decimal(str(s))
+
+    s_stripped = s.strip()
+    if not s_stripped:
+        raise ValueError("Value is empty string")
+
+    if s_stripped in {"-", "--", "...", "N/A", "n/a"}:
+        raise ValueError(f"Value is a placeholder: {s_stripped!r}")
+
+    try:
+        s_clean = NUM_CLEAN_RE.sub("", s_stripped)
+        return Decimal(s_clean)
+    except InvalidOperation as e:
+        raise ValueError(f"Invalid decimal format: {s!r}") from e
 
 
 def parse_date(d: str) -> dt.date:

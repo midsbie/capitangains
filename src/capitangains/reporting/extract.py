@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 import re
 
-from capitangains.conv import parse_date, to_dec
+from capitangains.conv import parse_date, to_dec, to_dec_strict
 from capitangains.model import IbkrModel
 
 
