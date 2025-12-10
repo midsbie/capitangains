@@ -127,18 +127,14 @@ def process_files(args):
     rb = ReportBuilder(year=args.year)
     for rl in realized:
         rb.add_realized(rl)
-    rb.set_dividends([d for d in dividends if d["date"].year == args.year])
-    rb.set_withholding([w for w in withholding if w["date"].year == args.year])
+    rb.set_dividends([d for d in dividends if d.date.year == args.year])
+    rb.set_withholding([w for w in withholding if w.date.year == args.year])
 
     # Keep only rows with a value date in the selected year (drop CSV 'Total' lines)
     rb.set_syep_interest(
-        [
-            r
-            for r in syep_interest
-            if r.get("value_date") and r["value_date"].year == args.year
-        ]
+        [r for r in syep_interest if r.value_date and r.value_date.year == args.year]
     )
-    rb.set_interest([i for i in interest if i["date"].year == args.year])
+    rb.set_interest([i for i in interest if i.date.year == args.year])
     rb.set_transfers(transfers)  # Include all transfers, not filtered by year
 
     # FX conversion if provided
