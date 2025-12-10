@@ -53,6 +53,7 @@ from capitangains.reporting import (
     parse_syep_interest_details,
     parse_interest,
     parse_trades_stocklike,
+    parse_transfers,
     parse_withholding_tax,
     reconcile_with_ibkr_summary,
 )
@@ -85,6 +86,7 @@ def process_files(args):
 
     # Extract data
     trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
+    transfers = parse_transfers(model)
     dividends = parse_dividends(model)
     withholding = parse_withholding_tax(model)
     syep_interest = parse_syep_interest_details(model)
@@ -92,6 +94,15 @@ def process_files(args):
 
     # Build FIFO realized
     matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)
+
+    # Process transfers first to establish initial positions
+    if transfers:
+        logger.info("Processing %d transfers...", len(transfers))
+        # Ensure transfers are sorted by date
+        transfers.sort(key=lambda t: t.date)
+        for t in transfers:
+            matcher.ingest_transfer(t)
+
     realized = []
     for tr in trades:
         rl = matcher.ingest(tr)
@@ -131,6 +142,7 @@ def process_files(args):
         ]
     )
     rb.set_interest([i for i in interest if i["date"].year == args.year])
+    rb.set_transfers(transfers)  # Include all transfers, not filtered by year
 
     # FX conversion if provided
     fx: FxTable | None = None

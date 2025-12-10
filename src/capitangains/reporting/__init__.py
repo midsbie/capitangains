@@ -5,6 +5,7 @@ from .extract import (
     parse_withholding_tax,
     parse_syep_interest_details,
     parse_interest,
+    parse_transfers,
 )
 from .fifo import FifoMatcher, RealizedLine, Lot
 from .fx import FxTable
@@ -19,6 +20,7 @@ __all__ = [
     "parse_withholding_tax",
     "parse_syep_interest_details",
     "parse_interest",
+    "parse_transfers",
     "FifoMatcher",
     "RealizedLine",
     "Lot",

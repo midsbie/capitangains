@@ -27,6 +27,7 @@ class ReportBuilder:
         self.withholding: list[dict[str, Any]] = []
         self.syep_interest: list[dict[str, Any]] = []
         self.interest: list[dict[str, Any]] = []
+        self.transfers: list[Any] = []  # TransferRow objects
 
         # flags
         self.fx_needed: bool = False
@@ -59,6 +60,8 @@ class ReportBuilder:
     def set_interest(self, rows: list[dict[str, Any]]):
         self.interest = rows
 
+    def set_transfers(self, transfers: list[Any]):
+        self.transfers = transfers
 
     def convert_eur(self, fx: FxTable | None):
         """Convert realized lines to EUR using per-date FX if available.

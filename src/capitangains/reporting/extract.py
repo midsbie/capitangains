@@ -314,3 +314,107 @@ def parse_interest(model: IbkrModel) -> list[dict[str, Any]]:
                 }
             )
     return out
+
+
+def parse_transfers(model: IbkrModel) -> list[TransferRow]:
+    """Extract stock transfers from IBKR 'Transfers' section.
+
+    Assumptions / invariants:
+    - Only stock-like asset categories are considered (ASSET_STOCK_LIKE).
+    - Direction must be 'In' or 'Out' (case-insensitive); other values are rejected.
+    - Quantity must be strictly positive; zero/negative quantities are treated as errors.
+    - For 'In' transfers, Market Value / Cost Basis must be present and parseable; missing
+      or placeholder basis is treated as an error.
+    - Transfers are applied as pre-period position seeding before processing trades.
+    - Until Open Positions support is implemented, Market Value at transfer date is used
+      as a proxy for cost basis, which may differ from IBKR's internal basis.
+    """
+    out: list[TransferRow] = []
+
+    # "Transfers" section contains fields like:
+    # Asset Category, Currency, Symbol, Date, Type, Direction, Qty, Cost Price, Cost Basis, Close Price, Market Value, Cash Amount, Code
+    # The field names can vary. Key fields we need: Symbol, Date, Direction, Qty, Market Value (or Cost Basis?)
+
+    # Based on user CSV:
+    # Asset Category,Currency,Symbol,Date,Type,Direction,Xfer Company,Xfer Account,Qty,Xfer Price,Market Value,Realized P/L,Cash Amount,Code
+    # Transfers,Data,Stocks,GBP,AZN,2021-10-15,Internal,In,--,U4842277,10,--,881.40,0.00,0.00,
+
+    for sub in model.get_subtables("Transfers"):
+        header = [h.strip() for h in sub.header]
+        rows = sub.rows
+
+        # We only care about stock-like transfers
+        for r in rows:
+            asset_cat = r.get("Asset Category", "").strip()
+            if asset_cat not in ASSET_STOCK_LIKE:
+                continue
+
+            symbol = r.get("Symbol", "").strip()
+            date_s = r.get("Date", "").strip()
+            direction = r.get("Direction", "").strip()  # "In" or "Out"
+            qty_s = r.get("Qty", "").strip()
+            if not qty_s and "Quantity" in r:
+                qty_s = r.get("Quantity", "").strip()
+
+            # For incoming transfers, we need the initial cost basis.
+            # Usually "Market Value" at transfer time is used if no other basis is provided,
+            # BUT legally, for internal transfers, the original cost basis should persist.
+            # IBKR CSV might show "Cost Basis" or "Market Value".
+            # The sample CSV shows "Market Value" populated, but "Xfer Price" is "--".
+            # It seems we must use Market Value as the best proxy for basis if it's an internal transfer
+            # where the user didn't provide cost basis data to IBKR.
+            # Or perhaps there is a "Cost Basis" column in other variants.
+
+            # Let's try to find a value field
+            val_s = r.get("Market Value", "").strip()
+            if not val_s and "Cost Basis" in r:
+                val_s = r.get("Cost Basis", "").strip()
+
+            code = r.get("Code", "").strip()
+            currency = r.get("Currency", "").strip()
+
+            if not (symbol and date_s and direction and qty_s):
+                raise ValueError(f"Invalid transfer row (missing fields): {r}")
+
+            direction_norm = direction.strip().lower()
+            if direction_norm not in {"in", "out"}:
+                raise ValueError(
+                    f"Unsupported transfer direction {direction!r} for row: {r}"
+                )
+
+            quantity = to_dec_strict(qty_s)
+            if quantity <= 0:
+                raise ValueError(
+                    f"Transfer quantity must be positive for {symbol!r} on {date_s!r}: "
+                    f"{quantity}"
+                )
+
+            # For incoming transfers, a valid basis is mandatory; treat missing/placeholder
+            # Market Value / Cost Basis as a hard error.
+            if direction_norm == "in":
+                if not val_s:
+                    raise ValueError(
+                        f"Transfer IN for {symbol!r} on {date_s!r} is missing "
+                        "Market Value/Cost Basis."
+                    )
+                market_value = to_dec_strict(val_s)
+            else:
+                # For OUT (or other) transfers, the market value is not used in FIFO matching.
+                market_value = to_dec(val_s) if val_s else Decimal("0")
+
+            t = TransferRow(
+                section="Transfers",
+                asset_category=asset_cat,
+                currency=currency,
+                symbol=symbol,
+                date=parse_date(date_s),
+                direction=direction,
+                quantity=quantity,
+                market_value=market_value,
+                code=code,
+            )
+            out.append(t)
+
+    # Sort by date
+    out.sort(key=lambda x: x.date)
+    return out

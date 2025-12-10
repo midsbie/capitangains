@@ -34,6 +34,7 @@ class ExcelReportSink:
                     "dividends": "Dividends",
                     "interest": "Account Interest",
                     "withholding": "Withholding Tax",
+                    "transfers": "Stock Transfers",
                     "anexo_g": "Lot-Level EUR Breakdown",
                     "syep_interest": "SYEP Interest",
                 },
@@ -71,6 +72,7 @@ class ExcelReportSink:
                     "alloc_eur": "Acquisition Value (EUR)",
                     "proceeds_eur": "Disposal Value (EUR)",
                     "pl_eur": "Realized P/L (EUR)",
+                    "transferred": "Transferred",
                 },
                 "per_symbol": {
                     "ticker": "Ticker",
@@ -118,6 +120,15 @@ class ExcelReportSink:
                     "interest_paid_eur": "Interest Paid (EUR)",
                     "code": "Code",
                 },
+                "transfers": {
+                    "date": "Date",
+                    "symbol": "Symbol",
+                    "direction": "Direction",
+                    "quantity": "Quantity",
+                    "currency": "Currency",
+                    "market_value": "Market Value",
+                    "code": "Code",
+                },
             }
         # Default: Portuguese (Portugal)
         return {
@@ -128,6 +139,7 @@ class ExcelReportSink:
                 "dividends": "Dividendos",
                 "interest": "Juros da Conta",
                 "withholding": "Retenção na Fonte",
+                "transfers": "Transferências de Ações",
                 "anexo_g": "Operações por Lote (Anexo G)",
                 "syep_interest": "Juros SYEP",
             },
@@ -165,6 +177,7 @@ class ExcelReportSink:
                 "alloc_eur": "Valor de Aquisição (EUR)",
                 "proceeds_eur": "Valor de Realização (EUR)",
                 "pl_eur": "Mais/menos‑valia (EUR)",
+                "transferred": "Transferido",
             },
             "per_symbol": {
                 "ticker": "Símbolo",
@@ -210,6 +223,15 @@ class ExcelReportSink:
                 "customer_rate": "Taxa ao Cliente (%)",
                 "interest_paid": "Juros Pagos (Moeda)",
                 "interest_paid_eur": "Juros Pagos (EUR)",
+                "code": "Código",
+            },
+            "transfers": {
+                "date": "Data",
+                "symbol": "Símbolo",
+                "direction": "Direção",
+                "quantity": "Quantidade",
+                "currency": "Moeda",
+                "market_value": "Valor de Mercado",
                 "code": "Código",
             },
         }
@@ -359,6 +381,7 @@ class ExcelReportSink:
                 labels["anexo_g"]["alloc_eur"],
                 labels["anexo_g"]["proceeds_eur"],
                 labels["anexo_g"]["pl_eur"],
+                labels["anexo_g"]["transferred"],
             ]
         )
         for rl in report.realized_lines:
@@ -368,6 +391,8 @@ class ExcelReportSink:
                 pl_eur = None
                 if alloc_eur is not None and proceeds_eur is not None:
                     pl_eur = (proceeds_eur - alloc_eur).quantize(Decimal("0.01"))
+                # Check if lot was from a transfer
+                is_transferred = leg.get("transferred", False)
                 ws.append(
                     [
                         rl.symbol,
@@ -378,6 +403,7 @@ class ExcelReportSink:
                         (None if alloc_eur is None else float(alloc_eur)),
                         (None if proceeds_eur is None else float(proceeds_eur)),
                         (None if pl_eur is None else float(pl_eur)),
+                        "Yes" if is_transferred else "",
                     ]
                 )
                 r = ws.max_row
@@ -623,6 +649,44 @@ class ExcelReportSink:
                     d["currency"]
                 )
                 ws.cell(row=r, column=7).number_format = money_fmt_for_currency("EUR")
+
+        # Transfers
+        if getattr(report, "transfers", None):
+            if report.transfers:
+                ws = wb.create_sheet(title=labels["sheet"]["transfers"])
+                ws.append(
+                    [
+                        labels["transfers"]["date"],
+                        labels["transfers"]["symbol"],
+                        labels["transfers"]["direction"],
+                        labels["transfers"]["quantity"],
+                        labels["transfers"]["currency"],
+                        labels["transfers"]["market_value"],
+                        labels["transfers"]["code"],
+                    ]
+                )
+                sorted_transfers = sorted(
+                    report.transfers,
+                    key=lambda t: (t.date, t.symbol),
+                )
+                for t in sorted_transfers:
+                    ws.append(
+                        [
+                            t.date,
+                            t.symbol,
+                            t.direction,
+                            float(t.quantity),
+                            t.currency,
+                            float(t.market_value),
+                            t.code,
+                        ]
+                    )
+                    r = ws.max_row
+                    ws.cell(row=r, column=1).number_format = date_fmt
+                    ws.cell(row=r, column=4).number_format = qty_fmt
+                    ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
+                        t.currency
+                    )
 
         def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
             header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []

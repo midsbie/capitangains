@@ -17,6 +17,7 @@ class SellMatchLeg(TypedDict, total=False):
     lot_qty_before: Decimal
     alloc_cost_ccy: Decimal
     synthetic: NotRequired[bool]
+    transferred: NotRequired[bool]
     alloc_cost_eur: NotRequired[Decimal]
     proceeds_share_eur: NotRequired[Decimal]
 
@@ -27,6 +28,7 @@ class Lot:
     qty: Decimal  # remaining quantity in lot
     basis_ccy: Decimal  # total basis in trade currency (incl. buy fees)
     currency: str
+    transferred: bool = False  # True if lot originated from a transfer
 
 
 @dataclass

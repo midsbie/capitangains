@@ -64,6 +64,62 @@ class FifoMatcher:
             raise ValueError("trade quantity cannot be zero")
         return None
 
+    def ingest_transfer(self, transfer: Any) -> None:
+        """Ingest a TransferRow (from extract.py) into the position book.
+
+        Assumes:
+        - transfer.direction is 'In' or 'Out' (case-insensitive).
+        - transfer.quantity is strictly positive.
+        - For 'In', transfer.market_value encodes the lot's cost basis in trade
+          currency (used as a proxy for original basis).
+
+        Transfers are expected to be processed before trades to seed pre-existing
+        positions from prior accounts.
+        """
+        if transfer.quantity <= 0:
+            raise ValueError("transfer quantity must be positive")
+
+        direction = transfer.direction.strip().lower()
+        if direction == "in":
+            # Treat as a buy
+            # NOTE: We use market_value as the cost basis. This is an approximation
+            # if the true original cost basis is not preserved in the CSV.
+            basis = transfer.market_value
+            lot = Lot(
+                buy_date=transfer.date,
+                qty=transfer.quantity,
+                basis_ccy=basis,
+                currency=transfer.currency,
+                transferred=True,
+            )
+            self.positions.append_buy(transfer.symbol, lot)
+        elif direction == "out":
+            # Out transfers: consume from FIFO position book
+            qty_to_remove = transfer.quantity
+            try:
+                legs, alloc_cost, qty_remaining = self.positions.consume_fifo(
+                    transfer.symbol, qty_to_remove
+                )
+                if qty_remaining > 0:
+                    logger.warning(
+                        "Transfer OUT of %s shares of %s on %s, but only %s shares available. "
+                        "Position book may be incomplete.",
+                        qty_to_remove,
+                        transfer.symbol,
+                        transfer.date,
+                        qty_to_remove - qty_remaining,
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to process Transfer OUT of %s shares of %s on %s. "
+                    "Position tracking may be inaccurate.",
+                    transfer.quantity,
+                    transfer.symbol,
+                    transfer.date,
+                )
+        else:
+            raise ValueError(f"Unknown transfer direction: {transfer.direction!r}")
+
     def _ingest_buy(self, trade: Any) -> None:
         if trade.quantity <= 0:
             raise ValueError("buy trades must have positive quantity")
