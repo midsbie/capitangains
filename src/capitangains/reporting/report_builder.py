@@ -65,128 +65,129 @@ class ReportBuilder:
 
     def convert_eur(self, fx: FxTable | None):
         """Convert realized lines to EUR using per-date FX if available.
+
         PT practice: acquisition values -> EUR at buy date; sale values -> EUR at sale
         date.
         """
         if fx is None:
-            # Mark if any non-EUR currency is present. We will still fill EUR-native trades.
+            # Mark if any non-EUR currency is present.  Note that we will still fill
+            # EUR-native trades.
             self.fx_missing = any(rl.currency != "EUR" for rl in self.realized_lines)
 
+        self._convert_realized_lines(fx)
+        self._convert_syep_interest(fx)
+        self._convert_withholding(fx)
+        self._convert_dividends(fx)
+        self._convert_interest(fx)
+        self._recompute_aggregates()
+
+    def _convert_realized_lines(self, fx: FxTable | None) -> None:
         for rl in self.realized_lines:
             if rl.currency == "EUR":
-                rl.sell_gross_eur = rl.sell_gross_ccy
-                rl.sell_comm_eur = rl.sell_comm_ccy
-                rl.sell_net_eur = rl.sell_net_ccy
-                alloc_eur = Decimal("0")
-                # per-leg EUR breakdown (identity conversion)
-                for leg in rl.legs:
-                    leg.alloc_cost_eur = leg.alloc_cost_ccy
-                    alloc_eur += leg.alloc_cost_eur
-                rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
-                rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
+                self._convert_realized_line_eur(rl)
+            elif fx is not None:
+                self._convert_realized_line_fx(rl, fx)
+
+    def _convert_realized_line_eur(self, rl: RealizedLine) -> None:
+        rl.sell_gross_eur = rl.sell_gross_ccy
+        rl.sell_comm_eur = rl.sell_comm_ccy
+        rl.sell_net_eur = rl.sell_net_ccy
+        alloc_eur = Decimal("0")
+        # per-leg EUR breakdown (identity conversion)
+        for leg in rl.legs:
+            leg.alloc_cost_eur = leg.alloc_cost_ccy
+            alloc_eur += leg.alloc_cost_eur
+        rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
+        rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
+            Decimal("0.01")
+        )
+        # allocate sale net EUR across legs by quantity share (helps Annex G)
+        if rl.sell_qty != 0:
+            for leg in rl.legs:
+                share = leg.qty / rl.sell_qty
+                leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
                     Decimal("0.01")
                 )
-                # allocate sale net EUR across legs by quantity share (helps Annex G)
-                if rl.sell_qty != 0:
-                    for leg in rl.legs:
-                        share = leg.qty / rl.sell_qty
-                        leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
-                            Decimal("0.01")
-                        )
-                continue
 
-            # Non-EUR needs FX
-            if fx is None:
-                # Cannot convert without FX
-                continue
+    def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable) -> None:
+        sell_rate = fx.get_rate(rl.sell_date, rl.currency)
+        if sell_rate is None:
+            self.fx_missing = True
+            return
 
-            sell_rate = fx.get_rate(rl.sell_date, rl.currency)
-            if sell_rate is None:
-                self.fx_missing = True
-                continue
+        rl.sell_gross_eur = (rl.sell_gross_ccy * sell_rate).quantize(Decimal("0.01"))
+        rl.sell_comm_eur = (rl.sell_comm_ccy * sell_rate).quantize(Decimal("0.01"))
+        rl.sell_net_eur = (rl.sell_net_ccy * sell_rate).quantize(Decimal("0.01"))
 
-            rl.sell_gross_eur = (rl.sell_gross_ccy * sell_rate).quantize(
-                Decimal("0.01")
-            )
-            rl.sell_comm_eur = (rl.sell_comm_ccy * sell_rate).quantize(Decimal("0.01"))
-            rl.sell_net_eur = (rl.sell_net_ccy * sell_rate).quantize(Decimal("0.01"))
-
-            alloc_eur = Decimal("0")
+        alloc_eur = Decimal("0")
+        for leg in rl.legs:
+            bd = leg.buy_date
+            rate = sell_rate  # fallback
+            if bd is not None:
+                rate = fx.get_rate(bd, rl.currency) or sell_rate
+            leg_eur = (leg.alloc_cost_ccy * rate).quantize(Decimal("0.01"))
+            leg.alloc_cost_eur = leg_eur
+            alloc_eur += leg_eur
+        rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
+        rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
+            Decimal("0.01")
+        )
+        # allocate sale net EUR across legs by quantity share
+        if rl.sell_qty != 0 and rl.sell_net_eur is not None:
             for leg in rl.legs:
-                bd = leg.buy_date
-                if bd is None:
-                    rate = sell_rate  # fallback
-                else:
-                    rate = fx.get_rate(bd, rl.currency) or sell_rate
-                leg_eur = (leg.alloc_cost_ccy * rate).quantize(Decimal("0.01"))
-                leg.alloc_cost_eur = leg_eur
-                alloc_eur += leg_eur
-            rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
-            rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
-                Decimal("0.01")
-            )
-            # allocate sale net EUR across legs by quantity share
-            if rl.sell_qty != 0 and rl.sell_net_eur is not None:
-                for leg in rl.legs:
-                    share = leg.qty / rl.sell_qty
-                    leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
-                        Decimal("0.01")
-                    )
+                share = leg.qty / rl.sell_qty
+                leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
+                    Decimal("0.01")
+                )
 
-        # Convert SYEP interest to EUR, if available
-        if getattr(self, "syep_interest", None):
-            for row in self.syep_interest:
-                cur = row.currency.upper()
-                amt = row.interest_paid
-                d = row.value_date
-                if cur == "EUR":
-                    row.interest_paid_eur = amt.quantize(Decimal("0.01"))
-                    continue
-                if fx is None or d is None:
-                    continue
-                rate = fx.get_rate(d, cur)
-                if rate is None:
-                    self.fx_missing = True
-                    continue
-                row.interest_paid_eur = (amt * rate).quantize(Decimal("0.01"))
+    def _convert_syep_interest(self, fx: FxTable | None) -> None:
+        if not getattr(self, "syep_interest", None):
+            return
+        for row in self.syep_interest:
+            self._convert_generic_row(row, "interest_paid", "interest_paid_eur", fx)
 
-        # Convert Withholding Tax amounts to EUR, if possible
-        if getattr(self, "withholding", None):
-            for row in self.withholding:
-                cur = row.currency.upper()
-                amt = row.amount
-                d = row.date
-                if cur == "EUR":
-                    row.amount_eur = amt.quantize(Decimal("0.01"))
-                    continue
-                if fx is None or d is None:
-                    continue
-                rate = fx.get_rate(d, cur)
-                if rate is None:
-                    self.fx_missing = True
-                    continue
-                row.amount_eur = (amt * rate).quantize(Decimal("0.01"))
+    def _convert_withholding(self, fx: FxTable | None) -> None:
+        if not getattr(self, "withholding", None):
+            return
+        for row in self.withholding:
+            self._convert_generic_row(row, "amount", "amount_eur", fx)
 
-        # Convert Dividends amounts to EUR, if possible
-        if getattr(self, "dividends", None):
-            for row in self.dividends:
-                cur = row.currency.upper()
-                amt = row.amount
-                d = row.date
-                if cur == "EUR":
-                    row.amount_eur = amt.quantize(Decimal("0.01"))
-                    continue
-                if fx is None or d is None:
-                    continue
-                rate = fx.get_rate(d, cur)
-                if rate is None:
-                    self.fx_missing = True
-                    continue
-                row.amount_eur = (amt * rate).quantize(Decimal("0.01"))
+    def _convert_dividends(self, fx: FxTable | None) -> None:
+        if not getattr(self, "dividends", None):
+            return
+        for row in self.dividends:
+            self._convert_generic_row(row, "amount", "amount_eur", fx)
 
+    def _convert_interest(self, fx: FxTable | None) -> None:
+        if not getattr(self, "interest", None):
+            return
+        for row in self.interest:
+            self._convert_generic_row(row, "amount", "amount_eur", fx)
+
+    def _convert_generic_row(
+        self, row: Any, attr_src: str, attr_dst: str, fx: FxTable | None
+    ) -> None:
+        cur = row.currency.upper()
+        amt = getattr(row, attr_src)
+        # FIXME: some rows use 'date', others 'value_date'
+        d = getattr(row, "date", getattr(row, "value_date", None))
+
+        if cur == "EUR":
+            setattr(row, attr_dst, amt.quantize(Decimal("0.01")))
+            return
+
+        if fx is None or d is None:
+            return
+        rate = fx.get_rate(d, cur)
+        if rate is None:
+            self.fx_missing = True
+            return
+        setattr(row, attr_dst, (amt * rate).quantize(Decimal("0.01")))
+
+    def _recompute_aggregates(self) -> None:
         # Recompute EUR aggregates per symbol after conversions
         # Clear prior EUR aggregates (they would have been zero before conversion)
-        for _sym, totals in self.symbol_totals.items():
+        for totals in self.symbol_totals.values():
             if "realized_eur" in totals:
                 totals["realized_eur"] = Decimal("0")
             if "proceeds_eur" in totals:
@@ -202,20 +203,3 @@ class ReportBuilder:
                 t["proceeds_eur"] += rl.sell_net_eur
             if rl.alloc_cost_eur is not None:
                 t["alloc_eur"] += rl.alloc_cost_eur
-
-        # Convert Interest amounts to EUR, if possible
-        if getattr(self, "interest", None):
-            for row in self.interest:
-                cur = row.currency.upper()
-                amt = row.amount
-                d = row.date
-                if cur == "EUR":
-                    row.amount_eur = amt.quantize(Decimal("0.01"))
-                    continue
-                if fx is None or d is None:
-                    continue
-                rate = fx.get_rate(d, cur)
-                if rate is None:
-                    self.fx_missing = True
-                    continue
-                row.amount_eur = (amt * rate).quantize(Decimal("0.01"))

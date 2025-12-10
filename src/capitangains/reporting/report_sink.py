@@ -246,6 +246,24 @@ class ExcelReportSink:
 
         labels = self._labels()
 
+        self._write_summary(wb, report, labels)
+        self._write_realized(wb, report, labels)
+        self._write_anexo_g(wb, report, labels)
+        self._write_per_symbol(wb, report, labels)
+        self._write_dividends(wb, report, labels)
+        self._write_interest(wb, report, labels)
+        self._write_syep_interest(wb, report, labels)
+        self._write_withholding(wb, report, labels)
+        self._write_transfers(wb, report, labels)
+
+        for _ws in wb.worksheets:
+            self._autosize(_ws)
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(out_path)
+        return out_path
+
+    def _write_summary(self, wb, report, labels):
         # Summary sheet (totals)
         ws = wb.create_sheet(title=labels["sheet"]["summary"])
         total_eur = sum(
@@ -270,36 +288,27 @@ class ExcelReportSink:
                 totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
             )
         ws.append([labels["summary"]["metric"], labels["summary"]["amount"]])
-        # Number formats
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
-        qty_fmt = "0.########"
-
-        def money_fmt_for_currency(ccy: str) -> str:
-            loc = self.locale.upper()
-            cur = (ccy or "").upper()
-            symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
-            sym = symbols.get(cur)
-            if sym:
-                if cur == "EUR" and loc == "PT":
-                    return f'#,##0.00 "{sym}"'
-                return f"{sym}#,##0.00"
-            if loc == "PT":
-                return f'#,##0.00 "{cur}"'
-            return f'"{cur}" #,##0.00'
 
         # Primary EUR totals
         ws.append([labels["summary"]["total_eur"], float(total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency("EUR")
+        ws.cell(row=ws.max_row, column=2).number_format = self._money_fmt_for_currency(
+            "EUR"
+        )
         ws.append([labels["summary"]["proceeds_eur"], float(proceeds_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency("EUR")
+        ws.cell(row=ws.max_row, column=2).number_format = self._money_fmt_for_currency(
+            "EUR"
+        )
         ws.append([labels["summary"]["alloc_eur"], float(alloc_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency("EUR")
+        ws.cell(row=ws.max_row, column=2).number_format = self._money_fmt_for_currency(
+            "EUR"
+        )
         for cur, amt in sorted(totals_by_cur.items()):
             ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)])
-            ws.cell(row=ws.max_row, column=2).number_format = money_fmt_for_currency(
-                cur
-            )
+            ws.cell(
+                row=ws.max_row, column=2
+            ).number_format = self._money_fmt_for_currency(cur)
 
+    def _write_realized(self, wb, report, labels):
         # Realized trades sheet
         ws = wb.create_sheet(title=labels["sheet"]["realized"])
         ws.append(
@@ -321,6 +330,9 @@ class ExcelReportSink:
                 labels["realized"]["legs_json"],
             ]
         )
+
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        qty_fmt = "0.########"
 
         for rl in report.realized_lines:
             alloc_cost_ccy = sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
@@ -357,14 +369,15 @@ class ExcelReportSink:
             ws.cell(row=r, column=3).number_format = date_fmt
             ws.cell(row=r, column=4).number_format = qty_fmt
             # Trade currency money columns 5..9
-            tcy_fmt = money_fmt_for_currency(rl.currency)
+            tcy_fmt = self._money_fmt_for_currency(rl.currency)
             for c in range(5, 10):
                 ws.cell(row=r, column=c).number_format = tcy_fmt
             # EUR money columns 10..14
-            eur_fmt = money_fmt_for_currency("EUR")
+            eur_fmt = self._money_fmt_for_currency("EUR")
             for c in range(10, 15):
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
+    def _write_anexo_g(self, wb, report, labels):
         # Annex G helper (per-leg breakdown with EUR values)
         ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])
         ws.append(
@@ -380,6 +393,10 @@ class ExcelReportSink:
                 labels["anexo_g"]["transferred"],
             ]
         )
+
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        qty_fmt = "0.########"
+
         for rl in report.realized_lines:
             for leg in rl.legs:
                 alloc_eur = leg.alloc_cost_eur
@@ -407,10 +424,11 @@ class ExcelReportSink:
                 ws.cell(row=r, column=4).number_format = date_fmt
                 ws.cell(row=r, column=5).number_format = qty_fmt
                 for c in (6, 7, 8):
-                    ws.cell(row=r, column=c).number_format = money_fmt_for_currency(
-                        "EUR"
-                    )
+                    ws.cell(
+                        row=r, column=c
+                    ).number_format = self._money_fmt_for_currency("EUR")
 
+    def _write_per_symbol(self, wb, report, labels):
         # Per-symbol summary (trade currency + EUR)
         ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
         ws.append(
@@ -438,7 +456,7 @@ class ExcelReportSink:
             if not scores:
                 # fallback: best-effort detect from available totals keys
                 totals = report.symbol_totals.get(symbol, {})
-                for k in totals.keys():
+                for k in totals:
                     if k.startswith("realized_ccy:"):
                         return k.split(":", 1)[1]
                 return "EUR"
@@ -463,249 +481,265 @@ class ExcelReportSink:
 
             r = ws.max_row
             # Money formats for trade currency values
-            tcy_fmt = money_fmt_for_currency(ccy)
+            tcy_fmt = self._money_fmt_for_currency(ccy)
             for c in (3, 4, 5):
                 ws.cell(row=r, column=c).number_format = tcy_fmt
             for c in (6, 7, 8):
-                ws.cell(row=r, column=c).number_format = money_fmt_for_currency("EUR")
+                ws.cell(row=r, column=c).number_format = self._money_fmt_for_currency(
+                    "EUR"
+                )
 
-        # Dividends
-        if report.dividends:
-            ws = wb.create_sheet(title=labels["sheet"]["dividends"])
+    def _write_dividends(self, wb, report, labels):
+        if not report.dividends:
+            return
+        ws = wb.create_sheet(title=labels["sheet"]["dividends"])
+        ws.append(
+            [
+                labels["dividends"]["date"],
+                labels["dividends"]["currency"],
+                labels["dividends"]["desc"],
+                labels["dividends"]["amount"],
+                labels["dividends"]["amount_eur"],
+            ]
+        )
+        sorted_divs = sorted(report.dividends, key=lambda row: row.description.lower())
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+
+        for d in sorted_divs:
             ws.append(
                 [
-                    labels["dividends"]["date"],
-                    labels["dividends"]["currency"],
-                    labels["dividends"]["desc"],
-                    labels["dividends"]["amount"],
-                    labels["dividends"]["amount_eur"],
+                    d.date,
+                    d.currency,
+                    d.description,
+                    float(d.amount),
+                    (None if d.amount_eur is None else float(d.amount_eur)),
                 ]
             )
-            sorted_divs = sorted(
-                report.dividends, key=lambda row: row.description.lower()
+            r = ws.max_row
+            ws.cell(row=r, column=1).number_format = date_fmt
+            ws.cell(row=r, column=4).number_format = self._money_fmt_for_currency(
+                d.currency
             )
-            for d in sorted_divs:
-                ws.append(
-                    [
-                        d.date,
-                        d.currency,
-                        d.description,
-                        float(d.amount),
-                        (None if d.amount_eur is None else float(d.amount_eur)),
-                    ]
-                )
-                r = ws.max_row
-                ws.cell(row=r, column=1).number_format = date_fmt
-                ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
-                    d.currency
-                )
-                ws.cell(row=r, column=5).number_format = money_fmt_for_currency("EUR")
+            ws.cell(row=r, column=5).number_format = self._money_fmt_for_currency("EUR")
 
-        # Interest
-        if getattr(report, "interest", None):
-            if report.interest:
-                ws = wb.create_sheet(title=labels["sheet"]["interest"])
-                ws.append(
-                    [
-                        labels["interest"]["date"],
-                        labels["interest"]["currency"],
-                        labels["interest"]["desc"],
-                        labels["interest"]["amount"],
-                        labels["interest"]["amount_eur"],
-                    ]
-                )
-                sorted_interest = sorted(
-                    report.interest,
-                    key=lambda row: row.description.lower(),
-                )
-                for d in sorted_interest:
-                    ws.append(
-                        [
-                            d.date,
-                            d.currency,
-                            d.description,
-                            float(d.amount),
-                            (None if d.amount_eur is None else float(d.amount_eur)),
-                        ]
-                    )
-                    r = ws.max_row
-                    ws.cell(row=r, column=1).number_format = date_fmt
-                    ws.cell(row=r, column=4).number_format = money_fmt_for_currency(
-                        d.currency
-                    )
-                    ws.cell(row=r, column=5).number_format = money_fmt_for_currency(
-                        "EUR"
-                    )
+    def _write_interest(self, wb, report, labels):
+        if not (getattr(report, "interest", None) and report.interest):
+            return
+        ws = wb.create_sheet(title=labels["sheet"]["interest"])
+        ws.append(
+            [
+                labels["interest"]["date"],
+                labels["interest"]["currency"],
+                labels["interest"]["desc"],
+                labels["interest"]["amount"],
+                labels["interest"]["amount_eur"],
+            ]
+        )
+        sorted_interest = sorted(
+            report.interest,
+            key=lambda row: row.description.lower(),
+        )
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
 
-        # SYEP Interest Details
-        if getattr(report, "syep_interest", None):
-            if report.syep_interest:
-                ws = wb.create_sheet(title=labels["sheet"]["syep_interest"])
-                ws.append(
-                    [
-                        labels["syep"]["date"],
-                        labels["syep"]["currency"],
-                        labels["syep"]["symbol"],
-                        labels["syep"]["start_date"],
-                        labels["syep"]["quantity"],
-                        labels["syep"]["collateral"],
-                        labels["syep"]["market_rate"],
-                        labels["syep"]["customer_rate"],
-                        labels["syep"]["interest_paid"],
-                        labels["syep"]["interest_paid_eur"],
-                        labels["syep"]["code"],
-                    ]
-                )
-                pct_fmt = "0.00####"
-                for row in report.syep_interest:
-                    ws.append(
-                        [
-                            row.value_date,
-                            row.currency,
-                            row.symbol,
-                            row.start_date,
-                            float(row.quantity),
-                            float(row.collateral_amount),
-                            float(row.market_rate_pct),
-                            float(row.customer_rate_pct),
-                            float(row.interest_paid),
-                            (
-                                None
-                                if row.interest_paid_eur is None
-                                else float(row.interest_paid_eur)
-                            ),
-                            row.code,
-                        ]
-                    )
-                    r = ws.max_row
-                    ws.cell(row=r, column=1).number_format = date_fmt
-                    ws.cell(row=r, column=4).number_format = date_fmt
-                    ws.cell(row=r, column=5).number_format = qty_fmt
-                    ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
-                        row.currency
-                    )
-                    ws.cell(row=r, column=7).number_format = pct_fmt
-                    ws.cell(row=r, column=8).number_format = pct_fmt
-                    ws.cell(row=r, column=9).number_format = money_fmt_for_currency(
-                        row.currency
-                    )
-                    ws.cell(row=r, column=10).number_format = money_fmt_for_currency(
-                        "EUR"
-                    )
-
-        # Withholding Tax
-        if report.withholding:
-            ws = wb.create_sheet(title=labels["sheet"]["withholding"])
+        for d in sorted_interest:
             ws.append(
                 [
-                    labels["withholding"]["date"],
-                    labels["withholding"]["currency"],
-                    labels["withholding"]["desc"],
-                    labels["withholding"]["type"],
-                    labels["withholding"]["country"],
-                    labels["withholding"]["amount"],
-                    labels["withholding"]["amount_eur"],
+                    d.date,
+                    d.currency,
+                    d.description,
+                    float(d.amount),
+                    (None if d.amount_eur is None else float(d.amount_eur)),
                 ]
             )
-            sorted_withholding = sorted(
-                report.withholding,
-                key=lambda row: (
-                    row.currency.upper(),
-                    row.description.lower(),
-                ),
+            r = ws.max_row
+            ws.cell(row=r, column=1).number_format = date_fmt
+            ws.cell(row=r, column=4).number_format = self._money_fmt_for_currency(
+                d.currency
             )
-            for d in sorted_withholding:
-                ws.append(
-                    [
-                        d.date,
-                        d.currency,
-                        d.description,
-                        d.type,
-                        d.country,
-                        float(d.amount),
-                        (None if d.amount_eur is None else float(d.amount_eur)),
-                    ]
-                )
-                r = ws.max_row
-                ws.cell(row=r, column=1).number_format = date_fmt
-                ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
-                    d.currency
-                )
-                ws.cell(row=r, column=7).number_format = money_fmt_for_currency("EUR")
+            ws.cell(row=r, column=5).number_format = self._money_fmt_for_currency("EUR")
 
-        # Transfers
-        if getattr(report, "transfers", None):
-            if report.transfers:
-                ws = wb.create_sheet(title=labels["sheet"]["transfers"])
-                ws.append(
-                    [
-                        labels["transfers"]["date"],
-                        labels["transfers"]["symbol"],
-                        labels["transfers"]["direction"],
-                        labels["transfers"]["quantity"],
-                        labels["transfers"]["currency"],
-                        labels["transfers"]["market_value"],
-                        labels["transfers"]["code"],
-                    ]
-                )
-                sorted_transfers = sorted(
-                    report.transfers,
-                    key=lambda t: (t.date, t.symbol),
-                )
-                for t in sorted_transfers:
-                    ws.append(
-                        [
-                            t.date,
-                            t.symbol,
-                            t.direction,
-                            float(t.quantity),
-                            t.currency,
-                            float(t.market_value),
-                            t.code,
-                        ]
+    def _write_syep_interest(self, wb, report, labels):
+        if not (getattr(report, "syep_interest", None) and report.syep_interest):
+            return
+        ws = wb.create_sheet(title=labels["sheet"]["syep_interest"])
+        ws.append(
+            [
+                labels["syep"]["date"],
+                labels["syep"]["currency"],
+                labels["syep"]["symbol"],
+                labels["syep"]["start_date"],
+                labels["syep"]["quantity"],
+                labels["syep"]["collateral"],
+                labels["syep"]["market_rate"],
+                labels["syep"]["customer_rate"],
+                labels["syep"]["interest_paid"],
+                labels["syep"]["interest_paid_eur"],
+                labels["syep"]["code"],
+            ]
+        )
+        pct_fmt = "0.00####"
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        qty_fmt = "0.########"
+
+        for row in report.syep_interest:
+            ws.append(
+                [
+                    row.value_date,
+                    row.currency,
+                    row.symbol,
+                    row.start_date,
+                    float(row.quantity),
+                    float(row.collateral_amount),
+                    float(row.market_rate_pct),
+                    float(row.customer_rate_pct),
+                    float(row.interest_paid),
+                    (
+                        None
+                        if row.interest_paid_eur is None
+                        else float(row.interest_paid_eur)
+                    ),
+                    row.code,
+                ]
+            )
+            r = ws.max_row
+            ws.cell(row=r, column=1).number_format = date_fmt
+            ws.cell(row=r, column=4).number_format = date_fmt
+            ws.cell(row=r, column=5).number_format = qty_fmt
+            ws.cell(row=r, column=6).number_format = self._money_fmt_for_currency(
+                row.currency
+            )
+            ws.cell(row=r, column=7).number_format = pct_fmt
+            ws.cell(row=r, column=8).number_format = pct_fmt
+            ws.cell(row=r, column=9).number_format = self._money_fmt_for_currency(
+                row.currency
+            )
+            ws.cell(row=r, column=10).number_format = self._money_fmt_for_currency(
+                "EUR"
+            )
+
+    def _write_withholding(self, wb, report, labels):
+        if not report.withholding:
+            return
+        ws = wb.create_sheet(title=labels["sheet"]["withholding"])
+        ws.append(
+            [
+                labels["withholding"]["date"],
+                labels["withholding"]["currency"],
+                labels["withholding"]["desc"],
+                labels["withholding"]["type"],
+                labels["withholding"]["country"],
+                labels["withholding"]["amount"],
+                labels["withholding"]["amount_eur"],
+            ]
+        )
+        sorted_withholding = sorted(
+            report.withholding,
+            key=lambda row: (
+                row.currency.upper(),
+                row.description.lower(),
+            ),
+        )
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+
+        for d in sorted_withholding:
+            ws.append(
+                [
+                    d.date,
+                    d.currency,
+                    d.description,
+                    d.type,
+                    d.country,
+                    float(d.amount),
+                    (None if d.amount_eur is None else float(d.amount_eur)),
+                ]
+            )
+            r = ws.max_row
+            ws.cell(row=r, column=1).number_format = date_fmt
+            ws.cell(row=r, column=6).number_format = self._money_fmt_for_currency(
+                d.currency
+            )
+            ws.cell(row=r, column=7).number_format = self._money_fmt_for_currency("EUR")
+
+    def _write_transfers(self, wb, report, labels):
+        if not (getattr(report, "transfers", None) and report.transfers):
+            return
+        ws = wb.create_sheet(title=labels["sheet"]["transfers"])
+        ws.append(
+            [
+                labels["transfers"]["date"],
+                labels["transfers"]["symbol"],
+                labels["transfers"]["direction"],
+                labels["transfers"]["quantity"],
+                labels["transfers"]["currency"],
+                labels["transfers"]["market_value"],
+                labels["transfers"]["code"],
+            ]
+        )
+        sorted_transfers = sorted(
+            report.transfers,
+            key=lambda t: (t.date, t.symbol),
+        )
+        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        qty_fmt = "0.########"
+
+        for t in sorted_transfers:
+            ws.append(
+                [
+                    t.date,
+                    t.symbol,
+                    t.direction,
+                    float(t.quantity),
+                    t.currency,
+                    float(t.market_value),
+                    t.code,
+                ]
+            )
+            r = ws.max_row
+            ws.cell(row=r, column=1).number_format = date_fmt
+            ws.cell(row=r, column=4).number_format = qty_fmt
+            ws.cell(row=r, column=6).number_format = self._money_fmt_for_currency(
+                t.currency
+            )
+
+    def _money_fmt_for_currency(self, ccy: str) -> str:
+        loc = self.locale.upper()
+        cur = (ccy or "").upper()
+        symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
+        sym = symbols.get(cur)
+        if sym:
+            if cur == "EUR" and loc == "PT":
+                return f'#,##0.00 "{sym}"'
+            return f"{sym}#,##0.00"
+        if loc == "PT":
+            return f'#,##0.00 "{cur}"'
+        return f'"{cur}" #,##0.00'
+
+    def _autosize(self, sheet, max_width: int = 60, min_width: int = 10) -> None:
+        header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []
+        for col in range(1, sheet.max_column + 1):
+            max_len = 0
+            for row in range(1, sheet.max_row + 1):
+                v = sheet.cell(row=row, column=col).value
+                if v is None:
+                    continue
+                # Approximate display width using string conversion
+                if hasattr(v, "strftime"):
+                    s = (
+                        v.strftime("%d/%m/%Y")
+                        if self.locale.upper() == "PT"
+                        else v.strftime("%Y-%m-%d")
                     )
-                    r = ws.max_row
-                    ws.cell(row=r, column=1).number_format = date_fmt
-                    ws.cell(row=r, column=4).number_format = qty_fmt
-                    ws.cell(row=r, column=6).number_format = money_fmt_for_currency(
-                        t.currency
-                    )
-
-        def autosize(sheet, max_width: int = 60, min_width: int = 10) -> None:
-            header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []
-            for col in range(1, sheet.max_column + 1):
-                max_len = 0
-                for row in range(1, sheet.max_row + 1):
-                    v = sheet.cell(row=row, column=col).value
-                    if v is None:
-                        continue
-                    # Approximate display width using string conversion
-                    if hasattr(v, "strftime"):
-                        s = (
-                            v.strftime("%d/%m/%Y")
-                            if self.locale.upper() == "PT"
-                            else v.strftime("%Y-%m-%d")
-                        )
-                    else:
-                        s = str(v)
-                    if len(s) > max_len:
-                        max_len = len(s)
-                header = (
-                    header_values[col - 1] if col - 1 < len(header_values) else None
-                )
-                if header:
-                    max_len = max(max_len, len(str(header)))
-                width = min(max_width, max(min_width, max_len + 2))
-                if header and "JSON" in str(header):
-                    width = min(width, 50)
-                sheet.column_dimensions[get_column_letter(col)].width = width
-
-        for _ws in wb.worksheets:
-            autosize(_ws)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        wb.save(out_path)
-        return out_path
+                else:
+                    s = str(v)
+                if len(s) > max_len:
+                    max_len = len(s)
+            header = header_values[col - 1] if col - 1 < len(header_values) else None
+            if header:
+                max_len = max(max_len, len(str(header)))
+            width = min(max_width, max(min_width, max_len + 2))
+            if header and "JSON" in str(header):
+                width = min(width, 50)
+            sheet.column_dimensions[get_column_letter(col)].width = width
 
 
 @dataclass
