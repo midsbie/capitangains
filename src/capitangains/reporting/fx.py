@@ -7,7 +7,7 @@ from collections import defaultdict
 from decimal import Decimal, DivisionByZero
 from pathlib import Path
 
-from capitangains.conv import date_key, to_dec
+from capitangains.conv import date_key, to_dec_strict
 
 
 class FxTable:
@@ -39,14 +39,18 @@ class FxTable:
             for row in reader:
                 d = date_key(row["date"])
                 ccy = row["currency"].strip().upper()
+                if not ccy:
+                    raise ValueError(f"FX row missing currency for date {d}")
                 if ccy == "EUR":
                     # Store identity explicitly for completeness
                     inst.data[ccy][d] = Decimal("1")
                     continue
 
-                units_per_eur = to_dec(row["rate"])  # e.g., 1 EUR = 1.91 AUD
-                if units_per_eur == 0:
-                    raise ValueError(f"Encountered zero FX rate for {ccy} on {d}")
+                units_per_eur = to_dec_strict(row["rate"])  # e.g., 1 EUR = 1.91 AUD
+                if units_per_eur <= 0:
+                    raise ValueError(
+                        f"Encountered non-positive FX rate {units_per_eur} for {ccy} on {d}"
+                    )
                 try:
                     eur_per_unit = Decimal("1") / units_per_eur
                 except DivisionByZero as exc:  # defensive, though checked above

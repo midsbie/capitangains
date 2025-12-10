@@ -171,12 +171,9 @@ def parse_trades_stocklike(
             continue
 
         for r in rows:
-            try:
-                trade = parse_trades_stocklike_row(scope_set, r, col)
-                if trade is not None:
-                    trades.append(trade)
-            except Exception:
-                logger.exception("Failed to parse trade row %s", r)
+            trade = parse_trades_stocklike_row(scope_set, r, col)
+            if trade is not None:
+                trades.append(trade)
 
     # Sort by actual execution date/time for deterministic FIFO (buys before sells if
     # same timestamp use quantity sign)
@@ -191,8 +188,12 @@ def parse_dividends(model: IbkrModel) -> list[dict[str, Any]]:
         cur = r.get("Currency", "").strip()
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
-        amt = to_dec(r.get("Amount", ""))
+        amount_s = r.get("Amount", "").strip()
+        # Rows lacking currency/date/description are typically totals or non-data lines;
+        # structural anomalies are already reported by the CSV parser, so we silently
+        # filter these here rather than logging again.
         if cur and date_s and desc:
+            amt = to_dec_strict(amount_s)
             out.append(
                 {
                     "currency": cur,
@@ -210,9 +211,12 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
         cur = r.get("Currency", "").strip()
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
-        amt = to_dec(r.get("Amount", ""))
+        amount_s = r.get("Amount", "").strip()
         code = r.get("Code", "").strip() if "Code" in r else ""
+        # As with dividends, missing currency/date/description indicates totals or
+        # non-data rows; malformed structure is handled at CSV parse time.
         if cur and date_s and desc:
+            amt = to_dec_strict(amount_s)
             dlow = desc.lower()
             wtype = ""
             if (
@@ -273,16 +277,25 @@ def parse_syep_interest_details(model: IbkrModel) -> list[dict[str, Any]]:
         if not cur or cur.lower().startswith("total"):
             continue
 
+        if not (qty_s and collat_s and mkt_rate_s and cust_rate_s and paid_s):
+            raise ValueError(f"Invalid SYEP interest row (missing numeric fields): {r}")
+
+        quantity = to_dec_strict(qty_s)
+        collateral_amount = to_dec_strict(collat_s)
+        market_rate_pct = to_dec_strict(mkt_rate_s)
+        customer_rate_pct = to_dec_strict(cust_rate_s)
+        interest_paid = to_dec_strict(paid_s)
+
         row: dict[str, Any] = {
             "currency": cur,
             "value_date": (parse_date(value_date_s) if value_date_s else None),
             "symbol": sym,
             "start_date": (parse_date(start_date_s) if start_date_s else None),
-            "quantity": to_dec(qty_s),
-            "collateral_amount": to_dec(collat_s),
-            "market_rate_pct": to_dec(mkt_rate_s),
-            "customer_rate_pct": to_dec(cust_rate_s),
-            "interest_paid": to_dec(paid_s),
+            "quantity": quantity,
+            "collateral_amount": collateral_amount,
+            "market_rate_pct": market_rate_pct,
+            "customer_rate_pct": customer_rate_pct,
+            "interest_paid": interest_paid,
             "code": code,
         }
         out.append(row)
@@ -303,8 +316,17 @@ def parse_interest(model: IbkrModel) -> list[dict[str, Any]]:
             continue
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
-        amt = to_dec(r.get("Amount", ""))
+        amount_s = r.get("Amount", "").strip()
+        # Only rows with full currency/date/description are treated as interest lines:
+        # - In IBKR exports, rows that fail this check are typically 'Total' or similar
+        #   summary lines, which we intentionally ignore at the domain level.
+        # - Truly malformed CSV structure is already surfaced by IbkrStatementCsvParser
+        #   via ParseReport, so re-logging here would add noise without new signal.
+        #
+        # If we ever decide that a partial row here is an invariant violation, the
+        # correct response would be to raise, not to emit a quiet debug log.
         if cur and date_s and desc:
+            amt = to_dec_strict(amount_s)
             out.append(
                 {
                     "currency": cur,
