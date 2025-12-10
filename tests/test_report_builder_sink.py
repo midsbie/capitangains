@@ -3,16 +3,16 @@ from decimal import Decimal
 
 from openpyxl import load_workbook
 
+from capitangains.reporting.extract import (
+    DividendRow,
+    InterestRow,
+    SyepInterestRow,
+    WithholdingRow,
+)
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
-from capitangains.reporting.extract import (
-    DividendRow,
-    WithholdingRow,
-    SyepInterestRow,
-    InterestRow,
-)
 
 
 def _make_fx(rates):
@@ -46,9 +46,8 @@ def _realized(symbol: str, currency: str, sell_date: dt.date, legs: list[SellMat
         sell_comm_ccy=Decimal("0"),
         sell_net_ccy=sell_net,
         legs=leg_objs,
-        realized_pl_ccy=sell_net - sum(
-            (leg.alloc_cost_ccy for leg in leg_objs), Decimal("0")
-        ),
+        realized_pl_ccy=sell_net
+        - sum((leg.alloc_cost_ccy for leg in leg_objs), Decimal("0")),
     )
 
 
@@ -97,9 +96,11 @@ def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
     rb.add_realized(rl_usd)
     rb.add_realized(rl_gbp)
 
-    fx = _make_fx({
-        ("USD", "2024-03-01"): Decimal("0.9"),
-    })
+    fx = _make_fx(
+        {
+            ("USD", "2024-03-01"): Decimal("0.9"),
+        }
+    )
 
     rb.convert_eur(fx)
 
@@ -221,7 +222,7 @@ def test_excel_report_sink_serializes_legs(tmp_path):
     wb = load_workbook(out_path)
     ws = wb["Realized Trades"]
     legs_json = ws.cell(row=2, column=15).value
-    assert "\"buy_date\": \"2023-01-01\"" in legs_json
+    assert '"buy_date": "2023-01-01"' in legs_json
 
 
 def test_excel_report_sink_sorts_dividends_by_description(tmp_path):

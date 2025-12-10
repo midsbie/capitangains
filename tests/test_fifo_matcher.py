@@ -17,13 +17,17 @@ class DummyPolicy(GapPolicy):
 
     def resolve(self, trade, qty_remaining, legs, alloc_cost_so_far):
         self.calls += 1
-        return legs, alloc_cost_so_far, GapEvent(
-            symbol=trade.symbol,
-            date=trade.date,
-            remaining_qty=Decimal("0"),
-            currency=trade.currency,
-            message="dummy",
-            fixed=True,
+        return (
+            legs,
+            alloc_cost_so_far,
+            GapEvent(
+                symbol=trade.symbol,
+                date=trade.date,
+                remaining_qty=Decimal("0"),
+                currency=trade.currency,
+                message="dummy",
+                fixed=True,
+            ),
         )
 
 
@@ -40,7 +44,14 @@ class NoneEventPolicy(GapPolicy):
         return legs, alloc_cost_so_far, None
 
 
-def _trade(symbol: str, qty: Decimal, *, proceeds: Decimal, comm: Decimal, currency: str = "USD"):
+def _trade(
+    symbol: str,
+    qty: Decimal,
+    *,
+    proceeds: Decimal,
+    comm: Decimal,
+    currency: str = "USD",
+):
     return SimpleNamespace(
         symbol=symbol,
         quantity=qty,
@@ -63,7 +74,9 @@ def test_fifo_matcher_buy_uses_injected_position_book():
 
 def test_fifo_matcher_sell_uses_gap_policy_and_recorder():
     book = PositionBook()
-    book.append_buy("ABC", Lot(dt.date(2023, 12, 1), Decimal("5"), Decimal("50"), "USD"))
+    book.append_buy(
+        "ABC", Lot(dt.date(2023, 12, 1), Decimal("5"), Decimal("50"), "USD")
+    )
     policy = DummyPolicy()
     recorder = EventRecorder()
     matcher = FifoMatcher(positions=book, gap_policy=policy, recorder=recorder)
@@ -92,7 +105,9 @@ def test_fifo_matcher_validates_quantities():
     matcher = FifoMatcher()
 
     with pytest.raises(ValueError):
-        matcher.ingest(_trade("ABC", Decimal("0"), proceeds=Decimal("0"), comm=Decimal("0")))
+        matcher.ingest(
+            _trade("ABC", Decimal("0"), proceeds=Decimal("0"), comm=Decimal("0"))
+        )
 
     with pytest.raises(ValueError):
         matcher._ingest_buy(

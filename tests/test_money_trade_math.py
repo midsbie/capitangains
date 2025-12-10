@@ -6,11 +6,7 @@ from capitangains.reporting.money import (
     quantize_money,
     round_cost_piece,
 )
-from capitangains.reporting.trade_math import (
-    buy_cost_ccy,
-    sell_gross_ccy,
-    sell_net_ccy,
-)
+from capitangains.reporting.trade_math import buy_cost_ccy, sell_gross_ccy, sell_net_ccy
 
 
 def test_quantize_money_custom_places():

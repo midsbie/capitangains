@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import csv
-import datetime as dt
 import logging
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 RowDict = dict[str, str]
 
@@ -93,9 +93,7 @@ class IbkrStatementCsvParser:
     def parse_file(
         self, path: str | Path, *, encoding: str = "utf-8", newline: str = ""
     ) -> tuple[IbkrModel, ParseReport]:
-        with open(
-            path, "r", encoding=encoding, errors="replace", newline=newline
-        ) as fp:
+        with open(path, encoding=encoding, errors="replace", newline=newline) as fp:
             reader = csv.reader(fp)
             return self.parse_rows(reader)
 

@@ -24,9 +24,9 @@ class FxTable:
         self.date_index: dict[str, list[str]] = {}
 
     @classmethod
-    def from_csv(cls, path: str | Path) -> "FxTable":
+    def from_csv(cls, path: str | Path) -> FxTable:
         inst = cls()
-        with open(path, "r", encoding="utf-8", newline="") as fp:
+        with open(path, encoding="utf-8", newline="") as fp:
             reader = csv.DictReader(fp)
             fields = set(reader.fieldnames or [])
             if not {"date", "currency"}.issubset(fields):

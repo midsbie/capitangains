@@ -1,16 +1,15 @@
 import datetime as dt
 from decimal import Decimal
 
-import pytest
 from openpyxl import load_workbook
 
 from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import (
+    DividendRow,
+    SyepInterestRow,
+    WithholdingRow,
     parse_interest,
     parse_syep_interest_details,
-    DividendRow,
-    WithholdingRow,
-    SyepInterestRow,
 )
 from capitangains.reporting.fifo import RealizedLine
 from capitangains.reporting.fx import FxTable

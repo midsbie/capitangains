@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from capitangains.conv import to_dec
 from capitangains.model import IbkrModel
+
 from .extract import ASSET_STOCK_LIKE
 
 

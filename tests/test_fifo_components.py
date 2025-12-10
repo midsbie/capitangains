@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from capitangains.reporting.fifo_domain import Lot
-from capitangains.reporting.positions import PositionBook
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
+from capitangains.reporting.positions import PositionBook
 from capitangains.reporting.realized_builder import build_realized_line
 
 
@@ -72,7 +72,9 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
         currency="USD",
         basis_ccy=Decimal("-1200"),
     )
-    policy = BasisSynthesisPolicy(tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy)
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+    )
     legs = [
         {
             "buy_date": dt.date(2024, 1, 1),
@@ -97,7 +99,9 @@ def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
         currency="USD",
         basis_ccy=Decimal("-900"),
     )
-    policy = BasisSynthesisPolicy(tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy)
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+    )
     legs: list[dict] = []
     legs_after, alloc_after, event = policy.resolve(
         trade, Decimal("15"), legs, Decimal("950")
@@ -114,7 +118,9 @@ def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
         currency="USD",
         basis_ccy=None,
     )
-    policy = BasisSynthesisPolicy(tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy)
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+    )
     legs: list[dict] = []
     legs_after, alloc_after, event = policy.resolve(
         trade, Decimal("5"), legs, Decimal("0")
@@ -131,7 +137,9 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
         currency="USD",
         basis_ccy=Decimal("-1000"),
     )
-    policy = BasisSynthesisPolicy(tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy)
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+    )
     legs = [
         {
             "buy_date": dt.date(2024, 1, 1),

@@ -86,8 +86,8 @@ def test_summary_sheet_contents(tmp_path):
 
     # Non-EUR breakdown includes USD but not EUR
     breakdown_labels = [r[0] for r in rows[4:]]
-    assert any("Total Realized P/L (USD)" == s for s in breakdown_labels)
-    assert not any("Total Realized P/L (EUR)" == s for s in breakdown_labels)
+    assert any(s == "Total Realized P/L (USD)" for s in breakdown_labels)
+    assert not any(s == "Total Realized P/L (EUR)" for s in breakdown_labels)
 
 
 def test_per_symbol_number_formats(tmp_path):

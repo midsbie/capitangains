@@ -3,8 +3,8 @@ from decimal import Decimal
 
 from capitangains.reporting.extract import TradeRow
 from capitangains.reporting.fifo import FifoMatcher
-from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.fx import FxTable
+from capitangains.reporting.report_builder import ReportBuilder
 
 
 def _make_fx(rates: dict[tuple[str, str], Decimal]) -> FxTable:
@@ -17,7 +17,9 @@ def _make_fx(rates: dict[tuple[str, str], Decimal]) -> FxTable:
     return ft
 
 
-def _buy(symbol: str, date: dt.date, qty: str, proceeds: str, comm: str, ccy: str = "USD") -> TradeRow:
+def _buy(
+    symbol: str, date: dt.date, qty: str, proceeds: str, comm: str, ccy: str = "USD"
+) -> TradeRow:
     # For buys, proceeds negative; comm negative. Basis allocation computed from these by matcher
     return TradeRow(
         section="Trades",
@@ -66,7 +68,9 @@ def test_fifo_no_fix_records_gap_and_zero_cost():
     # Buy 100 cost 1000
     m.ingest(_buy("ABC", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # Sell 120 proceeds 1200, basis -1200 (not used when no fix)
-    rl = m.ingest(_sell("ABC", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD"))
+    rl = m.ingest(
+        _sell("ABC", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+    )
 
     assert rl is not None
     assert rl.has_gap is True
@@ -87,7 +91,9 @@ def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
     m = FifoMatcher(fix_sell_gaps=True)
     m.ingest(_buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # SELL 120, proceeds 1200, IBKR Basis -1200 -> target alloc 1200
-    rl = m.ingest(_sell("XYZ", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD"))
+    rl = m.ingest(
+        _sell("XYZ", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+    )
     assert rl is not None
     assert rl.has_gap is True
     assert rl.gap_fixed is True
@@ -123,7 +129,9 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     # Buy 90 cost 900
     m.ingest(_buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
     # SELL 100 with IBKR Basis slightly less than matched alloc (residual = -0.01 -> clamp to 0)
-    rl = m.ingest(_sell("CLP", dt.date(2024, 2, 1), "-100", "1000", "0", "-899.99", "USD"))
+    rl = m.ingest(
+        _sell("CLP", dt.date(2024, 2, 1), "-100", "1000", "0", "-899.99", "USD")
+    )
     assert rl is not None
     assert rl.has_gap is True
     assert rl.gap_fixed is True  # synthetic leg created (qty=10) but zero cost
@@ -149,16 +157,20 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
     # Buy 100 cost 1000 USD on 2024-01-01
     m.ingest(_buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # Sell 120 on 2024-02-01, proceeds 1200, Basis -1200 so residual = 200
-    rl = m.ingest(_sell("EURX", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD"))
+    rl = m.ingest(
+        _sell("EURX", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+    )
     assert rl is not None and rl.gap_fixed is True
 
     rb = ReportBuilder(year=2024)
     rb.add_realized(rl)
 
-    fx = _make_fx({
-        ("USD", "2024-01-01"): Decimal("0.9"),
-        ("USD", "2024-02-01"): Decimal("0.8"),
-    })
+    fx = _make_fx(
+        {
+            ("USD", "2024-01-01"): Decimal("0.9"),
+            ("USD", "2024-02-01"): Decimal("0.8"),
+        }
+    )
     rb.convert_eur(fx)
 
     # EUR alloc = 1000 * 0.9 + 200 * 0.8 = 900 + 160 = 1060 -> 2 decimals

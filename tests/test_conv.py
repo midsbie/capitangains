@@ -2,6 +2,7 @@ import logging
 from decimal import Decimal
 
 import pytest
+
 from capitangains.conv import to_dec, to_dec_strict
 
 

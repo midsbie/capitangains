@@ -40,18 +40,14 @@ from decimal import ROUND_HALF_UP, Decimal, getcontext
 from pathlib import Path
 
 from capitangains.logging import configure_logging
-from capitangains.model import (
-    IbkrStatementCsvParser,
-    merge_models,
-    merge_reports,
-)
+from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
 from capitangains.reporting import (
-    FxTable,
     FifoMatcher,
+    FxTable,
     ReportBuilder,
     parse_dividends,
-    parse_syep_interest_details,
     parse_interest,
+    parse_syep_interest_details,
     parse_trades_stocklike,
     parse_transfers,
     parse_withholding_tax,
