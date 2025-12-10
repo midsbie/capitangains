@@ -13,8 +13,43 @@ from capitangains.model import IbkrModel
 
 logger = logging.getLogger(__name__)
 
+ALL_SCOPES_SET = {
+    "stocks": {"Stocks", "Stock"},
+    "etfs": {"ETF", "ETFs", "ETCs", "ETP"},
+    "stocks_etfs": {"Stocks", "Stock", "ETF", "ETFs", "ETCs", "ETP"},
+    "all": None,
+}
 
 ASSET_STOCK_LIKE = {"Stocks", "Stock", "ETFs", "ETF", "ETCs", "ETP"}
+
+TRADE_COLS = [
+    "DataDiscriminator",
+    "Asset Category",
+    "Currency",
+    "Symbol",
+    "Date/Time",
+    "Quantity",
+    "T. Price",
+    "Proceeds",
+    "Comm/Fee",
+    "Code",
+    "C. Price",
+    "Comm in EUR",
+    "MTM P/L",
+    "MTM in EUR",
+    "Basis",
+    "Realized P/L",
+]
+
+NEED_TRADE_COLS = [
+    "Asset Category",
+    "Currency",
+    "Symbol",
+    "Date/Time",
+    "Quantity",
+    "Proceeds",
+    "Code",
+]
 
 
 @dataclass
@@ -34,19 +69,88 @@ class TradeRow:
     realized_pl_ccy: Decimal | None = None
 
 
+@dataclass
+class TransferRow:
+    section: str
+    asset_category: str
+    currency: str
+    symbol: str
+    date: dt.date
+    direction: str  # "In" or "Out"
+    quantity: Decimal
+    market_value: Decimal  # Cost basis for incoming transfers
+    code: str
+
+
+def parse_trades_stocklike_row(
+    scope_set: set[str], r: dict[str, str], col: dict[str, int]
+) -> TradeRow | None:
+    asset_category = r.get("Asset Category", "").strip()
+    if scope_set is not None and asset_category not in scope_set:
+        return None
+
+    currency = r.get("Currency", "").strip()
+    symbol = r.get("Symbol", "").strip()
+    dt_str = r.get("Date/Time", "").strip()
+    qty_s = r.get("Quantity", "").strip()
+    proceeds_s = r.get("Proceeds", "").strip()
+    code = r.get("Code", "").strip()
+
+    # T. Price may be missing in some rows, default 0
+    t_price_s = r.get("T. Price", "").strip()
+
+    # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears
+    # in some Forex tables.
+    comm_s = ""
+    if "Comm/Fee" in r:
+        comm_s = r.get("Comm/Fee", "").strip()
+    elif "Comm in EUR" in r:
+        # Some subtables only have Comm in EUR (e.g., Forex); we don't use them
+        # here, but keep consistent type.
+        comm_s = r.get("Comm in EUR", "").strip()
+    else:
+        comm_s = ""
+
+    # Optional Basis and Realized P/L if present
+    basis_opt: Decimal | None = None
+    if col.get("Basis") is not None:
+        bs = r.get("Basis", "").strip()
+        if bs != "":
+            basis_opt = to_dec(bs)
+
+    realized_opt: Decimal | None = None
+    if col.get("Realized P/L") is not None:
+        rs = r.get("Realized P/L", "").strip()
+        if rs != "":
+            realized_opt = to_dec(rs)
+
+    trade = TradeRow(
+        section="Trades",
+        asset_category=asset_category,
+        currency=currency,
+        symbol=symbol,
+        datetime_str=dt_str,
+        date=parse_date(dt_str),
+        quantity=to_dec_strict(qty_s),
+        t_price=to_dec_strict(t_price_s),
+        proceeds=to_dec_strict(proceeds_s),
+        comm_fee=to_dec(comm_s),
+        code=code,
+        basis_ccy=basis_opt,
+        realized_pl_ccy=realized_opt,
+    )
+
+    # Only track non-zero quantity
+    return trade if trade.quantity != 0 else None
+
+
 def parse_trades_stocklike(
     model: IbkrModel, asset_scope: str = "stocks"
 ) -> list[TradeRow]:
     """Extract stock-like trades from 'Trades' section across header variants.
     asset_scope: 'stocks', 'etfs', 'stocks_etfs', 'all'
     """
-    scope_set = {
-        "stocks": {"Stocks", "Stock"},
-        "etfs": {"ETF", "ETFs", "ETCs", "ETP"},
-        "stocks_etfs": {"Stocks", "Stock", "ETF", "ETFs", "ETCs", "ETP"},
-        "all": None,
-    }[asset_scope]
-
+    scope_set = ALL_SCOPES_SET[asset_scope]
     trades: list[TradeRow] = []
 
     for sub in model.get_subtables("Trades"):
@@ -54,27 +158,7 @@ def parse_trades_stocklike(
         rows = sub.rows
 
         # Try to locate relevant columns (be lenient)
-        col = {
-            k: None
-            for k in [
-                "DataDiscriminator",
-                "Asset Category",
-                "Currency",
-                "Symbol",
-                "Date/Time",
-                "Quantity",
-                "T. Price",
-                "Proceeds",
-                "Comm/Fee",
-                "Code",
-                "C. Price",
-                "Comm in EUR",
-                "MTM P/L",
-                "MTM in EUR",
-                "Basis",
-                "Realized P/L",
-            ]
-        }
+        col = {k: None for k in TRADE_COLS}
         for name in col:
             for i, h in enumerate(header):
                 if h == name:
@@ -82,83 +166,17 @@ def parse_trades_stocklike(
                     break
 
         # Skip subtables without essential columns
-        need_cols = [
-            "Asset Category",
-            "Currency",
-            "Symbol",
-            "Date/Time",
-            "Quantity",
-            "Proceeds",
-            "Code",
-        ]
-        if any(col[n] is None for n in need_cols):
+        if any(col[n] is None for n in NEED_TRADE_COLS):
             logger.debug("Skipping Trades subtable, missing cols: %s", col)
             continue
 
         for r in rows:
-            asset_category = r.get("Asset Category", "").strip()
-            if scope_set is not None and asset_category not in scope_set:
-                continue
-            currency = r.get("Currency", "").strip()
-            symbol = r.get("Symbol", "").strip()
-            dt_str = r.get("Date/Time", "").strip()
-            qty_s = r.get("Quantity", "").strip()
-            proceeds_s = r.get("Proceeds", "").strip()
-            code = r.get("Code", "").strip()
-
-            # T. Price may be missing in some rows, default 0
-            t_price_s = r.get("T. Price", "").strip()
-
-            # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears
-            # in some Forex tables.
-            comm_s = ""
-            if "Comm/Fee" in r:
-                comm_s = r.get("Comm/Fee", "").strip()
-            elif "Comm in EUR" in r:
-                # Some subtables only have Comm in EUR (e.g., Forex); we don't use them
-                # here, but keep consistent type.
-                comm_s = r.get("Comm in EUR", "").strip()
-            else:
-                comm_s = ""
-
-            # Optional Basis and Realized P/L if present
-            basis_opt: Decimal | None = None
-            if col.get("Basis") is not None:
-                bs = r.get("Basis", "").strip()
-                if bs != "":
-                    basis_opt = to_dec(bs)
-
-            realized_opt: Decimal | None = None
-            if col.get("Realized P/L") is not None:
-                rs = r.get("Realized P/L", "").strip()
-                if rs != "":
-                    realized_opt = to_dec(rs)
-
             try:
-                trade = TradeRow(
-                    section="Trades",
-                    asset_category=asset_category,
-                    currency=currency,
-                    symbol=symbol,
-                    datetime_str=dt_str,
-                    date=parse_date(dt_str),
-                    quantity=to_dec(qty_s),
-                    t_price=to_dec(t_price_s),
-                    proceeds=to_dec(proceeds_s),
-                    comm_fee=to_dec(comm_s),
-                    code=code,
-                    basis_ccy=basis_opt,
-                    realized_pl_ccy=realized_opt,
-                )
+                trade = parse_trades_stocklike_row(scope_set, r, col)
+                if trade is not None:
+                    trades.append(trade)
             except Exception:
                 logger.exception("Failed to parse trade row %s", r)
-                continue
-
-            # Only track non-zero quantity
-            if trade.quantity == 0:
-                continue
-
-            trades.append(trade)
 
     # Sort by actual execution date/time for deterministic FIFO (buys before sells if
     # same timestamp use quantity sign)
