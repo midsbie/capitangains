@@ -224,7 +224,8 @@ def parse_withholding_tax(model: IbkrModel) -> list[dict[str, Any]]:
             elif "cash dividend" in dlow or "payment in lieu of dividend" in dlow:
                 wtype = "Dividend"
             else:
-                # default bucket: Dividend if it references dividend; otherwise leave empty
+                # default bucket: Dividend if it references dividend; otherwise leave
+                # empty
                 wtype = "Dividend" if "dividend" in dlow else ""
 
             # Extract country from suffix like " - US Tax" or " - NL Tax"

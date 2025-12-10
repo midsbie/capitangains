@@ -37,7 +37,6 @@ from __future__ import annotations
 import argparse
 import logging
 from decimal import ROUND_HALF_UP, Decimal, getcontext
-from typing import Optional
 from pathlib import Path
 
 from capitangains.logging import configure_logging
@@ -134,7 +133,7 @@ def process_files(args):
     rb.set_interest([i for i in interest if i["date"].year == args.year])
 
     # FX conversion if provided
-    fx: Optional[FxTable] = None
+    fx: FxTable | None = None
     if args.fx_table:
         try:
             fx = FxTable.from_csv(args.fx_table)

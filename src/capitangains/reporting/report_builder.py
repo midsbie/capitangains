@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 from .fifo import RealizedLine
 from .fx import FxTable
@@ -59,11 +59,11 @@ class ReportBuilder:
     def set_interest(self, rows: list[dict[str, Any]]):
         self.interest = rows
 
-    # CSV/Markdown writers have been intentionally removed in favor of ReportSink-based outputs.
 
-    def convert_eur(self, fx: Optional[FxTable]):
+    def convert_eur(self, fx: FxTable | None):
         """Convert realized lines to EUR using per-date FX if available.
-        PT practice: acquisition values -> EUR at buy date; sale values -> EUR at sale date.
+        PT practice: acquisition values -> EUR at buy date; sale values -> EUR at sale
+        date.
         """
         if fx is None:
             # Mark if any non-EUR currency is present. We will still fill EUR-native trades.
@@ -96,10 +96,12 @@ class ReportBuilder:
             if fx is None:
                 # Cannot convert without FX
                 continue
+
             sell_rate = fx.get_rate(rl.sell_date, rl.currency)
             if sell_rate is None:
                 self.fx_missing = True
                 continue
+
             rl.sell_gross_eur = (rl.sell_gross_ccy * sell_rate).quantize(
                 Decimal("0.01")
             )

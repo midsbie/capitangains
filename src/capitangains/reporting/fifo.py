@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 from .events import EventRecorder
 from .fifo_domain import GapEvent, Lot, RealizedLine
@@ -25,11 +25,11 @@ class FifoMatcher:
     def __init__(
         self,
         *,
-        positions: Optional[PositionBook] = None,
-        gap_policy: Optional[GapPolicy] = None,
-        recorder: Optional[EventRecorder] = None,
-        fix_sell_gaps: Optional[bool] = None,
-        gap_tolerance: Optional[Decimal] = None,
+        positions: PositionBook | None = None,
+        gap_policy: GapPolicy | None = None,
+        recorder: EventRecorder | None = None,
+        fix_sell_gaps: bool | None = None,
+        gap_tolerance: Decimal | None = None,
     ) -> None:
         self.positions = positions or PositionBook()
         self.recorder = recorder or EventRecorder()
@@ -40,7 +40,7 @@ class FifoMatcher:
         )
         self._gap_policy = self._resolve_gap_policy(gap_policy)
 
-    def _resolve_gap_policy(self, policy: Optional[GapPolicy]) -> GapPolicy:
+    def _resolve_gap_policy(self, policy: GapPolicy | None) -> GapPolicy:
         if policy is not None:
             return policy
         if self.fix_sell_gaps:
@@ -54,7 +54,7 @@ class FifoMatcher:
     def gap_events(self) -> list[GapEvent]:
         return self.recorder.gap_events
 
-    def ingest(self, trade: Any) -> Optional[RealizedLine]:
+    def ingest(self, trade: Any) -> RealizedLine | None:
         qty = trade.quantity
         if qty > 0:
             return self._ingest_buy(trade)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 try:
     from typing import NotRequired
@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
 
 
 class SellMatchLeg(TypedDict, total=False):
-    buy_date: Optional[dt.date]
+    buy_date: dt.date | None
     qty: Decimal
     lot_qty_before: Decimal
     alloc_cost_ccy: Decimal
@@ -42,11 +42,11 @@ class RealizedLine:
     realized_pl_ccy: Decimal
     has_gap: bool = False
     gap_fixed: bool = False
-    sell_gross_eur: Optional[Decimal] = None
-    sell_comm_eur: Optional[Decimal] = None
-    sell_net_eur: Optional[Decimal] = None
-    alloc_cost_eur: Optional[Decimal] = None
-    realized_pl_eur: Optional[Decimal] = None
+    sell_gross_eur: Decimal | None = None
+    sell_comm_eur: Decimal | None = None
+    sell_net_eur: Decimal | None = None
+    alloc_cost_eur: Decimal | None = None
+    realized_pl_eur: Decimal | None = None
 
 
 @dataclass
