@@ -134,6 +134,8 @@ def parse_trades_stocklike_row(
 
     currency = r.get("Currency", "").strip()
     symbol = r.get("Symbol", "").strip()
+    if not symbol:
+        raise ValueError("Invalid trade row: missing symbol")
     dt_str = r.get("Date/Time", "").strip()
     qty_s = r.get("Quantity", "").strip()
     proceeds_s = r.get("Proceeds", "").strip()

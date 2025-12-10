@@ -966,11 +966,8 @@ def test_error_missing_symbol():
     ]
 
     model = _parse_rows(rows)
-    # Empty symbol might not raise immediately but the trade object will have empty symbol
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
-    # Actually, the code doesn't validate this, it just creates a trade with empty symbol
-    assert len(trades) == 1
-    assert trades[0].symbol == ""
+    with pytest.raises(ValueError, match="missing symbol"):
+        parse_trades_stocklike(model, asset_scope="stocks")
 
 
 def test_error_missing_datetime():
