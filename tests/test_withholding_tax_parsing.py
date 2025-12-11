@@ -297,7 +297,58 @@ def test_type_classification_empty_for_unrecognized():
     withholding = parse_withholding_tax(model)
 
     assert len(withholding) == 1
-    assert withholding[0].type == ""  # No recognized keywords
+    assert withholding[0].type == "Unknown"  # No recognized keywords
+
+
+def test_type_classification_compound_terms():
+    """Test that 'dividend' takes precedence in compound terms like 'interest dividend'."""
+    rows = [
+        [
+            "Withholding Tax",
+            "Header",
+            "Currency",
+            "Date",
+            "Description",
+            "Amount",
+        ],
+        # Edge case: both "interest" and "dividend" present
+        [
+            "Withholding Tax",
+            "Data",
+            "USD",
+            "2024-01-01",
+            "Interest Dividend Payment - US Tax",
+            "-10.00",
+        ],
+        # Another order: "dividend" comes first
+        [
+            "Withholding Tax",
+            "Data",
+            "EUR",
+            "2024-02-01",
+            "Dividend Interest Distribution - NL Tax",
+            "-15.00",
+        ],
+        # "credit interest" should still win as most specific
+        [
+            "Withholding Tax",
+            "Data",
+            "GBP",
+            "2024-03-01",
+            "Credit Interest for Feb - GB Tax",
+            "-5.00",
+        ],
+    ]
+
+    model = _parse_rows(rows)
+    withholding = parse_withholding_tax(model)
+
+    assert len(withholding) == 3
+    # Both compound terms should be classified as Dividend
+    assert withholding[0].type == "Dividend", "interest dividend should be Dividend"
+    assert withholding[1].type == "Dividend", "dividend interest should be Dividend"
+    # Credit interest is most specific, should be Interest
+    assert withholding[2].type == "Interest", "credit interest should be Interest"
 
 
 # =============================================================================

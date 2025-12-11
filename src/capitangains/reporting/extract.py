@@ -237,16 +237,19 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
         # Rows lacking currency/date/description are typically totals or non-data lines;
         # structural anomalies are already reported by the CSV parser, so we silently
         # filter these here rather than logging again.
-        if cur and date_s and desc:
-            amt = to_dec_strict(amount_s)
-            out.append(
-                DividendRow(
-                    currency=cur,
-                    date=parse_date(date_s),
-                    description=desc,
-                    amount=amt,
-                )
+        if not (cur and date_s and desc):
+            continue
+
+        amt = to_dec_strict(amount_s)
+        out.append(
+            DividendRow(
+                currency=cur,
+                date=parse_date(date_s),
+                description=desc,
+                amount=amt,
             )
+        )
+
     return out
 
 
@@ -258,41 +261,51 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
         desc = r.get("Description", "").strip()
         amount_s = r.get("Amount", "").strip()
         code = r.get("Code", "").strip() if "Code" in r else ""
+
         # As with dividends, missing currency/date/description indicates totals or
         # non-data rows; malformed structure is handled at CSV parse time.
-        if cur and date_s and desc:
-            amt = to_dec_strict(amount_s)
-            dlow = desc.lower()
-            wtype = ""
-            if (
-                "credit interest" in dlow
-                or "interest" in dlow
-                and "dividend" not in dlow
-            ):
-                wtype = "Interest"
-            elif "cash dividend" in dlow or "payment in lieu of dividend" in dlow:
-                wtype = "Dividend"
-            else:
-                # default bucket: Dividend if it references dividend; otherwise leave
-                # empty
-                wtype = "Dividend" if "dividend" in dlow else ""
+        if not (cur and date_s and desc):
+            continue
 
-            # Extract country from suffix like " - US Tax" or " - NL Tax"
-            country = ""
-            m = re.search(r"-\s+([A-Z]{2})\s+Tax\b", desc)
-            if m:
-                country = m.group(1)
-            out.append(
-                WithholdingRow(
-                    currency=cur,
-                    date=parse_date(date_s),
-                    description=desc,
-                    amount=amt,
-                    code=code,
-                    type=wtype,
-                    country=country,
-                )
+        amt = to_dec_strict(amount_s)
+        dlow = desc.lower()
+        # Classify withholding tax type with explicit precedence
+        # Most specific patterns first, then generic fallbacks
+        if "credit interest" in dlow:
+            wtype = "Interest"
+        elif "dividend" in dlow:
+            # Catches "cash dividend", "payment in lieu of dividend", "interest
+            # dividend", etc.; dividend takes precedence
+            wtype = "Dividend"
+        elif "interest" in dlow:
+            # Generic interest (not dividend-related, already caught above)
+            wtype = "Interest"
+        else:
+            # Unknown/other
+            logger.warning(
+                "Unrecognized withholding tax description: %r. "
+                "Classifying as 'Unknown'. Please verify data integrity.",
+                desc,
             )
+            wtype = "Unknown"
+
+        # Extract country from suffix like " - US Tax" or " - NL Tax"
+        country = ""
+        m = re.search(r"-\s+([A-Z]{2})\s+Tax\b", desc)
+        if m:
+            country = m.group(1)
+
+        out.append(
+            WithholdingRow(
+                currency=cur,
+                date=parse_date(date_s),
+                description=desc,
+                amount=amt,
+                code=code,
+                type=wtype,
+                country=country,
+            )
+        )
     return out
 
 
