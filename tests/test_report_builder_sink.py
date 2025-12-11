@@ -254,7 +254,8 @@ def test_excel_report_sink_sorts_dividends_by_description(tmp_path):
     wb = load_workbook(out_path)
     ws = wb["Dividends"]
     descriptions = [ws.cell(row=i, column=3).value for i in range(2, ws.max_row + 1)]
-    assert descriptions == sorted(descriptions)
+    descriptions_str = [str(d) for d in descriptions]
+    assert descriptions_str == sorted(descriptions_str)
 
 
 def test_excel_report_sink_sorts_account_interest(tmp_path):
@@ -283,7 +284,8 @@ def test_excel_report_sink_sorts_account_interest(tmp_path):
     wb = load_workbook(out_path)
     ws = wb["Account Interest"]
     descriptions = [ws.cell(row=i, column=3).value for i in range(2, ws.max_row + 1)]
-    assert descriptions == sorted(descriptions)
+    descriptions_str = [str(d) for d in descriptions]
+    assert descriptions_str == sorted(descriptions_str)
 
 
 def test_excel_report_sink_sorts_withholding(tmp_path):

@@ -209,12 +209,12 @@ def test_per_symbol_summary_trade_and_eur(tmp_path):
     for row in rows[1:]:
         if row[0] == "GOOGL":
             assert row[1] == "USD"
-            assert float(row[2]) == 200.0
-            assert float(row[3]) == 1000.0
-            assert float(row[4]) == 800.0
-            assert float(row[5]) == 180.0
-            assert float(row[6]) == 900.0
-            assert float(row[7]) == 720.0
+            assert isinstance(row[2], (int, float)) and float(row[2]) == 200.0
+            assert isinstance(row[3], (int, float)) and float(row[3]) == 1000.0
+            assert isinstance(row[4], (int, float)) and float(row[4]) == 800.0
+            assert isinstance(row[5], (int, float)) and float(row[5]) == 180.0
+            assert isinstance(row[6], (int, float)) and float(row[6]) == 900.0
+            assert isinstance(row[7], (int, float)) and float(row[7]) == 720.0
             break
     else:
         raise AssertionError("GOOGL row not found in Per Symbol Summary")

@@ -36,5 +36,5 @@ def test_parser_bom_and_data_before_header():
     # BOM-stripped section key should be 'Dividends'
     subs = model.get_subtables("Dividends")
     assert len(subs) == 1
-    r = next(model.iter_rows("Dividends"))
+    r = next(iter(model.iter_rows("Dividends")))
     assert r["Currency"] == "EUR" and Decimal(r["Amount"]) == Decimal("10.00")

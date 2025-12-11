@@ -243,7 +243,8 @@ class ExcelReportSink:
 
         # Remove the default sheet
         ws_default = wb.active
-        wb.remove(ws_default)
+        if ws_default is not None:
+            wb.remove(ws_default)
 
         labels = self._labels()
 
