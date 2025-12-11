@@ -1,7 +1,7 @@
-#+title: CapitaNGains - Capital Gains Tool for IBKR Statements
+#+title: CapitanGains - Capital Gains Tool for IBKR Statements
 #+options: toc:t num:nil
 
-CapitaNGains generates capital gains reports from broker annual statements. It is designed for Portuguese tax residents and currently supports Interactive Brokers (IBKR) Activity Statement CSV exports. The tool creates an XLSX workbook with realized trades (FIFO), symbol summaries, dividends, account interest, SYEP interest, withholding tax, and an Annex-G helper sheet in Portuguese or English.
+CapitanGains generates capital gains reports from broker annual statements. It is designed for Portuguese tax residents and currently supports Interactive Brokers (IBKR) Activity Statement CSV exports. The tool creates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account and SYEP interest, withholding tax, stock transfers, and an Annex-J helper sheet (lot-level EUR breakdown) in Portuguese or English.
 
 * Disclaimer
 
@@ -11,7 +11,7 @@ This software is experimental and *may produce inconsistent or invalid results*.
 
 - FIFO realized gains with buy-lot audit trail.
 - Optional EUR conversion per date using an external FX table.
-- Output sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, Lot-Level EUR Breakdown.
+- Output sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, Stock Transfers, Lot-Level EUR Breakdown (Annex J helper).
 
 * Installation
 
@@ -27,33 +27,48 @@ This software is experimental and *may produce inconsistent or invalid results*.
 
 3. Install dependencies
    #+begin_src sh
-   make setup
+   make bootstrap
    #+end_src
 
 * CLI Usage
 
-Pass one or more CSV files as arguments. Include prior years so FIFO can match sales with earlier buys. If sales reference missing buys, the tool aborts unless auto-fix is enabled. Output defaults to =report_<year>.xlsx= in the current directory.
+After installation, run the =capitangains= command. Pass one or more Activity Statement CSV files as arguments. Include prior years so FIFO can match sales with earlier buys. If sales reference missing buys, the tool aborts unless auto-fix is enabled. Output defaults to =report_<year>.xlsx= in the current directory.
 
 ** Examples
 - Single year:
   #+begin_src sh
-    python -m capitangains.cmd \
-           --year 2024 \
-           --output ./report_2024.xlsx \
-           --fx-table ./fx_rates.csv \
-           --locale EN \
-           ./U1234567_2024_2024.csv
+    capitangains \
+        --year 2024 \
+        --output ./report_2024.xlsx \
+        --fx-table ./fx_rates.csv \
+        --locale EN \
+        ./U1234567_2024_2024.csv
   #+end_src
 
 - Multi-year:
   #+begin_src sh
-    python -m capitangains.cmd \
-           --year 2024 \
-           --output ./report_2024.xlsx \
-           --fx-table ./fx_rates.csv \
-           --locale EN \
-           ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv
+    capitangains \
+        --year 2024 \
+        --output ./report_2024.xlsx \
+        --fx-table ./fx_rates.csv \
+        --locale EN \
+        ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv
   #+end_src
+
+You can also run the CLI module directly from the source checkout:
+
+#+begin_src sh
+  python -m capitangains.cmd ...
+#+end_src
+
+** Options
+
+- =--year YYYY=: calendar year to report.
+- =--fx-table PATH=: FX rates CSV (see FX Data section).
+- =--locale {EN,PT}=: locale for sheet names and headers (default EN).
+- =--output PATH=: output XLSX file path (default =report_<year>.xlsx=).
+- =--auto-fix-sell-gaps=: synthesize residual lots when SELLS exceed available buys.
+- =-v= / =-vv=: increase logging verbosity (INFO / DEBUG).
 
 ** Handling unmatched SELLs
 
