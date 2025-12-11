@@ -7,15 +7,15 @@ lint:
 	ruff check src tests
 	mypy src tests
 
-.PHONY: test
-test:
-	pytest
-
 .PHONY: fmt
 fmt:
   # Running isort ahead of ruff because it is more comprehensive than `ruff format`.
 	isort src tests
 	ruff format src tests
+
+.PHONY: test
+test:
+	pytest
 
 .PHONY: clean
 clean:
