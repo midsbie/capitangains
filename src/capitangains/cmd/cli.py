@@ -60,7 +60,7 @@ getcontext().prec = 28
 getcontext().rounding = ROUND_HALF_UP
 
 
-def process_files(args):
+def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
     logger = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ def process_files(args):
     logger.info("Wrote workbook to %s", out_path)
 
 
-def build_argparser():
+def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Portugal Capital Gains Report from IBKR Activity Statement CSV"
     )
@@ -234,7 +234,7 @@ def build_argparser():
     return p
 
 
-def main():
+def main() -> None:
     parser = build_argparser()
     args = parser.parse_args()
 

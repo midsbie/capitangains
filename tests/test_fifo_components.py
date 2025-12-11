@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from capitangains.reporting.fifo_domain import Lot
+from capitangains.reporting.fifo_domain import Lot, SellMatchLeg
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
 from capitangains.reporting.positions import PositionBook
 from capitangains.reporting.realized_builder import build_realized_line
@@ -76,12 +76,12 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
         tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
     )
     legs = [
-        {
-            "buy_date": dt.date(2024, 1, 1),
-            "qty": Decimal("100"),
-            "lot_qty_before": Decimal("100"),
-            "alloc_cost_ccy": Decimal("1200.01000000"),
-        }
+        SellMatchLeg(
+            buy_date=dt.date(2024, 1, 1),
+            qty=Decimal("100"),
+            lot_qty_before=Decimal("100"),
+            alloc_cost_ccy=Decimal("1200.01000000"),
+        )
     ]
     legs_after, alloc_after, event = policy.resolve(
         trade, Decimal("20"), legs, Decimal("1200.01000000")
@@ -102,7 +102,7 @@ def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
     policy = BasisSynthesisPolicy(
         tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
     )
-    legs: list[dict] = []
+    legs: list[SellMatchLeg] = []
     legs_after, alloc_after, event = policy.resolve(
         trade, Decimal("15"), legs, Decimal("950")
     )
@@ -121,7 +121,7 @@ def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
     policy = BasisSynthesisPolicy(
         tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
     )
-    legs: list[dict] = []
+    legs: list[SellMatchLeg] = []
     legs_after, alloc_after, event = policy.resolve(
         trade, Decimal("5"), legs, Decimal("0")
     )
@@ -141,12 +141,12 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
         tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
     )
     legs = [
-        {
-            "buy_date": dt.date(2024, 1, 1),
-            "qty": Decimal("100"),
-            "lot_qty_before": Decimal("100"),
-            "alloc_cost_ccy": Decimal("1000.02000000"),
-        }
+        SellMatchLeg(
+            buy_date=dt.date(2024, 1, 1),
+            qty=Decimal("100"),
+            lot_qty_before=Decimal("100"),
+            alloc_cost_ccy=Decimal("1000.02000000"),
+        )
     ]
     legs_after, alloc_after, event = policy.resolve(
         trade, Decimal("10"), legs, Decimal("1000.02000000")
@@ -166,12 +166,12 @@ def test_realized_line_builder_rounds_realized_pl():
         comm_fee=Decimal("-1.23"),
     )
     legs = [
-        {
-            "buy_date": dt.date(2023, 6, 1),
-            "qty": Decimal("50"),
-            "lot_qty_before": Decimal("50"),
-            "alloc_cost_ccy": Decimal("420.56789012"),
-        }
+        SellMatchLeg(
+            buy_date=dt.date(2023, 6, 1),
+            qty=Decimal("50"),
+            lot_qty_before=Decimal("50"),
+            alloc_cost_ccy=Decimal("420.56789012"),
+        )
     ]
     line = build_realized_line(trade, legs, Decimal("420.56789012"))
     assert line.sell_qty == Decimal("50")

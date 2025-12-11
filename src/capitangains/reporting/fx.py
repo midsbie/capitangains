@@ -18,7 +18,7 @@ class FxTable:
       - date,currency,eur_per_unit    # geur_per_unit = EUR per 1 unit of currency
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Map: currency -> { date -> Decimal(eur_per_unit) }, plus sorted date list
         self.data: dict[str, dict[str, Decimal]] = defaultdict(dict)
         self.date_index: dict[str, list[str]] = {}

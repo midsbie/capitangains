@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import csv
 import logging
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 RowDict = dict[str, str]
 
@@ -28,7 +28,7 @@ class IbkrModel:
 
     sections: dict[str, list[Subtable]] = field(default_factory=dict)
 
-    def get_subtables(self, section_name: str) -> list[Mapping[str, Any]]:
+    def get_subtables(self, section_name: str) -> list[Subtable]:
         """Return the subtables for a section (as list of Subtable)."""
         return self.sections.get(section_name, [])
 

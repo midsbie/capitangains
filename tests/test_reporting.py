@@ -80,7 +80,7 @@ def test_syep_interest_parsing_excludes_totals():
     r = parsed[0]
     assert r.currency == "USD"
     assert r.symbol == "BANC"
-    assert r.value_date.isoformat() == "2024-06-10"
+    assert r.value_date is not None and r.value_date.isoformat() == "2024-06-10"
     assert r.interest_paid == Decimal("0.01")
 
 

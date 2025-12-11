@@ -57,12 +57,12 @@ class FifoMatcher:
     def ingest(self, trade: Any) -> RealizedLine | None:
         qty = trade.quantity
         if qty > 0:
-            return self._ingest_buy(trade)
+            self._ingest_buy(trade)
+            return None
         elif qty < 0:
             return self._ingest_sell(trade)
-        else:
-            raise ValueError("trade quantity cannot be zero")
-        return None
+
+        raise ValueError("trade quantity cannot be zero")
 
     def ingest_transfer(self, transfer: Any) -> None:
         """Ingest a TransferRow (from extract.py) into the position book.

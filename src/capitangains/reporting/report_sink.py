@@ -9,6 +9,7 @@ from typing import Protocol
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
 
 from .report_builder import ReportBuilder
 
@@ -23,7 +24,7 @@ class ExcelReportSink:
     out_path: Path
     locale: str = "PT"  # "PT" (default) or "EN"
 
-    def _labels(self):
+    def _labels(self) -> dict[str, dict[str, str]]:
         loc = (self.locale or "PT").upper()
         if loc == "EN":
             return {
@@ -263,7 +264,9 @@ class ExcelReportSink:
         wb.save(out_path)
         return out_path
 
-    def _write_summary(self, wb, report, labels):
+    def _write_summary(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         # Summary sheet (totals)
         ws = wb.create_sheet(title=labels["sheet"]["summary"])
         total_eur = sum(
@@ -279,7 +282,7 @@ class ExcelReportSink:
             Decimal("0"),
         )
 
-        totals_by_cur = {}
+        totals_by_cur: dict[str, Decimal] = {}
         for rl in report.realized_lines:
             # Exclude EUR from by-currency totals to avoid duplicate label confusion
             if rl.currency == "EUR":
@@ -308,7 +311,9 @@ class ExcelReportSink:
                 row=ws.max_row, column=2
             ).number_format = self._money_fmt_for_currency(cur)
 
-    def _write_realized(self, wb, report, labels):
+    def _write_realized(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         # Realized trades sheet
         ws = wb.create_sheet(title=labels["sheet"]["realized"])
         ws.append(
@@ -377,7 +382,9 @@ class ExcelReportSink:
             for c in range(10, 15):
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
-    def _write_anexo_j(self, wb, report, labels):
+    def _write_anexo_j(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         # Annex J helper (per-leg breakdown with EUR values)
         ws = wb.create_sheet(title=labels["sheet"]["anexo_j"])
         ws.append(
@@ -428,7 +435,9 @@ class ExcelReportSink:
                         row=r, column=c
                     ).number_format = self._money_fmt_for_currency("EUR")
 
-    def _write_per_symbol(self, wb, report, labels):
+    def _write_per_symbol(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         # Per-symbol summary (trade currency + EUR)
         ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
         ws.append(
@@ -489,7 +498,9 @@ class ExcelReportSink:
                     "EUR"
                 )
 
-    def _write_dividends(self, wb, report, labels):
+    def _write_dividends(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         if not report.dividends:
             return
         ws = wb.create_sheet(title=labels["sheet"]["dividends"])
@@ -522,7 +533,9 @@ class ExcelReportSink:
             )
             ws.cell(row=r, column=5).number_format = self._money_fmt_for_currency("EUR")
 
-    def _write_interest(self, wb, report, labels):
+    def _write_interest(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         if not (getattr(report, "interest", None) and report.interest):
             return
         ws = wb.create_sheet(title=labels["sheet"]["interest"])
@@ -558,7 +571,9 @@ class ExcelReportSink:
             )
             ws.cell(row=r, column=5).number_format = self._money_fmt_for_currency("EUR")
 
-    def _write_syep_interest(self, wb, report, labels):
+    def _write_syep_interest(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         if not (getattr(report, "syep_interest", None) and report.syep_interest):
             return
         ws = wb.create_sheet(title=labels["sheet"]["syep_interest"])
@@ -617,7 +632,9 @@ class ExcelReportSink:
                 "EUR"
             )
 
-    def _write_withholding(self, wb, report, labels):
+    def _write_withholding(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         if not report.withholding:
             return
         ws = wb.create_sheet(title=labels["sheet"]["withholding"])
@@ -660,7 +677,9 @@ class ExcelReportSink:
             )
             ws.cell(row=r, column=7).number_format = self._money_fmt_for_currency("EUR")
 
-    def _write_transfers(self, wb, report, labels):
+    def _write_transfers(
+        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
+    ) -> None:
         if not (getattr(report, "transfers", None) and report.transfers):
             return
         ws = wb.create_sheet(title=labels["sheet"]["transfers"])
@@ -714,7 +733,9 @@ class ExcelReportSink:
             return f'#,##0.00 "{cur}"'
         return f'"{cur}" #,##0.00'
 
-    def _autosize(self, sheet, max_width: int = 60, min_width: int = 10) -> None:
+    def _autosize(
+        self, sheet: Worksheet, max_width: int = 60, min_width: int = 10
+    ) -> None:
         header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []
         for col in range(1, sheet.max_column + 1):
             max_len = 0

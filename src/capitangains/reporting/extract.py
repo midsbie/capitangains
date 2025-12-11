@@ -126,7 +126,7 @@ class SyepInterestRow:
 
 
 def parse_trades_stocklike_row(
-    scope_set: set[str], r: dict[str, str], col: dict[str, int]
+    scope_set: set[str] | None, r: dict[str, str], col: dict[str, int | None]
 ) -> TradeRow | None:
     asset_category = r.get("Asset Category", "").strip()
     if scope_set is not None and asset_category not in scope_set:
@@ -203,7 +203,7 @@ def parse_trades_stocklike(
         rows = sub.rows
 
         # Try to locate relevant columns (be lenient)
-        col = {k: None for k in TRADE_COLS}
+        col: dict[str, int | None] = {k: None for k in TRADE_COLS}
         for name in col:
             for i, h in enumerate(header):
                 if h == name:

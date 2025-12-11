@@ -1,5 +1,6 @@
 import datetime as dt
 from decimal import Decimal
+from typing import Any
 
 from openpyxl import load_workbook
 
@@ -24,7 +25,9 @@ def _make_fx(rates):
     return table
 
 
-def _realized(symbol: str, currency: str, sell_date: dt.date, legs: list[SellMatchLeg]):
+def _realized(
+    symbol: str, currency: str, sell_date: dt.date, legs: list[dict[str, Any]]
+):
     leg_objs = [
         SellMatchLeg(
             buy_date=leg["buy_date"],
@@ -72,7 +75,7 @@ def test_report_builder_add_realized_accumulates_symbol_totals():
 
 def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
     rb = ReportBuilder(year=2024)
-    usd_legs = [
+    usd_legs: list[dict[str, Any]] = [
         {
             "buy_date": dt.date(2023, 6, 1),
             "qty": Decimal("5"),
@@ -222,7 +225,7 @@ def test_excel_report_sink_serializes_legs(tmp_path):
     wb = load_workbook(out_path)
     ws = wb["Realized Trades"]
     legs_json = ws.cell(row=2, column=15).value
-    assert '"buy_date": "2023-01-01"' in legs_json
+    assert isinstance(legs_json, str) and '"buy_date": "2023-01-01"' in legs_json
 
 
 def test_excel_report_sink_sorts_dividends_by_description(tmp_path):

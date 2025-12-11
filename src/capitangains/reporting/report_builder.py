@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ReportBuilder:
     year: int
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # collections
         self.realized_lines: list[RealizedLine] = []
         self.symbol_totals: defaultdict[str, dict[str, Decimal]] = defaultdict(
@@ -34,7 +34,7 @@ class ReportBuilder:
         self.fx_needed: bool = False
         self.fx_missing: bool = False
 
-    def add_realized(self, rl: RealizedLine):
+    def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
         # aggregate per symbol
         t = self.symbol_totals[rl.symbol]
@@ -49,22 +49,22 @@ class ReportBuilder:
             t["proceeds_eur"] += rl.sell_net_eur or Decimal("0")
             t["alloc_cost_eur"] += rl.alloc_cost_eur or Decimal("0")
 
-    def set_dividends(self, rows: list[DividendRow]):
+    def set_dividends(self, rows: list[DividendRow]) -> None:
         self.dividends = rows
 
-    def set_withholding(self, rows: list[WithholdingRow]):
+    def set_withholding(self, rows: list[WithholdingRow]) -> None:
         self.withholding = rows
 
-    def set_syep_interest(self, rows: list[SyepInterestRow]):
+    def set_syep_interest(self, rows: list[SyepInterestRow]) -> None:
         self.syep_interest = rows
 
-    def set_interest(self, rows: list[InterestRow]):
+    def set_interest(self, rows: list[InterestRow]) -> None:
         self.interest = rows
 
-    def set_transfers(self, transfers: list[Any]):
+    def set_transfers(self, transfers: list[Any]) -> None:
         self.transfers = transfers
 
-    def convert_eur(self, fx: FxTable | None):
+    def convert_eur(self, fx: FxTable | None) -> None:
         """Convert realized lines to EUR using per-date FX if available.
 
         PT practice: acquisition values -> EUR at buy date; sale values -> EUR at sale

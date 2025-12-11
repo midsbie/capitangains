@@ -97,7 +97,7 @@ def test_fifo_matcher_gap_policy_can_skip_event():
     trade = _trade("ABC", Decimal("-5"), proceeds=Decimal("50"), comm=Decimal("0"))
     line = matcher.ingest(trade)
 
-    assert line.has_gap is True
+    assert line is not None and line.has_gap is True
     assert matcher.gap_events == []
 
 
