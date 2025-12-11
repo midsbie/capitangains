@@ -35,7 +35,7 @@ class ExcelReportSink:
                     "interest": "Account Interest",
                     "withholding": "Withholding Tax",
                     "transfers": "Stock Transfers",
-                    "anexo_g": "Lot-Level EUR Breakdown",
+                    "anexo_j": "Lot-Level EUR Breakdown",
                     "syep_interest": "SYEP Interest",
                 },
                 "summary": {
@@ -63,7 +63,7 @@ class ExcelReportSink:
                     "pl_eur": "Realized P/L (EUR)",
                     "legs_json": "Matched Buy Lots (JSON)",
                 },
-                "anexo_g": {
+                "anexo_j": {
                     "ticker": "Ticker",
                     "trade_currency": "Trade Currency",
                     "buy_date": "Acquisition Date",
@@ -140,7 +140,7 @@ class ExcelReportSink:
                 "interest": "Juros da Conta",
                 "withholding": "Retenção na Fonte",
                 "transfers": "Transferências de Ações",
-                "anexo_g": "Operações por Lote (Anexo G)",
+                "anexo_j": "Operações por Lote (Anexo J)",
                 "syep_interest": "Juros SYEP",
             },
             "summary": {
@@ -168,7 +168,7 @@ class ExcelReportSink:
                 "pl_eur": "Resultado Realizado (EUR)",
                 "legs_json": "Lotes de Compra (JSON)",
             },
-            "anexo_g": {
+            "anexo_j": {
                 "ticker": "Símbolo",
                 "trade_currency": "Moeda da Operação",
                 "buy_date": "Data de Aquisição",
@@ -248,7 +248,7 @@ class ExcelReportSink:
 
         self._write_summary(wb, report, labels)
         self._write_realized(wb, report, labels)
-        self._write_anexo_g(wb, report, labels)
+        self._write_anexo_j(wb, report, labels)
         self._write_per_symbol(wb, report, labels)
         self._write_dividends(wb, report, labels)
         self._write_interest(wb, report, labels)
@@ -377,20 +377,20 @@ class ExcelReportSink:
             for c in range(10, 15):
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
-    def _write_anexo_g(self, wb, report, labels):
-        # Annex G helper (per-leg breakdown with EUR values)
-        ws = wb.create_sheet(title=labels["sheet"]["anexo_g"])
+    def _write_anexo_j(self, wb, report, labels):
+        # Annex J helper (per-leg breakdown with EUR values)
+        ws = wb.create_sheet(title=labels["sheet"]["anexo_j"])
         ws.append(
             [
-                labels["anexo_g"]["ticker"],
-                labels["anexo_g"]["trade_currency"],
-                labels["anexo_g"]["buy_date"],
-                labels["anexo_g"]["sell_date"],
-                labels["anexo_g"]["qty"],
-                labels["anexo_g"]["alloc_eur"],
-                labels["anexo_g"]["proceeds_eur"],
-                labels["anexo_g"]["pl_eur"],
-                labels["anexo_g"]["transferred"],
+                labels["anexo_j"]["ticker"],
+                labels["anexo_j"]["trade_currency"],
+                labels["anexo_j"]["buy_date"],
+                labels["anexo_j"]["sell_date"],
+                labels["anexo_j"]["qty"],
+                labels["anexo_j"]["alloc_eur"],
+                labels["anexo_j"]["proceeds_eur"],
+                labels["anexo_j"]["pl_eur"],
+                labels["anexo_j"]["transferred"],
             ]
         )
 

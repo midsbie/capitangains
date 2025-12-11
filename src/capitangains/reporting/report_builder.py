@@ -102,7 +102,7 @@ class ReportBuilder:
         rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
             Decimal("0.01")
         )
-        # allocate sale net EUR across legs by quantity share (helps Annex G)
+        # allocate sale net EUR across legs by quantity share (helps Annex J)
         if rl.sell_qty != 0:
             for leg in rl.legs:
                 share = leg.qty / rl.sell_qty
