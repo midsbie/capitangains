@@ -9,7 +9,7 @@ from decimal import Decimal
 import pytest
 
 from capitangains.model.ibkr import IbkrStatementCsvParser
-from capitangains.reporting.extract import DividendRow, parse_dividends
+from capitangains.reporting.extract import parse_dividends
 
 
 def _parse_rows(rows):

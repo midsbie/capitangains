@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from capitangains.model.ibkr import IbkrStatementCsvParser
-from capitangains.reporting.extract import TradeRow, parse_trades_stocklike
+from capitangains.reporting.extract import parse_trades_stocklike
 
 
 def _parse_rows(rows):

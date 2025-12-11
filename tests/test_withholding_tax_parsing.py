@@ -9,7 +9,7 @@ from decimal import Decimal
 import pytest
 
 from capitangains.model.ibkr import IbkrStatementCsvParser
-from capitangains.reporting.extract import WithholdingRow, parse_withholding_tax
+from capitangains.reporting.extract import parse_withholding_tax
 
 
 def _parse_rows(rows):
@@ -301,7 +301,8 @@ def test_type_classification_empty_for_unrecognized():
 
 
 def test_type_classification_compound_terms():
-    """Test that 'dividend' takes precedence in compound terms like 'interest dividend'."""
+    """Test that 'dividend' takes precedence in compound terms like 'interest
+    dividend'."""
     rows = [
         [
             "Withholding Tax",
