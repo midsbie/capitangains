@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -202,6 +203,16 @@ def parse_trades_stocklike(
         header = [h.strip() for h in sub.header]
         rows = sub.rows
 
+        if logger.isEnabledFor(logging.DEBUG):
+            asset_categories = {
+                r.get("Asset Category", "") for r in rows if r.get("Asset Category")
+            }
+            logger.debug(
+                "Processing Trades subtable with %d rows (Asset Categories: %s)",
+                len(rows),
+                asset_categories,
+            )
+
         # Try to locate relevant columns (be lenient)
         col: dict[str, int | None] = {k: None for k in TRADE_COLS}
         for name in col:
@@ -215,6 +226,12 @@ def parse_trades_stocklike(
             logger.debug("Skipping Trades subtable, missing cols: %s", col)
             continue
 
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Mapped Trades columns: %s",
+                {k: header[v] for k, v in col.items() if v is not None},
+            )
+
         for r in rows:
             trade = parse_trades_stocklike_row(scope_set, r, col)
             if trade is not None:
@@ -223,6 +240,16 @@ def parse_trades_stocklike(
     # Sort by actual execution date/time for deterministic FIFO (buys before sells if
     # same timestamp use quantity sign)
     trades.sort(key=lambda tr: (tr.date, tr.datetime_str, tr.quantity <= 0))
+    if logger.isEnabledFor(logging.DEBUG):
+        buys = sum(1 for t in trades if t.quantity > 0)
+        sells = sum(1 for t in trades if t.quantity < 0)
+        logger.debug(
+            "Extracted %d trades (%d buys, %d sells)",
+            len(trades),
+            buys,
+            sells,
+        )
+
     return trades
 
 
@@ -250,6 +277,8 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
             )
         )
 
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Extracted %d dividend entries", len(out))
     return out
 
 
@@ -306,6 +335,15 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
                 country=country,
             )
         )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        counts = Counter(w.type for w in out)
+        summary = ", ".join(f"{wtype}: {count}" for wtype, count in counts.items())
+        logger.debug(
+            "Extracted %d withholding tax entries (%s)",
+            len(out),
+            summary or "none",
+        )
     return out
 
 
@@ -358,6 +396,9 @@ def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
                 code=code,
             )
         )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Extracted %d SYEP interest entries", len(out))
     return out
 
 
@@ -396,6 +437,9 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
                     amount=amt,
                 )
             )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Extracted %d interest entries", len(out))
     return out
 
 
@@ -480,19 +524,31 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
                 # matching.
                 market_value = to_dec(val_s) if val_s else Decimal("0")
 
-            t = TransferRow(
-                section="Transfers",
-                asset_category=asset_cat,
-                currency=currency,
-                symbol=symbol,
-                date=parse_date(date_s),
-                direction=direction,
-                quantity=quantity,
-                market_value=market_value,
-                code=code,
+            out.append(
+                TransferRow(
+                    section="Transfers",
+                    asset_category=asset_cat,
+                    currency=currency,
+                    symbol=symbol,
+                    date=parse_date(date_s),
+                    direction=direction,
+                    quantity=quantity,
+                    market_value=market_value,
+                    code=code,
+                )
             )
-            out.append(t)
 
     # Sort by date
     out.sort(key=lambda x: x.date)
+
+    if logger.isEnabledFor(logging.DEBUG):
+        ins = sum(1 for t in out if t.direction.lower() == "in")
+        outs = sum(1 for t in out if t.direction.lower() == "out")
+        logger.debug(
+            "Extracted %d transfers (%d IN, %d OUT)",
+            len(out),
+            ins,
+            outs,
+        )
+
     return out

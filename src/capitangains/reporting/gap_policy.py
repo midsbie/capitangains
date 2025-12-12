@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any, Callable, Protocol
 
 from .fifo_domain import GapEvent, SellMatchLeg
 from .money import abs_decimal, quantize_allocation
+
+logger = logging.getLogger(__name__)
 
 
 class GapPolicy(Protocol):
@@ -82,10 +85,19 @@ class BasisSynthesisPolicy:
         alloc_cost_so_far: Decimal,
     ) -> tuple[list[SellMatchLeg], Decimal, GapEvent]:
         basis = self._basis_getter(trade)
+        logger.debug(
+            "Basis for %s sell: %s (source: %s)",
+            trade.symbol,
+            basis if basis is not None else "None",
+            "trade row" if basis is not None else "unavailable",
+        )
         if basis is None:
             message = (
                 f"Cannot auto-fix SELL for {trade.symbol} on {trade.date}: "
                 f"missing Basis; remaining qty={qty_remaining}."
+            )
+            logger.debug(
+                "Basis synthesis failed: no basis available, using zero-cost leg"
             )
             StrictGapPolicy._append_zero_cost_leg(trade, qty_remaining, legs)
             return (
@@ -103,15 +115,37 @@ class BasisSynthesisPolicy:
 
         target_alloc = abs_decimal(basis)
         residual = quantize_allocation(target_alloc - alloc_cost_so_far)
+        logger.debug(
+            "Residual calculation: basis=%s, matched_cost=%s, residual=%s "
+            "(tolerance: %s)",
+            basis,
+            alloc_cost_so_far,
+            residual,
+            self.tolerance,
+        )
         if residual < 0:
-            if abs_decimal(residual) <= self.tolerance:
+            abs_residual = abs_decimal(residual)
+            if abs_residual <= self.tolerance:
+                logger.debug(
+                    "Residual passes tolerance check: %s <= %s: rounding to zero",
+                    abs_residual,
+                    self.tolerance,
+                )
                 residual = quantize_allocation(Decimal("0"))
             else:
+                logger.debug(
+                    "Guardrail violation: residual %s is negative and exceeds "
+                    "tolerance (%s > %s), cannot synthesize",
+                    residual,
+                    abs_residual,
+                    self.tolerance,
+                )
                 message = (
                     "Auto-fix guardrail: negative residual alloc for "
                     f"{trade.symbol} on {trade.date}: {residual}. "
                     f"Falling back to zero-cost remainder for qty={qty_remaining}."
                 )
+                logger.debug("Basis synthesis failed guardrails, using zero-cost leg")
                 StrictGapPolicy._append_zero_cost_leg(trade, qty_remaining, legs)
                 return (
                     legs,
@@ -127,6 +161,13 @@ class BasisSynthesisPolicy:
                 )
 
         synth_cost = quantize_allocation(residual)
+        avg_price = synth_cost / qty_remaining if qty_remaining > 0 else Decimal("0")
+        logger.debug(
+            "Synthesized basis: %s shares @ %s per share = %s total cost",
+            qty_remaining,
+            avg_price,
+            synth_cost,
+        )
         legs.append(
             SellMatchLeg(
                 buy_date=trade.date,

@@ -113,10 +113,24 @@ class ReportBuilder:
     def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable) -> None:
         sell_rate = fx.get_rate(rl.sell_date, rl.currency)
         if sell_rate is None:
+            logger.debug(
+                "Sell FX rate missing for %s on %s, proceeds marked as missing",
+                rl.currency,
+                rl.sell_date,
+            )
             self.fx_missing = True
             return
 
-        rl.sell_gross_eur = (rl.sell_gross_ccy * sell_rate).quantize(Decimal("0.01"))
+        proceeds_eur = (rl.sell_gross_ccy * sell_rate).quantize(Decimal("0.01"))
+        logger.debug(
+            "Sell FX conversion: %s %s: EUR (rate: %s) = %s EUR",
+            rl.sell_gross_ccy,
+            rl.currency,
+            sell_rate,
+            proceeds_eur,
+        )
+
+        rl.sell_gross_eur = proceeds_eur
         rl.sell_comm_eur = (rl.sell_comm_ccy * sell_rate).quantize(Decimal("0.01"))
         rl.sell_net_eur = (rl.sell_net_ccy * sell_rate).quantize(Decimal("0.01"))
 

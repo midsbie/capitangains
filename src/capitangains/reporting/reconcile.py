@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from decimal import Decimal
 
@@ -7,6 +8,8 @@ from capitangains.conv import to_dec
 from capitangains.model import IbkrModel
 
 from .extract import ASSET_STOCK_LIKE
+
+logger = logging.getLogger(__name__)
 
 
 def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
@@ -19,6 +22,12 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
     for sub in model.get_subtables("Realized & Unrealized Performance Summary"):
         header = [h.strip() for h in sub.header]
         rows = sub.rows
+
+        logger.debug(
+            "Found 'Realized & Unrealized Performance Summary' subtable with %d rows",
+            len(rows),
+        )
+
         # Heuristic: Find columns for Asset Category, Symbol, Total (or Realized Total).
         # In many IBKR statements, columns include fields for realized/unrealized P/L
         # and a final "Total".
@@ -48,6 +57,12 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
             range(len(header) - 1, max(-1, len(header) - 10), -1)
         )
 
+        logger.debug(
+            "Reconciliation column mapping: symbol_idx=%s, candidate_cols=%s",
+            idx_symbol,
+            candidate_cols,
+        )
+
         for r in rows:
             asset = r.get("Asset Category", "")
             if asset not in ASSET_STOCK_LIKE:
@@ -68,6 +83,14 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
                     val = dec
                     break
             if val is not None:
+                logger.debug(
+                    "Reconciliation extracted: %s: %s EUR (from col %d: %s)",
+                    sym,
+                    val,
+                    ci,
+                    header[ci],
+                )
                 result[sym] = result.get(sym, Decimal("0")) + val
 
+    logger.debug("Reconciliation parsed %d symbols from IBKR summary", len(result))
     return result

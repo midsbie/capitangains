@@ -74,6 +74,12 @@ def process_files(args: argparse.Namespace) -> None:
     reports = []
     for p in inputs:
         m, rep = parser.parse_file(p)
+        logger.debug(
+            "Parsed %s: %d sections, %d subtables",
+            p,
+            len(m.sections),
+            sum(len(subs) for subs in m.sections.values()),
+        )
         models.append(m)
         reports.append(rep)
     model = merge_models(models)
@@ -86,6 +92,15 @@ def process_files(args: argparse.Namespace) -> None:
     withholding = parse_withholding_tax(model)
     syep_interest = parse_syep_interest_details(model)
     interest = parse_interest(model)
+
+    logger.info(
+        "Extracted: %d trades, %d dividends, %d withholding, %d interest, %d transfers",
+        len(trades),
+        len(dividends),
+        len(withholding),
+        len(interest),
+        len(transfers),
+    )
 
     # Build FIFO realized
     matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)
@@ -103,6 +118,12 @@ def process_files(args: argparse.Namespace) -> None:
         rl = matcher.ingest(tr)
         if rl is not None and rl.sell_date.year == args.year:
             realized.append(rl)
+
+    logger.info(
+        "FIFO matching: %d trades processed, %d realized lines generated",
+        len(trades),
+        len(realized),
+    )
 
     # If auto-fix is disabled and there were unmatched sells, abort
     if not fix_sell_gaps and matcher.gap_events:
@@ -137,6 +158,13 @@ def process_files(args: argparse.Namespace) -> None:
     rb.set_interest([i for i in interest if i.date.year == args.year])
     rb.set_transfers(transfers)  # Include all transfers, not filtered by year
 
+    logger.info(
+        "Report built: %d realized lines, %d dividend lines, %d withholding lines",
+        len(rb.realized_lines),
+        len(rb.dividends),
+        len(rb.withholding),
+    )
+
     # FX conversion if provided
     fx: FxTable | None = None
     if args.fx_table:
@@ -152,13 +180,32 @@ def process_files(args: argparse.Namespace) -> None:
         try:
             ibkr_sum = reconcile_with_ibkr_summary(model)
             if ibkr_sum:
+                logger.debug(
+                    "Reconciling %d symbols against IBKR summary", len(ibkr_sum)
+                )
                 mismatches = []
                 for sym, ibkr_val in ibkr_sum.items():
                     my_val = rb.symbol_totals.get(sym, {}).get("realized_eur", None)
-                    if my_val is not None and (my_val - ibkr_val).copy_abs() > Decimal(
-                        "0.05"
-                    ):
-                        mismatches.append((sym, my_val, ibkr_val))
+                    if my_val is not None:
+                        diff = (my_val - ibkr_val).copy_abs()
+                        logger.debug(
+                            "Reconciliation: %s - mine: %s EUR, IBKR: %s EUR, "
+                            "diff: %s EUR (%s)",
+                            sym,
+                            my_val,
+                            ibkr_val,
+                            diff,
+                            "OK" if diff <= Decimal("0.05") else "MISMATCH",
+                        )
+                        if diff > Decimal("0.05"):
+                            mismatches.append((sym, my_val, ibkr_val))
+                    else:
+                        logger.debug(
+                            "Reconciliation: %s - mine: N/A, IBKR: %s EUR "
+                            "(symbol not in my totals)",
+                            sym,
+                            ibkr_val,
+                        )
                 if mismatches:
                     logger.warning(
                         "Reconciliation mismatches (my EUR vs IBKR EUR): %s",
