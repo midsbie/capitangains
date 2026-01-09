@@ -72,8 +72,10 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
             )
             if not sym:
                 continue
+
             # try columns from right to left for a parseable number
             val = None
+            found_col: int | None = None
             for ci in reversed(candidate_cols):
                 v = r.get(header[ci], "")
                 dec = to_dec(v)
@@ -81,14 +83,16 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
                 # skip zeros
                 if dec != 0:
                     val = dec
+                    found_col = ci
                     break
-            if val is not None:
+
+            if val is not None and found_col is not None:
                 logger.debug(
                     "Reconciliation extracted: %s: %s EUR (from col %d: %s)",
                     sym,
                     val,
-                    ci,
-                    header[ci],
+                    found_col,
+                    header[found_col],
                 )
                 result[sym] = result.get(sym, Decimal("0")) + val
 
