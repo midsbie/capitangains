@@ -188,7 +188,8 @@ def process_files(args: argparse.Namespace) -> None:
                 )
                 mismatches = []
                 for sym, ibkr_val in ibkr_sum.items():
-                    my_val = rb.symbol_totals.get(sym, {}).get("realized_eur", None)
+                    sym_totals = rb.symbol_totals.get(sym)
+                    my_val = sym_totals.eur.realized if sym_totals else None
                     if my_val is not None:
                         diff = (my_val - ibkr_val).copy_abs()
                         is_ok = diff <= RECONCILIATION_MISMATCH_THRESHOLD

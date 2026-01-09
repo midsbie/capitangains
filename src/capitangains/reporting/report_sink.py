@@ -11,7 +11,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .report_builder import ReportBuilder
+from .report_builder import CurrencyTotals, ReportBuilder
 
 # Column ranges for realized trades sheet formatting (1-indexed Excel columns)
 # Columns: ticker(1), currency(2), date(3), qty(4), gross_tcy(5), fees_tcy(6),
@@ -474,28 +474,25 @@ class ExcelReportSink:
         def primary_ccy(symbol: str) -> str:
             scores = sym_ccy_score.get(symbol, {})
             if not scores:
-                # fallback: best-effort detect from available totals keys
-                totals = report.symbol_totals.get(symbol, {})
-                for k in totals:
-                    if k.startswith("realized_ccy:"):
-                        return k.split(":", 1)[1]
+                # fallback: best-effort detect from available currency keys
+                totals = report.symbol_totals.get(symbol)
+                if totals and totals.by_currency:
+                    return next(iter(totals.by_currency.keys()))
                 return "EUR"
             return max(scores.items(), key=lambda kv: kv[1])[0]
 
         for symbol, totals in sorted(report.symbol_totals.items()):
             ccy = primary_ccy(symbol)
-            pl_tcy = totals.get("realized_ccy:" + ccy, Decimal("0"))
-            net_tcy = totals.get("proceeds_ccy:" + ccy, Decimal("0"))
-            alloc_tcy = totals.get("alloc_cost_ccy:" + ccy, Decimal("0"))
+            ccy_totals = totals.by_currency.get(ccy, CurrencyTotals())
             row = [
                 symbol,
                 ccy,
-                float(pl_tcy),
-                float(net_tcy),
-                float(alloc_tcy),
-                float(totals.get("realized_eur", Decimal("0"))),
-                float(totals.get("proceeds_eur", Decimal("0"))),
-                float(totals.get("alloc_eur", Decimal("0"))),
+                float(ccy_totals.realized),
+                float(ccy_totals.proceeds),
+                float(ccy_totals.alloc_cost),
+                float(totals.eur.realized),
+                float(totals.eur.proceeds),
+                float(totals.eur.alloc_cost),
             ]
             ws.append(row)
 

@@ -4,13 +4,7 @@ import logging
 from decimal import Decimal
 
 from .events import EventRecorder
-from .fifo_domain import (
-    GapEvent,
-    Lot,
-    RealizedLine,
-    TradeProtocol,
-    TransferProtocol,
-)
+from .fifo_domain import GapEvent, Lot, RealizedLine, TradeProtocol, TransferProtocol
 from .gap_policy import BasisSynthesisPolicy, GapPolicy, StrictGapPolicy
 from .money import abs_decimal
 from .positions import PositionBook

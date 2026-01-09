@@ -69,8 +69,9 @@ def test_report_builder_add_realized_accumulates_symbol_totals():
     rb.add_realized(rl2)
 
     totals = rb.symbol_totals["ABC"]
-    assert totals["realized_ccy:USD"] == rl1.realized_pl_ccy + rl2.realized_pl_ccy
-    assert totals["proceeds_ccy:USD"] == rl1.sell_net_ccy + rl2.sell_net_ccy
+    usd = totals.by_currency["USD"]
+    assert usd.realized == rl1.realized_pl_ccy + rl2.realized_pl_ccy
+    assert usd.proceeds == rl1.sell_net_ccy + rl2.sell_net_ccy
 
 
 def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():

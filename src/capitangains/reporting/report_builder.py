@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -15,8 +14,27 @@ from .fx import FxTable
 logger = logging.getLogger(__name__)
 
 
-def _default_symbol_totals() -> defaultdict[str, dict[str, Decimal]]:
-    return defaultdict(lambda: defaultdict(Decimal))
+@dataclass
+class CurrencyTotals:
+    """Aggregated monetary totals for a single currency."""
+
+    realized: Decimal = field(default_factory=lambda: Decimal("0"))
+    proceeds: Decimal = field(default_factory=lambda: Decimal("0"))
+    alloc_cost: Decimal = field(default_factory=lambda: Decimal("0"))
+
+
+@dataclass
+class SymbolTotals:
+    """Aggregated totals for a symbol across currencies."""
+
+    by_currency: dict[str, CurrencyTotals] = field(default_factory=dict)
+    eur: CurrencyTotals = field(default_factory=CurrencyTotals)
+
+    def get_currency(self, currency: str) -> CurrencyTotals:
+        """Get or create currency totals."""
+        if currency not in self.by_currency:
+            self.by_currency[currency] = CurrencyTotals()
+        return self.by_currency[currency]
 
 
 @dataclass
@@ -24,9 +42,7 @@ class ReportBuilder:
     year: int
     # Collections
     realized_lines: list[RealizedLine] = field(default_factory=list)
-    symbol_totals: defaultdict[str, dict[str, Decimal]] = field(
-        default_factory=_default_symbol_totals
-    )
+    symbol_totals: dict[str, SymbolTotals] = field(default_factory=dict)
     dividends: list[DividendRow] = field(default_factory=list)
     withholding: list[WithholdingRow] = field(default_factory=list)
     syep_interest: list[SyepInterestRow] = field(default_factory=list)
@@ -39,17 +55,18 @@ class ReportBuilder:
     def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
         # aggregate per symbol
+        if rl.symbol not in self.symbol_totals:
+            self.symbol_totals[rl.symbol] = SymbolTotals()
         t = self.symbol_totals[rl.symbol]
-        t["realized_ccy:" + rl.currency] += rl.realized_pl_ccy
-        t["proceeds_ccy:" + rl.currency] += rl.sell_net_ccy
-        t["alloc_cost_ccy:" + rl.currency] += sum(
-            (leg.alloc_cost_ccy for leg in rl.legs), Decimal("0")
-        )
+        ccy = t.get_currency(rl.currency)
+        ccy.realized += rl.realized_pl_ccy
+        ccy.proceeds += rl.sell_net_ccy
+        ccy.alloc_cost += sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
         # EUR aggregations if present
         if rl.realized_pl_eur is not None:
-            t["realized_eur"] += rl.realized_pl_eur
-            t["proceeds_eur"] += rl.sell_net_eur or Decimal("0")
-            t["alloc_cost_eur"] += rl.alloc_cost_eur or Decimal("0")
+            t.eur.realized += rl.realized_pl_eur
+            t.eur.proceeds += rl.sell_net_eur or Decimal("0")
+            t.eur.alloc_cost += rl.alloc_cost_eur or Decimal("0")
 
     def set_dividends(self, rows: list[DividendRow]) -> None:
         self.dividends = rows
@@ -219,18 +236,15 @@ class ReportBuilder:
         # Recompute EUR aggregates per symbol after conversions
         # Clear prior EUR aggregates (they would have been zero before conversion)
         for totals in self.symbol_totals.values():
-            if "realized_eur" in totals:
-                totals["realized_eur"] = Decimal("0")
-            if "proceeds_eur" in totals:
-                totals["proceeds_eur"] = Decimal("0")
-            if "alloc_eur" in totals:
-                totals["alloc_eur"] = Decimal("0")
+            totals.eur = CurrencyTotals()
 
         for rl in self.realized_lines:
+            if rl.symbol not in self.symbol_totals:
+                self.symbol_totals[rl.symbol] = SymbolTotals()
             t = self.symbol_totals[rl.symbol]
             if rl.realized_pl_eur is not None:
-                t["realized_eur"] += rl.realized_pl_eur
+                t.eur.realized += rl.realized_pl_eur
             if rl.sell_net_eur is not None:
-                t["proceeds_eur"] += rl.sell_net_eur
+                t.eur.proceeds += rl.sell_net_eur
             if rl.alloc_cost_eur is not None:
-                t["alloc_eur"] += rl.alloc_cost_eur
+                t.eur.alloc_cost += rl.alloc_cost_eur
