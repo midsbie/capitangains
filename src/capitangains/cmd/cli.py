@@ -59,6 +59,9 @@ from capitangains.reporting.report_sink import ExcelReportSink
 getcontext().prec = 28
 getcontext().rounding = ROUND_HALF_UP
 
+# Threshold for reconciliation mismatches (EUR)
+RECONCILIATION_MISMATCH_THRESHOLD = Decimal("0.05")
+
 
 def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
@@ -188,6 +191,7 @@ def process_files(args: argparse.Namespace) -> None:
                     my_val = rb.symbol_totals.get(sym, {}).get("realized_eur", None)
                     if my_val is not None:
                         diff = (my_val - ibkr_val).copy_abs()
+                        is_ok = diff <= RECONCILIATION_MISMATCH_THRESHOLD
                         logger.debug(
                             "Reconciliation: %s - mine: %s EUR, IBKR: %s EUR, "
                             "diff: %s EUR (%s)",
@@ -195,9 +199,9 @@ def process_files(args: argparse.Namespace) -> None:
                             my_val,
                             ibkr_val,
                             diff,
-                            "OK" if diff <= Decimal("0.05") else "MISMATCH",
+                            "OK" if is_ok else "MISMATCH",
                         )
-                        if diff > Decimal("0.05"):
+                        if diff > RECONCILIATION_MISMATCH_THRESHOLD:
                             mismatches.append((sym, my_val, ibkr_val))
                     else:
                         logger.debug(
