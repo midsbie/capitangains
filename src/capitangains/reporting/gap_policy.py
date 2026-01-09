@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any, Callable, Protocol
+from typing import Callable, Protocol
 
-from .fifo_domain import GapEvent, SellMatchLeg
+from .fifo_domain import GapEvent, SellMatchLeg, TradeProtocol
 from .money import abs_decimal, quantize_allocation
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class GapPolicy(Protocol):
     def resolve(
         self,
-        trade: Any,
+        trade: TradeProtocol,
         qty_remaining: Decimal,
         legs: list[SellMatchLeg],
         alloc_cost_so_far: Decimal,
@@ -28,7 +28,7 @@ class StrictGapPolicy:
 
     def resolve(
         self,
-        trade: Any,
+        trade: TradeProtocol,
         qty_remaining: Decimal,
         legs: list[SellMatchLeg],
         alloc_cost_so_far: Decimal,
@@ -53,7 +53,7 @@ class StrictGapPolicy:
 
     @staticmethod
     def _append_zero_cost_leg(
-        trade: Any, qty: Decimal, legs: list[SellMatchLeg]
+        trade: TradeProtocol, qty: Decimal, legs: list[SellMatchLeg]
     ) -> None:
         legs.append(
             SellMatchLeg(
@@ -72,14 +72,14 @@ class BasisSynthesisPolicy:
         self,
         *,
         tolerance: Decimal,
-        basis_getter: Callable[[Any], Decimal | None],
+        basis_getter: Callable[[TradeProtocol], Decimal | None],
     ) -> None:
         self.tolerance = tolerance
         self._basis_getter = basis_getter
 
     def resolve(
         self,
-        trade: Any,
+        trade: TradeProtocol,
         qty_remaining: Decimal,
         legs: list[SellMatchLeg],
         alloc_cost_so_far: Decimal,

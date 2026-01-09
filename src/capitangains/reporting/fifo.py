@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import Any
 
 from .events import EventRecorder
-from .fifo_domain import GapEvent, Lot, RealizedLine
+from .fifo_domain import (
+    GapEvent,
+    Lot,
+    RealizedLine,
+    TradeProtocol,
+    TransferProtocol,
+)
 from .gap_policy import BasisSynthesisPolicy, GapPolicy, StrictGapPolicy
 from .money import abs_decimal
 from .positions import PositionBook
@@ -17,7 +22,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_GAP_TOLERANCE = Decimal("0.02")
 
 
-def _default_basis_getter(trade: Any) -> Decimal | None:
+def _default_basis_getter(trade: TradeProtocol) -> Decimal | None:
     return getattr(trade, "basis_ccy", None)
 
 
@@ -54,7 +59,7 @@ class FifoMatcher:
     def gap_events(self) -> list[GapEvent]:
         return self.recorder.gap_events
 
-    def ingest(self, trade: Any) -> RealizedLine | None:
+    def ingest(self, trade: TradeProtocol) -> RealizedLine | None:
         qty = trade.quantity
         if qty > 0:
             self._ingest_buy(trade)
@@ -64,7 +69,7 @@ class FifoMatcher:
 
         raise ValueError("trade quantity cannot be zero")
 
-    def ingest_transfer(self, transfer: Any) -> None:
+    def ingest_transfer(self, transfer: TransferProtocol) -> None:
         """Ingest a TransferRow (from extract.py) into the position book.
 
         Assumes:
@@ -148,7 +153,7 @@ class FifoMatcher:
         else:
             raise ValueError(f"Unknown transfer direction: {transfer.direction!r}")
 
-    def _ingest_buy(self, trade: Any) -> None:
+    def _ingest_buy(self, trade: TradeProtocol) -> None:
         if trade.quantity <= 0:
             raise ValueError("buy trades must have positive quantity")
         lot = Lot(
@@ -174,7 +179,7 @@ class FifoMatcher:
         )
         return None
 
-    def _ingest_sell(self, trade: Any) -> RealizedLine:
+    def _ingest_sell(self, trade: TradeProtocol) -> RealizedLine:
         if trade.quantity >= 0:
             raise ValueError("sell trades must have negative quantity")
         qty_to_sell = abs_decimal(trade.quantity)

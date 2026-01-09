@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
 
-from .fifo_domain import RealizedLine, SellMatchLeg
+from .fifo_domain import RealizedLine, SellMatchLeg, TradeProtocol
 from .money import abs_decimal, quantize_money
 from .trade_math import sell_gross_ccy, sell_net_ccy
 
 
 def build_realized_line(
-    trade: Any,
+    trade: TradeProtocol,
     legs: list[SellMatchLeg],
     alloc_cost_ccy: Decimal,
 ) -> RealizedLine:

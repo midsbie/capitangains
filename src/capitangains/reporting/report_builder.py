@@ -5,10 +5,10 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
 
 from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
+from .fifo_domain import TransferProtocol
 from .fx import FxTable
 
 logger = logging.getLogger(__name__)
@@ -61,8 +61,8 @@ class ReportBuilder:
     def set_interest(self, rows: list[InterestRow]) -> None:
         self.interest = rows
 
-    def set_transfers(self, transfers: list[Any]) -> None:
         self.transfers = transfers
+    def set_transfers(self, transfers: Sequence[TransferProtocol]) -> None:
 
     def convert_eur(self, fx: FxTable | None) -> None:
         """Convert realized lines to EUR using per-date FX if available.
