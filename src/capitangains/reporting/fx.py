@@ -12,6 +12,9 @@ from capitangains.conv import date_key, to_dec_strict
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of days to look back for FX rate before warning
+_MAX_FX_LOOKBACK_DAYS = 7
+
 
 class FxTable:
     """Date-indexed FX table: (date, currency) -> EUR per 1 unit of currency.
@@ -101,11 +104,13 @@ class FxTable:
                 "FX rate lookup: %s on %s: NOT FOUND (currency not in table)", c, date
             )
             return None
+
         d = date.isoformat()
         if d in self.data[c]:
             rate = self.data[c][d]
             logger.debug("FX rate lookup: %s on %s = %s (exact match)", c, date, rate)
             return rate
+
         # fallback to nearest previous date (weekends/holidays)
         # Find the latest date <= d in sorted list
         dates = self.date_index[c]
@@ -118,20 +123,31 @@ class FxTable:
                 date,
             )
             return None
+
         fallback_date_str = dates[pos - 1]
         rate = self.data[c][fallback_date_str]
         # Best-effort logging of fallback distance; do not crash on malformed keys.
         try:
             fallback_date = dt.date.fromisoformat(fallback_date_str)
             days_back = (date - fallback_date).days
-            logger.debug(
-                "FX rate lookup: %s on %s: fallback to %s (%d days earlier) = %s",
-                c,
-                date,
-                fallback_date,
-                days_back,
-                rate,
-            )
+            if days_back > _MAX_FX_LOOKBACK_DAYS:
+                logger.warning(
+                    "FX rate for %s on %s using %d-day-old rate from %s. "
+                    "Consider providing more recent FX data.",
+                    c,
+                    date,
+                    days_back,
+                    fallback_date,
+                )
+            else:
+                logger.debug(
+                    "FX rate lookup: %s on %s: fallback to %s (%d days earlier) = %s",
+                    c,
+                    date,
+                    fallback_date,
+                    days_back,
+                    rate,
+                )
         except ValueError:
             logger.debug(
                 "FX rate lookup: %s on %s: fallback to %r (unparseable date key) = %s",
@@ -140,4 +156,5 @@ class FxTable:
                 fallback_date_str,
                 rate,
             )
+
         return rate
