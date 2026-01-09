@@ -24,6 +24,11 @@ class ExcelReportSink:
     out_path: Path
     locale: str = "PT"  # "PT" (default) or "EN"
 
+    @property
+    def _date_format(self) -> str:
+        """Excel date format string based on locale."""
+        return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+
     def _labels(self) -> dict[str, dict[str, str]]:
         loc = (self.locale or "PT").upper()
         if loc == "EN":
@@ -337,7 +342,7 @@ class ExcelReportSink:
             ]
         )
 
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
         qty_fmt = "0.########"
 
         for rl in report.realized_lines:
@@ -402,7 +407,7 @@ class ExcelReportSink:
             ]
         )
 
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
         qty_fmt = "0.########"
 
         for rl in report.realized_lines:
@@ -515,7 +520,7 @@ class ExcelReportSink:
             ]
         )
         sorted_divs = sorted(report.dividends, key=lambda row: row.description.lower())
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
 
         for d in sorted_divs:
             ws.append(
@@ -553,7 +558,7 @@ class ExcelReportSink:
             report.interest,
             key=lambda row: row.description.lower(),
         )
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
 
         for d in sorted_interest:
             ws.append(
@@ -594,7 +599,7 @@ class ExcelReportSink:
             ]
         )
         pct_fmt = "0.00####"
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
         qty_fmt = "0.########"
 
         for row in report.syep_interest:
@@ -657,7 +662,7 @@ class ExcelReportSink:
                 row.description.lower(),
             ),
         )
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
 
         for d in sorted_withholding:
             ws.append(
@@ -699,7 +704,7 @@ class ExcelReportSink:
             report.transfers,
             key=lambda t: (t.date, t.symbol),
         )
-        date_fmt = "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        date_fmt = self._date_format
         qty_fmt = "0.########"
 
         for t in sorted_transfers:
