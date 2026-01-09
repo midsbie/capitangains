@@ -3,7 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import logging
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
@@ -14,25 +15,26 @@ from .fx import FxTable
 logger = logging.getLogger(__name__)
 
 
+def _default_symbol_totals() -> defaultdict[str, dict[str, Decimal]]:
+    return defaultdict(lambda: defaultdict(Decimal))
+
+
 @dataclass
 class ReportBuilder:
     year: int
-
-    def __post_init__(self) -> None:
-        # collections
-        self.realized_lines: list[RealizedLine] = []
-        self.symbol_totals: defaultdict[str, dict[str, Decimal]] = defaultdict(
-            lambda: defaultdict(Decimal)
-        )
-        self.dividends: list[DividendRow] = []
-        self.withholding: list[WithholdingRow] = []
-        self.syep_interest: list[SyepInterestRow] = []
-        self.interest: list[InterestRow] = []
-        self.transfers: list[Any] = []  # TransferRow objects
-
-        # flags
-        self.fx_needed: bool = False
-        self.fx_missing: bool = False
+    # Collections
+    realized_lines: list[RealizedLine] = field(default_factory=list)
+    symbol_totals: defaultdict[str, dict[str, Decimal]] = field(
+        default_factory=_default_symbol_totals
+    )
+    dividends: list[DividendRow] = field(default_factory=list)
+    withholding: list[WithholdingRow] = field(default_factory=list)
+    syep_interest: list[SyepInterestRow] = field(default_factory=list)
+    interest: list[InterestRow] = field(default_factory=list)
+    transfers: list[TransferProtocol] = field(default_factory=list)
+    # Flags
+    fx_needed: bool = False
+    fx_missing: bool = False
 
     def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
@@ -61,8 +63,8 @@ class ReportBuilder:
     def set_interest(self, rows: list[InterestRow]) -> None:
         self.interest = rows
 
-        self.transfers = transfers
     def set_transfers(self, transfers: Sequence[TransferProtocol]) -> None:
+        self.transfers = list(transfers)
 
     def convert_eur(self, fx: FxTable | None) -> None:
         """Convert realized lines to EUR using per-date FX if available.
