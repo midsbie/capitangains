@@ -229,7 +229,7 @@ class FifoMatcher:
                             trade.currency,
                         )
                 else:
-                    logger.warn(
+                    logger.warning(
                         "Gap NOT resolved: %s",
                         gap_event.message if gap_event else "unknown reason",
                     )
