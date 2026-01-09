@@ -547,7 +547,7 @@ class ExcelReportSink:
     def _write_interest(
         self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
     ) -> None:
-        if not (getattr(report, "interest", None) and report.interest):
+        if not report.interest:
             return
         ws = wb.create_sheet(title=labels["sheet"]["interest"])
         ws.append(
@@ -585,7 +585,7 @@ class ExcelReportSink:
     def _write_syep_interest(
         self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
     ) -> None:
-        if not (getattr(report, "syep_interest", None) and report.syep_interest):
+        if not report.syep_interest:
             return
         ws = wb.create_sheet(title=labels["sheet"]["syep_interest"])
         ws.append(
@@ -691,7 +691,7 @@ class ExcelReportSink:
     def _write_transfers(
         self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
     ) -> None:
-        if not (getattr(report, "transfers", None) and report.transfers):
+        if not report.transfers:
             return
         ws = wb.create_sheet(title=labels["sheet"]["transfers"])
         ws.append(
