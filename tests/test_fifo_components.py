@@ -1,8 +1,8 @@
 import datetime as dt
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
+from fixtures import Trade
 
 from capitangains.reporting.fifo_domain import Lot, SellMatchLeg
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
@@ -66,14 +66,17 @@ def test_position_book_returns_remainder_when_no_lots():
 
 
 def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
-    trade = SimpleNamespace(
+    trade = Trade(
         symbol="ABC",
         date=dt.date(2024, 3, 1),
         currency="USD",
+        quantity=Decimal("-100"),
+        proceeds=Decimal("1200"),
+        comm_fee=Decimal("0"),
         basis_ccy=Decimal("-1200"),
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
     )
     legs = [
         SellMatchLeg(
@@ -93,14 +96,17 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
 
 
 def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
-    trade = SimpleNamespace(
+    trade = Trade(
         symbol="DEF",
         date=dt.date(2024, 3, 2),
         currency="USD",
+        quantity=Decimal("-15"),
+        proceeds=Decimal("900"),
+        comm_fee=Decimal("0"),
         basis_ccy=Decimal("-900"),
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
     )
     legs: list[SellMatchLeg] = []
     legs_after, alloc_after, event = policy.resolve(
@@ -112,14 +118,17 @@ def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
 
 
 def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
-    trade = SimpleNamespace(
+    trade = Trade(
         symbol="GHI",
         date=dt.date(2024, 3, 3),
         currency="USD",
+        quantity=Decimal("-5"),
+        proceeds=Decimal("100"),
+        comm_fee=Decimal("0"),
         basis_ccy=None,
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
     )
     legs: list[SellMatchLeg] = []
     legs_after, alloc_after, event = policy.resolve(
@@ -131,14 +140,17 @@ def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
 
 
 def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
-    trade = SimpleNamespace(
+    trade = Trade(
         symbol="HIJ",
         date=dt.date(2024, 3, 4),
         currency="USD",
+        quantity=Decimal("-10"),
+        proceeds=Decimal("1000"),
+        comm_fee=Decimal("0"),
         basis_ccy=Decimal("-1000"),
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: t.basis_ccy
+        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
     )
     legs = [
         SellMatchLeg(
@@ -157,7 +169,7 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
 
 
 def test_realized_line_builder_rounds_realized_pl():
-    trade = SimpleNamespace(
+    trade = Trade(
         symbol="JKL",
         date=dt.date(2024, 4, 1),
         currency="USD",

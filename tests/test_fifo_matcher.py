@@ -1,8 +1,8 @@
 import datetime as dt
 from decimal import Decimal
-from types import SimpleNamespace
 
 import pytest
+from fixtures import Trade
 
 from capitangains.reporting.events import EventRecorder
 from capitangains.reporting.fifo import FifoMatcher
@@ -51,15 +51,14 @@ def _trade(
     proceeds: Decimal,
     comm: Decimal,
     currency: str = "USD",
-):
-    return SimpleNamespace(
+) -> Trade:
+    return Trade(
         symbol=symbol,
         quantity=qty,
         proceeds=proceeds,
         comm_fee=comm,
         currency=currency,
         date=dt.date(2024, 1, 1),
-        basis_ccy=None,
     )
 
 

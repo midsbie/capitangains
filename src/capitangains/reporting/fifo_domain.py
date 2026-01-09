@@ -43,37 +43,6 @@ class TransferProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Concrete implementations of protocols
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class Trade:
-    """Minimal trade object implementing TradeProtocol."""
-
-    date: dt.date
-    symbol: str
-    quantity: Decimal
-    currency: str
-    proceeds: Decimal
-    comm_fee: Decimal
-    basis_ccy: Decimal | None = None
-
-
-@dataclass
-class Transfer:
-    """Minimal transfer object implementing TransferProtocol."""
-
-    date: dt.date
-    symbol: str
-    quantity: Decimal
-    currency: str
-    direction: str
-    market_value: Decimal
-    code: str = ""
-
-
-# ---------------------------------------------------------------------------
 # Domain dataclasses
 # ---------------------------------------------------------------------------
 
