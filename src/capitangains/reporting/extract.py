@@ -23,6 +23,12 @@ ALL_SCOPES_SET: dict[str, set[str] | None] = {
 
 ASSET_STOCK_LIKE = {"Stocks", "Stock", "ETFs", "ETF", "ETCs", "ETP"}
 
+
+def _is_total_or_empty(value: str) -> bool:
+    """Return True if value is empty or a 'Total' summary row."""
+    return not value or value.lower().startswith("total")
+
+
 TRADE_COLS = [
     "DataDiscriminator",
     "Asset Category",
@@ -372,7 +378,7 @@ def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
         code = r.get("Code", "").strip()
 
         # Skip trailing totals like 'Total', 'Total in EUR'.
-        if not cur or cur.lower().startswith("total"):
+        if _is_total_or_empty(cur):
             continue
 
         if not (qty_s and collat_s and mkt_rate_s and cust_rate_s and paid_s):
@@ -416,7 +422,7 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
     out: list[InterestRow] = []
     for r in model.iter_rows("Interest"):
         cur = (r.get("Currency", "") or "").strip()
-        if not cur or cur.lower().startswith("total"):
+        if _is_total_or_empty(cur):
             continue
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
