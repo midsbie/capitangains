@@ -12,10 +12,12 @@ from capitangains.model import IbkrModel
 
 logger = logging.getLogger(__name__)
 
-ALL_SCOPES_SET = {
-    "stocks": {"Stocks", "Stock"},
-    "etfs": {"ETF", "ETFs", "ETCs", "ETP"},
-    "stocks_etfs": {"Stocks", "Stock", "ETF", "ETFs", "ETCs", "ETP"},
+_STOCKS = {"Stocks", "Stock"}
+_ETFS = {"ETF", "ETFs", "ETCs", "ETP"}
+ALL_SCOPES_SET: dict[str, set[str] | None] = {
+    "stocks": _STOCKS,
+    "etfs": _ETFS,
+    "stocks_etfs": _STOCKS | _ETFS,
     "all": None,
 }
 
