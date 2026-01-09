@@ -13,6 +13,13 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .report_builder import ReportBuilder
 
+# Column ranges for realized trades sheet formatting (1-indexed Excel columns)
+# Columns: ticker(1), currency(2), date(3), qty(4), gross_tcy(5), fees_tcy(6),
+#          net_tcy(7), alloc_tcy(8), pl_tcy(9), gross_eur(10), fees_eur(11),
+#          net_eur(12), alloc_eur(13), pl_eur(14), legs_json(15)
+_REALIZED_TCY_MONEY_COLS = range(5, 10)  # Trade currency columns (gross..pl)
+_REALIZED_EUR_MONEY_COLS = range(10, 15)  # EUR columns (gross..pl)
+
 
 class ReportSink(Protocol):
     def write(self, report: ReportBuilder) -> Path:  # returns written file path
@@ -379,13 +386,11 @@ class ExcelReportSink:
             r = ws.max_row
             ws.cell(row=r, column=3).number_format = date_fmt
             ws.cell(row=r, column=4).number_format = qty_fmt
-            # Trade currency money columns 5..9
             tcy_fmt = self._money_fmt_for_currency(rl.currency)
-            for c in range(5, 10):
+            for c in _REALIZED_TCY_MONEY_COLS:
                 ws.cell(row=r, column=c).number_format = tcy_fmt
-            # EUR money columns 10..14
             eur_fmt = self._money_fmt_for_currency("EUR")
-            for c in range(10, 15):
+            for c in _REALIZED_EUR_MONEY_COLS:
                 ws.cell(row=r, column=c).number_format = eur_fmt
 
     def _write_anexo_j(
