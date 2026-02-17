@@ -71,6 +71,33 @@ def test_reconcile_collects_stock_symbols_only():
     }
 
 
+def test_reconcile_fallback_prefers_rightmost_numeric_column():
+    """When no header matches the P&L regex, the fallback should pick the
+    rightmost parseable numeric column (scanning right-to-left)."""
+    rows = [
+        [
+            "Realized & Unrealized Performance Summary",
+            "Header",
+            "Asset Category",
+            "Symbol",
+            "Quantity",
+            "Amount",
+        ],
+        [
+            "Realized & Unrealized Performance Summary",
+            "Data",
+            "Stocks",
+            "ABC",
+            "100.00",
+            "7.50",
+        ],
+    ]
+    model = _parse_rows(rows)
+
+    # "Amount" (rightmost) should win over "Quantity"
+    assert reconcile_with_ibkr_summary(model) == {"ABC": Decimal("7.50")}
+
+
 def test_reconcile_returns_empty_when_missing_columns():
     rows = [
         ["Realized & Unrealized Performance Summary", "Header", "Symbol", "Total"],

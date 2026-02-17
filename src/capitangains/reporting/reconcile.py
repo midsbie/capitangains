@@ -54,7 +54,7 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
             if re.search(r"(Total|Realized|P/L|Profit|Loss)", h, re.I)
         ]
         candidate_cols = numeric_cols or list(
-            range(len(header) - 1, max(-1, len(header) - 10), -1)
+            range(max(0, len(header) - 10), len(header))
         )
 
         logger.debug(
