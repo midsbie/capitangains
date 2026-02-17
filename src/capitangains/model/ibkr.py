@@ -116,8 +116,8 @@ class IbkrStatementCsvParser:
 
             # Defensive: need at least 2 cols for 'section' and 'kind'
             if len(row) < 2:
-                report.warn(
-                    line_no, "Malformed or blank-ish row (< 2 cells); skipped.", row
+                report.error(
+                    line_no, "Malformed row (< 2 cells); skipped.", row
                 )
                 continue
 
@@ -142,13 +142,22 @@ class IbkrStatementCsvParser:
                 continue
 
             if kind != "Data":
-                report.warn(line_no, f"Unknown kind '{kind}'; row skipped.", row)
+                report.error(line_no, f"Unknown kind '{kind}'; row skipped.", row)
                 continue
 
             # "Data" row
             if current_section is None or current_subtable is None:
-                report.warn(
+                report.error(
                     line_no, "Data row encountered before any header; row skipped.", row
+                )
+                continue
+
+            if section != current_section:
+                report.error(
+                    line_no,
+                    f"Data row section {section!r} differs from current header "
+                    f"section {current_section!r}; row skipped.",
+                    row,
                 )
                 continue
 

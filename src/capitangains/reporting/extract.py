@@ -150,7 +150,6 @@ def parse_trades_stocklike_row(
     proceeds_s = r.get("Proceeds", "").strip()
     code = r.get("Code", "").strip()
 
-    # T. Price may be missing in some rows, default 0
     t_price_s = r.get("T. Price", "").strip()
 
     # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears

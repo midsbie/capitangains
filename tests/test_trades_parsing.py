@@ -557,7 +557,7 @@ def test_parse_scope_filtering_etfs():
 
 
 def test_error_empty_t_price():
-    """Test that empty T.Price raises ValueError (uses to_dec_strict)."""
+    """Empty T.Price on a valid trade row is corrupt input."""
     rows = [
         [
             "Trades",
@@ -588,7 +588,6 @@ def test_error_empty_t_price():
     ]
 
     model = _parse_rows(rows)
-    # to_dec_strict on empty T.Price should raise ValueError
     with pytest.raises(ValueError, match="empty string"):
         parse_trades_stocklike(model, asset_scope="stocks")
 

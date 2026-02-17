@@ -26,9 +26,9 @@ def test_parser_bom_and_data_before_header():
     parser = IbkrStatementCsvParser()
     model, report = parser.parse_rows(rows)
 
-    # Data-before-header is skipped and reported
+    # Data-before-header is skipped and reported as error
     assert any(
-        i.severity == "warning"
+        i.severity == "error"
         and "Data row encountered before any header" in i.message
         for i in report.issues
     )
