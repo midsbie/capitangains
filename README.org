@@ -15,19 +15,17 @@ This software is experimental and *may produce inconsistent or invalid results*.
 
 * Installation
 
-1. Clone the repository
-   git clone [[https://github.com/midsbie/capitangains.git][https://github.com/midsbie/capitangains.git]]
+1. Install [[https://docs.astral.sh/uv/][uv]]
 
-2. Create a virtual environment
+2. Clone the repository
    #+begin_src sh
+   git clone https://github.com/midsbie/capitangains.git
    cd capitangains
-   python3 -m venv .venv
-   source .venv/bin/activate
    #+end_src
 
 3. Install dependencies
    #+begin_src sh
-   make bootstrap
+   make setup
    #+end_src
 
 * CLI Usage

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "capitangains"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "openpyxl>=3.1.0",
 ]
@@ -13,13 +13,14 @@ dependencies = [
 [project.scripts]
 capitangains = "capitangains.cmd.cli:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "ipython",
     "isort",
     "pre-commit",
     "pyflakes",
     "pytest",
+    "pytest-cov",
     "pytest-mock",
     "ruff",
     "mypy",
@@ -52,7 +53,7 @@ max-complexity = 18
 known_first_party = ["capitangains"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 check_untyped_defs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true

@@ -1,21 +1,23 @@
 .PHONY: setup
-bootstrap:
-	pip install -e .[dev]
+setup:
+	@# A Python version is not explicitly specified via the --python flag because it is picked up from
+	@# the special .python-version file.
+	uv sync --dev
 
 .PHONY: lint
 lint:
-	ruff check src tests
-	mypy src tests
+	uv run ruff check src tests
+	uv run mypy src tests
 
 .PHONY: fmt
 fmt:
-  # Running isort ahead of ruff because it is more comprehensive than `ruff format`.
-	isort src tests
-	ruff format src tests
+	# Running isort ahead of ruff because it is more comprehensive than `ruff format`.
+	uv run isort src tests
+	uv run ruff format src tests
 
 .PHONY: test
 test:
-	pytest
+	uv run pytest tests/ --cov=src/ --cov-report=term-missing
 
 .PHONY: clean
 clean:
