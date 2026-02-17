@@ -182,7 +182,7 @@ def _map_row_to_header(data_vals: Sequence[str], header: Sequence[str]) -> RowDi
         vals = list(data_vals) + [""] * (hlen - len(data_vals))
     else:
         vals = list(data_vals[:hlen])
-    return dict(zip(header, vals))
+    return dict(zip(header, vals, strict=True))
 
 
 def merge_models(models: Sequence[IbkrModel]) -> IbkrModel:

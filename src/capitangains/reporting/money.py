@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Union
 
-MoneyLike = Union[str, Decimal]
+MoneyLike = str | Decimal
 
 _MONEY_Q = Decimal("0.01")
 _ALLOCATION_Q = Decimal("0.00000001")
