@@ -35,6 +35,7 @@ Forex CSV schema (base EUR):
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import logging
 from decimal import ROUND_HALF_UP, Decimal, getcontext
 from pathlib import Path
@@ -45,6 +46,8 @@ from capitangains.reporting import (
     FifoMatcher,
     FxTable,
     ReportBuilder,
+    TradeRow,
+    TransferRow,
     parse_dividends,
     parse_interest,
     parse_syep_interest_details,
@@ -61,6 +64,17 @@ getcontext().rounding = ROUND_HALF_UP
 
 # Threshold for reconciliation mismatches (EUR)
 RECONCILIATION_MISMATCH_THRESHOLD = Decimal("0.05")
+
+
+def _event_sort_key(event: TradeRow | TransferRow) -> tuple[dt.date, int, str]:
+    if isinstance(event, TransferRow):
+        direction = event.direction.strip().lower()
+        priority = 0 if direction == "in" else 2
+        return (event.date, priority, "")
+    elif isinstance(event, TradeRow):
+        priority = 1 if event.quantity > 0 else 3
+        return (event.date, priority, event.datetime_str)
+    raise ValueError(f"unexpected event type: {type(event)}")
 
 
 def process_files(args: argparse.Namespace) -> None:
@@ -108,18 +122,22 @@ def process_files(args: argparse.Namespace) -> None:
     # Build FIFO realized
     matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)
 
-    # Process transfers first to establish initial positions
-    if transfers:
-        logger.info("Processing %d transfers...", len(transfers))
-        # Ensure transfers are sorted by date
-        transfers.sort(key=lambda t: t.date)
-        for t in transfers:
-            matcher.ingest_transfer(t)
+    # Merge trades and transfers into a single chronological stream so that FIFO lot
+    # creation/consumption respects actual event ordering.
+    # Same-date tie-break: transfer-in(0) < buy(1) < transfer-out(2) < sell(3).
+    events: list[TradeRow | TransferRow] = [*trades, *transfers]
+    events.sort(key=_event_sort_key)
 
     realized = []
-    for tr in trades:
-        rl = matcher.ingest(tr)
-        if rl is not None and rl.sell_date.year == args.year:
+    for event in events:
+        if isinstance(event, TransferRow):
+            matcher.ingest_transfer(event)
+            continue
+        elif not isinstance(event, TradeRow):
+            raise ValueError(f"unexpected event type in merged stream: {type(event)}")
+
+        rl = matcher.ingest_trade(event)
+        if rl is not None:  # keep only realized lines generated from sells
             realized.append(rl)
 
     logger.info(
@@ -150,7 +168,8 @@ def process_files(args: argparse.Namespace) -> None:
     # Build report
     rb = ReportBuilder(year=args.year)
     for rl in realized:
-        rb.add_realized(rl)
+        if rl.sell_date.year == args.year:
+            rb.add_realized(rl)
     rb.set_dividends([d for d in dividends if d.date.year == args.year])
     rb.set_withholding([w for w in withholding if w.date.year == args.year])
 

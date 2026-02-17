@@ -53,7 +53,7 @@ class FifoMatcher:
     def gap_events(self) -> list[GapEvent]:
         return self.recorder.gap_events
 
-    def ingest(self, trade: TradeProtocol) -> RealizedLine | None:
+    def ingest_trade(self, trade: TradeProtocol) -> RealizedLine | None:
         qty = trade.quantity
         if qty > 0:
             self._ingest_buy(trade)
@@ -72,8 +72,8 @@ class FifoMatcher:
         - For 'In', transfer.market_value encodes the lot's cost basis in trade
           currency (used as a proxy for original basis).
 
-        Transfers are expected to be processed before trades to seed pre-existing
-        positions from prior accounts.
+        Callers must interleave transfers with trades in chronological order
+        to maintain correct FIFO semantics.
         """
         if transfer.quantity <= 0:
             raise ValueError("transfer quantity must be positive")

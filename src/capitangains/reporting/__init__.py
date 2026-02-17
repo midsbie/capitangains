@@ -1,5 +1,6 @@
 from .extract import (
     TradeRow,
+    TransferRow,
     parse_dividends,
     parse_interest,
     parse_syep_interest_details,
@@ -15,6 +16,7 @@ from .report_sink import ExcelReportSink, OdsReportSink, ReportSink
 
 __all__ = [
     "TradeRow",
+    "TransferRow",
     "parse_trades_stocklike",
     "parse_dividends",
     "parse_withholding_tax",

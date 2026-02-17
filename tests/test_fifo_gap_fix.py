@@ -69,9 +69,9 @@ def _sell(
 def test_fifo_no_fix_records_gap_and_zero_cost():
     m = FifoMatcher(fix_sell_gaps=False)
     # Buy 100 cost 1000
-    m.ingest(_buy("ABC", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
+    m.ingest_trade(_buy("ABC", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # Sell 120 proceeds 1200, basis -1200 (not used when no fix)
-    rl = m.ingest(
+    rl = m.ingest_trade(
         _sell("ABC", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
     )
 
@@ -92,9 +92,9 @@ def test_fifo_no_fix_records_gap_and_zero_cost():
 
 def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
     m = FifoMatcher(fix_sell_gaps=True)
-    m.ingest(_buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
+    m.ingest_trade(_buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # SELL 120, proceeds 1200, IBKR Basis -1200 -> target alloc 1200
-    rl = m.ingest(
+    rl = m.ingest_trade(
         _sell("XYZ", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
     )
     assert rl is not None
@@ -115,9 +115,11 @@ def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
 
 def test_fifo_auto_fix_missing_basis_falls_back_zero_cost():
     m = FifoMatcher(fix_sell_gaps=True)
-    m.ingest(_buy("DEF", dt.date(2024, 1, 1), "50", "-500", "0", "USD"))
+    m.ingest_trade(_buy("DEF", dt.date(2024, 1, 1), "50", "-500", "0", "USD"))
     # SELL 60, proceeds 600, Basis missing
-    rl = m.ingest(_sell("DEF", dt.date(2024, 2, 1), "-60", "600", "0", None, "USD"))
+    rl = m.ingest_trade(
+        _sell("DEF", dt.date(2024, 2, 1), "-60", "600", "0", None, "USD")
+    )
     assert rl is not None
     assert rl.has_gap is True
     assert rl.gap_fixed is False
@@ -130,10 +132,10 @@ def test_fifo_auto_fix_missing_basis_falls_back_zero_cost():
 def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     m = FifoMatcher(fix_sell_gaps=True, gap_tolerance=Decimal("0.02"))
     # Buy 90 cost 900
-    m.ingest(_buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
+    m.ingest_trade(_buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
     # SELL 100 with IBKR Basis slightly less than matched alloc
     # (residual = -0.01 -> clamp to 0)
-    rl = m.ingest(
+    rl = m.ingest_trade(
         _sell("CLP", dt.date(2024, 2, 1), "-100", "1000", "0", "-899.99", "USD")
     )
     assert rl is not None
@@ -146,9 +148,11 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
 def test_fifo_auto_fix_negative_residual_beyond_tolerance_fallback():
     m = FifoMatcher(fix_sell_gaps=True, gap_tolerance=Decimal("0.02"))
     # Buy 90 cost 900
-    m.ingest(_buy("FLT", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
+    m.ingest_trade(_buy("FLT", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
     # SELL 100 with IBKR Basis much less than matched alloc (residual = -5 -> fallback)
-    rl = m.ingest(_sell("FLT", dt.date(2024, 2, 1), "-100", "1000", "0", "-895", "USD"))
+    rl = m.ingest_trade(
+        _sell("FLT", dt.date(2024, 2, 1), "-100", "1000", "0", "-895", "USD")
+    )
     assert rl is not None
     assert rl.has_gap is True
     assert rl.gap_fixed is False
@@ -159,9 +163,9 @@ def test_fifo_auto_fix_negative_residual_beyond_tolerance_fallback():
 def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
     m = FifoMatcher(fix_sell_gaps=True)
     # Buy 100 cost 1000 USD on 2024-01-01
-    m.ingest(_buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
+    m.ingest_trade(_buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # Sell 120 on 2024-02-01, proceeds 1200, Basis -1200 so residual = 200
-    rl = m.ingest(
+    rl = m.ingest_trade(
         _sell("EURX", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
     )
     assert rl is not None and rl.gap_fixed is True
