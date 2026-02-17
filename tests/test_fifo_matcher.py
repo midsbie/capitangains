@@ -68,7 +68,7 @@ def test_fifo_matcher_buy_uses_injected_position_book():
     trade = _trade("ABC", Decimal("10"), proceeds=Decimal("-100"), comm=Decimal("-1"))
 
     assert matcher.ingest_trade(trade) is None
-    assert book.has_position("ABC") is True
+    assert book.has_position("ABC", "USD") is True
 
 
 def test_fifo_matcher_sell_uses_gap_policy_and_recorder():
@@ -230,6 +230,39 @@ def test_buy_transfer_out_sell_partial_depletes_correctly():
     assert line.legs[0].qty == Decimal("50")
     assert line.legs[0].alloc_cost_ccy == Decimal("500")
     assert line.realized_pl_ccy == Decimal("100.00")
+
+
+def test_sell_matches_only_lots_in_same_currency():
+    """Buy XYZ in EUR, then sell XYZ in USD: lots must not cross-match."""
+    matcher = FifoMatcher()
+
+    # Buy 100 XYZ denominated in EUR (basis = 1000 EUR)
+    matcher.ingest_trade(
+        _trade(
+            "XYZ",
+            Decimal("100"),
+            proceeds=Decimal("-1000"),
+            comm=Decimal("0"),
+            currency="EUR",
+        )
+    )
+
+    # Sell 100 XYZ denominated in USD — should NOT consume the EUR lot
+    line = matcher.ingest_trade(
+        _trade(
+            "XYZ",
+            Decimal("-100"),
+            proceeds=Decimal("1200"),
+            comm=Decimal("0"),
+            currency="USD",
+        )
+    )
+
+    assert line is not None
+    # The sell must report a gap: no USD lots exist for XYZ
+    assert line.has_gap is True
+    # The EUR lot must remain unconsumed
+    assert matcher.positions.has_position("XYZ", "EUR") is True
 
 
 def test_transfer_in_and_buy_both_fund_sell_in_fifo_order():

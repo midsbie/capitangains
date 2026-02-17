@@ -111,7 +111,7 @@ class FifoMatcher:
             )
             try:
                 legs, alloc_cost, qty_remaining = self.positions.consume_fifo(
-                    transfer.symbol, qty_to_remove
+                    transfer.symbol, transfer.currency, qty_to_remove
                 )
                 consumed = qty_to_remove - qty_remaining
                 logger.debug(
@@ -166,10 +166,11 @@ class FifoMatcher:
         )
         self.positions.append_buy(trade.symbol, lot)
         logger.debug(
-            "Position book for %s: %d lots, total qty: %s",
+            "Position book for %s/%s: %d lots, total qty: %s",
             trade.symbol,
-            len(self.positions._positions[trade.symbol]),
-            sum(lp.qty for lp in self.positions._positions[trade.symbol]),
+            trade.currency,
+            self.positions.lot_count(trade.symbol, trade.currency),
+            self.positions.total_qty(trade.symbol, trade.currency),
         )
         return None
 
@@ -183,11 +184,11 @@ class FifoMatcher:
             qty_to_sell,
             trade.symbol,
             trade.date,
-            len(self.positions._positions.get(trade.symbol, [])),
+            self.positions.lot_count(trade.symbol, trade.currency),
         )
 
         legs, alloc_cost_ccy, qty_remaining = self.positions.consume_fifo(
-            trade.symbol, qty_to_sell
+            trade.symbol, trade.currency, qty_to_sell
         )
 
         matched_qty = qty_to_sell - qty_remaining

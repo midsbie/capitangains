@@ -21,7 +21,7 @@ def test_position_book_fifo_consumption_and_residual_tracking():
         Lot(dt.date(2024, 2, 1), Decimal("50"), Decimal("600"), "USD"),
     )
 
-    legs, alloc, remaining = book.consume_fifo("ABC", Decimal("120"))
+    legs, alloc, remaining = book.consume_fifo("ABC", "USD", Decimal("120"))
     assert remaining == Decimal("0")
     assert len(legs) == 2
     assert legs[0].qty == Decimal("100")
@@ -30,7 +30,7 @@ def test_position_book_fifo_consumption_and_residual_tracking():
     assert legs[1].alloc_cost_ccy == Decimal("240.00000000")
     assert alloc == Decimal("1240.00000000")
 
-    legs2, alloc2, remaining2 = book.consume_fifo("ABC", Decimal("50"))
+    legs2, alloc2, remaining2 = book.consume_fifo("ABC", "USD", Decimal("50"))
     # 30 available from previous lot, 20 shortage
     assert len(legs2) == 1
     assert legs2[0].qty == Decimal("30")
@@ -54,15 +54,38 @@ def test_position_book_validations():
     lot = Lot(dt.date(2024, 1, 2), Decimal("10"), Decimal("100"), "USD")
     book.append_buy("XYZ", lot)
     with pytest.raises(ValueError):
-        book.consume_fifo("XYZ", Decimal("0"))
+        book.consume_fifo("XYZ", "USD", Decimal("0"))
 
 
 def test_position_book_returns_remainder_when_no_lots():
     book = PositionBook()
-    legs, alloc, remaining = book.consume_fifo("MISSING", Decimal("5"))
+    legs, alloc, remaining = book.consume_fifo("MISSING", "USD", Decimal("5"))
     assert legs == []
     assert alloc == Decimal("0")
     assert remaining == Decimal("5")
+
+
+def test_position_book_consume_fifo_isolates_currencies():
+    book = PositionBook()
+    book.append_buy(
+        "XYZ",
+        Lot(dt.date(2024, 1, 1), Decimal("100"), Decimal("1000"), "EUR"),
+    )
+    book.append_buy(
+        "XYZ",
+        Lot(dt.date(2024, 2, 1), Decimal("50"), Decimal("600"), "USD"),
+    )
+
+    legs, alloc, remaining = book.consume_fifo("XYZ", "USD", Decimal("50"))
+    assert remaining == Decimal("0")
+    assert len(legs) == 1
+    assert alloc == Decimal("600.00000000")
+
+    # EUR lot untouched
+    legs_eur, alloc_eur, remaining_eur = book.consume_fifo("XYZ", "EUR", Decimal("100"))
+    assert remaining_eur == Decimal("0")
+    assert len(legs_eur) == 1
+    assert alloc_eur == Decimal("1000.00000000")
 
 
 def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
