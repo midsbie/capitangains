@@ -63,7 +63,7 @@ def test_transfer_in_before_trades_transfer_out_after():
     trade = _trade("2024-06-15, 12:00:00", "100")
     xfer_out = _transfer(dt.date(2024, 6, 15), "Out")
 
-    events = [xfer_out, trade, xfer_in]
+    events: list[TradeRow | TransferRow] = [xfer_out, trade, xfer_in]
     events.sort(key=_event_sort_key)
 
     assert events == [xfer_in, trade, xfer_out]

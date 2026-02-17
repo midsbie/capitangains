@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -11,7 +10,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .report_builder import CurrencyTotals, ReportBuilder
+from .report_builder import ReportBuilder
 
 # Column ranges for realized trades sheet formatting (1-indexed Excel columns)
 # Columns: ticker(1), currency(2), date(3), qty(4), gross_tcy(5), fees_tcy(6),
@@ -464,26 +463,10 @@ class ExcelReportSink:
             ]
         )
 
-        # Determine primary trade currency per symbol (by total abs net proceeds)
-        sym_ccy_score: dict[str, dict[str, Decimal]] = defaultdict(
-            lambda: defaultdict(Decimal)
-        )
-        for rl in report.realized_lines:
-            sym_ccy_score[rl.symbol][rl.currency] += rl.sell_net_ccy.copy_abs()
-
-        def primary_ccy(symbol: str) -> str:
-            scores = sym_ccy_score.get(symbol, {})
-            if not scores:
-                # fallback: best-effort detect from available currency keys
-                totals = report.symbol_totals.get(symbol)
-                if totals and totals.by_currency:
-                    return next(iter(totals.by_currency.keys()))
-                return "EUR"
-            return max(scores.items(), key=lambda kv: kv[1])[0]
-
+        # Invariant: each symbol maps to exactly one trade currency
+        # (enforced by validate_symbol_currency_uniqueness at ingestion).
         for symbol, totals in sorted(report.symbol_totals.items()):
-            ccy = primary_ccy(symbol)
-            ccy_totals = totals.by_currency.get(ccy, CurrencyTotals())
+            ccy, ccy_totals = next(iter(totals.by_currency.items()))
             row = [
                 symbol,
                 ccy,

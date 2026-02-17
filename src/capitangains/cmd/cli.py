@@ -37,6 +37,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import logging
+from collections import defaultdict
+from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal, getcontext
 from pathlib import Path
 
@@ -64,6 +66,36 @@ getcontext().rounding = ROUND_HALF_UP
 
 # Threshold for reconciliation mismatches (EUR)
 RECONCILIATION_MISMATCH_THRESHOLD = Decimal("0.05")
+
+
+def validate_symbol_currency_uniqueness(
+    trades: Sequence[TradeRow], transfers: Sequence[TransferRow]
+) -> None:
+    """Enforce one-currency-per-symbol invariant across all extracted events.
+
+    Design choice: IBKR symbols are treated as exchange-specific identifiers, each
+    denominated in a single currency.  If the same ticker appears on exchanges with
+    different currencies (e.g. "RY" on NYSE/USD and TSX/CAD), the CSV data must
+    disambiguate them with distinct symbols.  Allowing multiple currencies per symbol
+    would make the per-symbol summary incoherent — trade-currency columns can only
+    represent one denomination, while EUR columns aggregate across all, producing
+    rows that cannot be reconciled.
+    """
+    seen: dict[str, set[str]] = defaultdict(set)
+    events: Sequence[TradeRow | TransferRow] = [*trades, *transfers]
+    for event in events:
+        seen[event.symbol].add(event.currency)
+    violations = {sym: ccys for sym, ccys in seen.items() if len(ccys) > 1}
+    if not violations:
+        return
+    details = "\n".join(
+        f"  {sym}: {', '.join(sorted(ccys))}"
+        for sym, ccys in sorted(violations.items())
+    )
+    raise ValueError(
+        f"symbol-currency uniqueness violated — each symbol must map to exactly "
+        f"one trade currency, but the following appear in multiple:\n{details}"
+    )
 
 
 def _event_sort_key(
@@ -121,6 +153,8 @@ def process_files(args: argparse.Namespace) -> None:
         len(interest),
         len(transfers),
     )
+
+    validate_symbol_currency_uniqueness(trades, transfers)
 
     # Build FIFO realized
     matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)

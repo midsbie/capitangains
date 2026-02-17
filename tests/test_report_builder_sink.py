@@ -2,12 +2,15 @@ import datetime as dt
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from openpyxl import load_workbook
 
+from capitangains.cmd.cli import validate_symbol_currency_uniqueness
 from capitangains.reporting.extract import (
     DividendRow,
     InterestRow,
     SyepInterestRow,
+    TradeRow,
     WithholdingRow,
 )
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
@@ -72,6 +75,29 @@ def test_report_builder_add_realized_accumulates_symbol_totals():
     usd = totals.by_currency["USD"]
     assert usd.realized == rl1.realized_pl_ccy + rl2.realized_pl_ccy
     assert usd.proceeds == rl1.sell_net_ccy + rl2.sell_net_ccy
+
+
+def _trade_row(symbol: str, currency: str) -> TradeRow:
+    return TradeRow(
+        section="Trades",
+        asset_category="Stocks",
+        currency=currency,
+        symbol=symbol,
+        datetime_str="2024-01-01, 10:00:00",
+        date=dt.date(2024, 1, 1),
+        quantity=Decimal("10"),
+        t_price=Decimal("100"),
+        proceeds=Decimal("-1000"),
+        comm_fee=Decimal("-1"),
+        code="O",
+    )
+
+
+def test_multi_currency_same_symbol_rejected():
+    """Same symbol in multiple currencies must raise at validation time."""
+    trades = [_trade_row("ABC", "USD"), _trade_row("ABC", "EUR")]
+    with pytest.raises(ValueError, match="symbol-currency uniqueness"):
+        validate_symbol_currency_uniqueness(trades, [])
 
 
 def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
