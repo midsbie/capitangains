@@ -66,14 +66,17 @@ getcontext().rounding = ROUND_HALF_UP
 RECONCILIATION_MISMATCH_THRESHOLD = Decimal("0.05")
 
 
-def _event_sort_key(event: TradeRow | TransferRow) -> tuple[dt.date, int, str]:
+def _event_sort_key(
+    event: TradeRow | TransferRow,
+) -> tuple[dt.date, int, str, int]:
     if isinstance(event, TransferRow):
         direction = event.direction.strip().lower()
         priority = 0 if direction == "in" else 2
-        return (event.date, priority, "")
+        return (event.date, priority, "", 0)
     elif isinstance(event, TradeRow):
-        priority = 1 if event.quantity > 0 else 3
-        return (event.date, priority, event.datetime_str)
+        # Buys before sells only as tie-break for identical timestamps.
+        sub = 0 if event.quantity > 0 else 1
+        return (event.date, 1, event.datetime_str, sub)
     raise ValueError(f"unexpected event type: {type(event)}")
 
 
@@ -124,7 +127,7 @@ def process_files(args: argparse.Namespace) -> None:
 
     # Merge trades and transfers into a single chronological stream so that FIFO lot
     # creation/consumption respects actual event ordering.
-    # Same-date tie-break: transfer-in(0) < buy(1) < transfer-out(2) < sell(3).
+    # Same-date tie-break: transfer-in(0) < trades by datetime(1) < transfer-out(2).
     events: list[TradeRow | TransferRow] = [*trades, *transfers]
     events.sort(key=_event_sort_key)
 
