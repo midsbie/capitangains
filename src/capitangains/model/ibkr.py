@@ -116,9 +116,7 @@ class IbkrStatementCsvParser:
 
             # Defensive: need at least 2 cols for 'section' and 'kind'
             if len(row) < 2:
-                report.error(
-                    line_no, "Malformed row (< 2 cells); skipped.", row
-                )
+                report.error(line_no, "Malformed row (< 2 cells); skipped.", row)
                 continue
 
             # Strip BOM on first cell if present

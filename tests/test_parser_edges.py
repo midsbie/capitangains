@@ -28,8 +28,7 @@ def test_parser_bom_and_data_before_header():
 
     # Data-before-header is skipped and reported as error
     assert any(
-        i.severity == "error"
-        and "Data row encountered before any header" in i.message
+        i.severity == "error" and "Data row encountered before any header" in i.message
         for i in report.issues
     )
 
