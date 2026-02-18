@@ -135,7 +135,10 @@ def process_files(args: argparse.Namespace) -> None:
         models.append(m)
         reports.append(rep)
     model = merge_models(models)
-    merge_reports(reports).log_with(logger)
+    parse_report = merge_reports(reports)
+    parse_report.log_with(logger)
+    if parse_report.has_errors:
+        raise SystemExit(2)
 
     # Extract data
     trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
