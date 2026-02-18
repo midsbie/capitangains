@@ -37,3 +37,19 @@ def test_parser_bom_and_data_before_header():
     assert len(subs) == 1
     r = next(iter(model.iter_rows("Dividends")))
     assert r["Currency"] == "EUR" and Decimal(r["Amount"]) == Decimal("10.00")
+
+
+def test_total_and_subtotal_rows_are_silently_skipped():
+    rows = [
+        ["Trades", "Header", "Currency", "Symbol", "Quantity"],
+        ["Trades", "Data", "EUR", "ASML", "10"],
+        ["Trades", "SubTotal", "", "", "10"],
+        ["Trades", "Total", "", "", "10"],
+    ]
+    parser = IbkrStatementCsvParser()
+    model, report = parser.parse_rows(rows)
+
+    assert list(model.iter_rows("Trades")) == [
+        {"Currency": "EUR", "Symbol": "ASML", "Quantity": "10"},
+    ]
+    assert not report.issues

@@ -9,6 +9,9 @@ from typing import Literal
 
 RowDict = dict[str, str]
 
+# IBKR CSV row kinds that carry summary data and should be silently skipped.
+_SUMMARY_KINDS: frozenset[str] = frozenset({"Total", "SubTotal"})
+
 
 @dataclass(frozen=True)
 class Subtable:
@@ -137,6 +140,9 @@ class IbkrStatementCsvParser:
                 current_section = section
                 current_subtable = _MutableSubtable(header=header)
                 sections_acc.setdefault(current_section, []).append(current_subtable)
+                continue
+
+            if kind in _SUMMARY_KINDS:
                 continue
 
             if kind != "Data":
