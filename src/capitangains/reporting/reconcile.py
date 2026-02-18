@@ -4,7 +4,7 @@ import logging
 import re
 from decimal import Decimal
 
-from capitangains.conv import to_dec
+from capitangains.conv import to_dec_strict
 from capitangains.model import IbkrModel
 
 from .extract import ASSET_STOCK_LIKE
@@ -78,13 +78,12 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
             found_col: int | None = None
             for ci in reversed(candidate_cols):
                 v = r.get(header[ci], "")
-                dec = to_dec(v)
-                # If parsing was hopeless (due to "..." elision), result might be zero;
-                # skip zeros
-                if dec != 0:
-                    val = dec
+                try:
+                    val = to_dec_strict(v)
                     found_col = ci
                     break
+                except ValueError:
+                    continue
 
             if val is not None and found_col is not None:
                 logger.debug(

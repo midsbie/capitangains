@@ -98,6 +98,37 @@ def test_reconcile_fallback_prefers_rightmost_numeric_column():
     assert reconcile_with_ibkr_summary(model) == {"ABC": Decimal("7.50")}
 
 
+def test_reconcile_preserves_zero_realized_pl():
+    """A legitimate 0.00 realized P/L must be included, not dropped."""
+    rows = [
+        [
+            "Realized & Unrealized Performance Summary",
+            "Header",
+            "Asset Category",
+            "Symbol",
+            "Total",
+        ],
+        [
+            "Realized & Unrealized Performance Summary",
+            "Data",
+            "Stocks",
+            "ABC",
+            "0.00",
+        ],
+        [
+            "Realized & Unrealized Performance Summary",
+            "Data",
+            "Stocks",
+            "XYZ",
+            "5.00",
+        ],
+    ]
+    model = _parse_rows(rows)
+
+    result = reconcile_with_ibkr_summary(model)
+    assert result == {"ABC": Decimal("0.00"), "XYZ": Decimal("5.00")}
+
+
 def test_reconcile_returns_empty_when_missing_columns():
     rows = [
         ["Realized & Unrealized Performance Summary", "Header", "Symbol", "Total"],
