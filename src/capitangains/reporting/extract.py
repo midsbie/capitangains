@@ -161,8 +161,6 @@ def parse_trades_stocklike_row(
         # Some subtables only have Comm in EUR (e.g., Forex); we don't use them here,
         # but keep consistent type.
         comm_s = r.get("Comm in EUR", "").strip()
-    else:
-        comm_s = ""
 
     # Placeholders like "..." must map to None (missing), not Decimal("0"), because
     # downstream gap synthesis treats 0 as a real value and would falsely mark gaps
@@ -420,7 +418,7 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
     """
     out: list[InterestRow] = []
     for r in model.iter_rows("Interest"):
-        cur = (r.get("Currency", "") or "").strip()
+        cur = r.get("Currency", "").strip()
         if _is_total_or_empty(cur):
             continue
         date_s = r.get("Date", "").strip()
@@ -504,7 +502,7 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
             if not (symbol and date_s and direction and qty_s):
                 raise ValueError(f"Invalid transfer row (missing fields): {r}")
 
-            direction_norm = direction.strip().lower()
+            direction_norm = direction.lower()
             if direction_norm not in {"in", "out"}:
                 raise ValueError(
                     f"Unsupported transfer direction {direction!r} for row: {r}"
@@ -529,7 +527,7 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
             else:
                 # For OUT (or other) transfers, the market value is not used in FIFO
                 # matching.
-                market_value = to_dec(val_s) if val_s else Decimal("0")
+                market_value = to_dec(val_s)
 
             out.append(
                 TransferRow(
