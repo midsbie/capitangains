@@ -29,6 +29,13 @@ def _is_total_or_empty(value: str) -> bool:
     return not value or value.lower().startswith("total")
 
 
+def _require_fields(label: str, **fields: str) -> None:
+    """Raise ValueError naming every empty required field."""
+    missing = [k for k, v in fields.items() if not v]
+    if missing:
+        raise ValueError(f"Invalid {label}: missing {', '.join(missing)}")
+
+
 TRADE_COLS = [
     "DataDiscriminator",
     "Asset Category",
@@ -143,8 +150,7 @@ def parse_trades_stocklike_row(
 
     currency = r.get("Currency", "").strip()
     symbol = r.get("Symbol", "").strip()
-    if not symbol:
-        raise ValueError("Invalid trade row: missing symbol")
+    _require_fields("trade row", symbol=symbol, currency=currency)
     dt_str = r.get("Date/Time", "").strip()
     qty_s = r.get("Quantity", "").strip()
     proceeds_s = r.get("Proceeds", "").strip()
@@ -499,8 +505,14 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
             code = r.get("Code", "").strip()
             currency = r.get("Currency", "").strip()
 
-            if not (symbol and date_s and direction and qty_s):
-                raise ValueError(f"Invalid transfer row (missing fields): {r}")
+            _require_fields(
+                "transfer row",
+                symbol=symbol,
+                date=date_s,
+                direction=direction,
+                quantity=qty_s,
+                currency=currency,
+            )
 
             direction_norm = direction.lower()
             if direction_norm not in {"in", "out"}:

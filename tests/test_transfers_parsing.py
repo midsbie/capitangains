@@ -650,7 +650,41 @@ def test_error_missing_symbol():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row.*missing fields"):
+    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
+        parse_transfers(model)
+
+
+def test_error_missing_currency():
+    """Test that missing currency raises ValueError."""
+    rows = [
+        [
+            "Transfers",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date",
+            "Direction",
+            "Qty",
+            "Market Value",
+            "Code",
+        ],
+        [
+            "Transfers",
+            "Data",
+            "Stocks",
+            "",  # Missing currency
+            "AAPL",
+            "2021-01-01",
+            "In",
+            "10",
+            "1500",
+            "",
+        ],
+    ]
+
+    model = _parse_rows(rows)
+    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
         parse_transfers(model)
 
 
@@ -684,7 +718,7 @@ def test_error_missing_date():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row.*missing fields"):
+    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
         parse_transfers(model)
 
 
@@ -718,7 +752,7 @@ def test_error_missing_direction():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row.*missing fields"):
+    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
         parse_transfers(model)
 
 
@@ -752,7 +786,7 @@ def test_error_missing_quantity():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row.*missing fields"):
+    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
         parse_transfers(model)
 
 

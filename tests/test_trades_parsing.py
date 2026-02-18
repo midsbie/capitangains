@@ -969,6 +969,42 @@ def test_error_missing_symbol():
         parse_trades_stocklike(model, asset_scope="stocks")
 
 
+def test_error_missing_currency():
+    """Test that missing currency raises ValueError."""
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "",  # Missing currency
+            "AAPL",
+            "2024-01-15, 10:00:00",
+            "100",
+            "150.00",
+            "-15000.00",
+            "-1.00",
+            "P",
+        ],
+    ]
+
+    model = _parse_rows(rows)
+    with pytest.raises(ValueError, match="missing currency"):
+        parse_trades_stocklike(model, asset_scope="stocks")
+
+
 def test_error_missing_datetime():
     """Test that missing date/time raises ValueError."""
     rows = [
