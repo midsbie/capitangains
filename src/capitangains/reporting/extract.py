@@ -152,30 +152,30 @@ def parse_trades_stocklike_row(
 
     t_price_s = r.get("T. Price", "").strip()
 
-    # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears
-    # in some Forex tables.
+    # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears in some
+    # Forex tables.
     comm_s = ""
     if "Comm/Fee" in r:
         comm_s = r.get("Comm/Fee", "").strip()
     elif "Comm in EUR" in r:
-        # Some subtables only have Comm in EUR (e.g., Forex); we don't use them
-        # here, but keep consistent type.
+        # Some subtables only have Comm in EUR (e.g., Forex); we don't use them here,
+        # but keep consistent type.
         comm_s = r.get("Comm in EUR", "").strip()
     else:
         comm_s = ""
 
-    # Optional Basis and Realized P/L if present
-    basis_opt: Decimal | None = None
-    if col.get("Basis") is not None:
-        bs = r.get("Basis", "").strip()
-        if bs != "":
-            basis_opt = to_dec(bs)
+    # Placeholders like "..." must map to None (missing), not Decimal("0"), because
+    # downstream gap synthesis treats 0 as a real value and would falsely mark gaps
+    # as fixed with zero cost.
+    try:
+        basis_opt: Decimal | None = to_dec_strict(r.get("Basis"))
+    except ValueError:
+        basis_opt = None
 
-    realized_opt: Decimal | None = None
-    if col.get("Realized P/L") is not None:
-        rs = r.get("Realized P/L", "").strip()
-        if rs != "":
-            realized_opt = to_dec(rs)
+    try:
+        realized_opt: Decimal | None = to_dec_strict(r.get("Realized P/L"))
+    except ValueError:
+        realized_opt = None
 
     trade = TradeRow(
         section="Trades",

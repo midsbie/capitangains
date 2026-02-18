@@ -1181,6 +1181,49 @@ def test_skip_subtable_missing_required_columns():
     assert trades[0].symbol == "GOOGL"
 
 
+def test_parse_elided_basis_and_realized_pl_treated_as_none():
+    """Elided placeholders ('...') in Basis/Realized P/L must yield None, not 0."""
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+            "Basis",
+            "Realized P/L",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "USD",
+            "AAPL",
+            "2024-01-15, 10:00:00",
+            "-100",
+            "155.00",
+            "15500.00",
+            "-2.00",
+            "P",
+            "...",
+            "...",
+        ],
+    ]
+
+    model = _parse_rows(rows)
+    trades = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert len(trades) == 1
+    assert trades[0].basis_ccy is None
+    assert trades[0].realized_pl_ccy is None
+
+
 def test_filter_non_stock_asset_by_scope():
     """Test that non-matching asset categories are filtered by scope."""
     rows = [
