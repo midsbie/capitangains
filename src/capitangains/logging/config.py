@@ -38,13 +38,11 @@ class ShortLevelFormatter(logging.Formatter):
 
 def configure_logging(level: int = logging.WARNING) -> logging.Logger:
     """Set up logging configuration with short level names and return a logger."""
-    handler = logging.StreamHandler()
-    handler.setFormatter(ProfessionalFormatter())
-
     root_logger = logging.getLogger()
+    root_logger.setLevel(level)
     if not root_logger.handlers:
-        root_logger.setLevel(level)
+        handler = logging.StreamHandler()
+        handler.setFormatter(ProfessionalFormatter())
         root_logger.addHandler(handler)
-        # Prevent double logging if handlers are added multiple times
         root_logger.propagate = False
     return root_logger
