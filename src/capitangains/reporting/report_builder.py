@@ -89,11 +89,6 @@ class ReportBuilder:
         PT practice: acquisition values -> EUR at buy date; sale values -> EUR at sale
         date.
         """
-        if fx is None:
-            # Mark if any non-EUR currency is present.  Note that we will still fill
-            # EUR-native trades.
-            self.fx_missing = any(rl.currency != "EUR" for rl in self.realized_lines)
-
         self._convert_realized_lines(fx)
         self._convert_syep_interest(fx)
         self._convert_withholding(fx)
@@ -107,6 +102,8 @@ class ReportBuilder:
                 self._convert_realized_line_eur(rl)
             elif fx is not None:
                 self._convert_realized_line_fx(rl, fx)
+            else:
+                self.fx_missing = True
 
     def _convert_realized_line_eur(self, rl: RealizedLine) -> None:
         rl.sell_gross_eur = rl.sell_gross_ccy
@@ -230,6 +227,7 @@ class ReportBuilder:
             return amount.quantize(Decimal("0.01"))
 
         if fx is None or date is None:
+            self.fx_missing = True
             return None
 
         rate = fx.get_rate(date, cur)

@@ -19,9 +19,8 @@ _MAX_FX_LOOKBACK_DAYS = 7
 class FxTable:
     """Date-indexed FX table: (date, currency) -> EUR per 1 unit of currency.
 
-    Accepted CSV schemas (base currency is EUR):
-      - date,currency,rate            # rate = target_currency_units_per_EUR
-      - date,currency,eur_per_unit    # geur_per_unit = EUR per 1 unit of currency
+    Accepted CSV schema (base currency is EUR):
+      date,currency,rate   where rate = target_currency_units_per_EUR
     """
 
     def __init__(self) -> None:
