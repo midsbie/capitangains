@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
-from .fifo_domain import TransferProtocol
+from .fifo_domain import SellMatchLeg, TransferProtocol
 from .fx import FxTable
 
 logger = logging.getLogger(__name__)
@@ -121,13 +121,7 @@ class ReportBuilder:
         rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
             Decimal("0.01")
         )
-        # allocate sale net EUR across legs by quantity share (helps Annex J)
-        if rl.sell_qty != 0:
-            for leg in rl.legs:
-                share = leg.qty / rl.sell_qty
-                leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
-                    Decimal("0.01")
-                )
+        self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
 
     def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable) -> None:
         sell_rate = fx.get_rate(rl.sell_date, rl.currency)
@@ -166,13 +160,26 @@ class ReportBuilder:
         rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
             Decimal("0.01")
         )
-        # allocate sale net EUR across legs by quantity share
-        if rl.sell_qty != 0 and rl.sell_net_eur is not None:
-            for leg in rl.legs:
-                share = leg.qty / rl.sell_qty
-                leg.proceeds_share_eur = (rl.sell_net_eur * share).quantize(
-                    Decimal("0.01")
-                )
+        self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
+
+    @staticmethod
+    def _allocate_proceeds_to_legs(
+        legs: list[SellMatchLeg],
+        sell_qty: Decimal,
+        sell_net_eur: Decimal | None,
+    ) -> None:
+        """Allocate sale proceeds EUR across legs by quantity share, cent-exact.
+
+        Last leg absorbs the rounding residual so the sum equals sell_net_eur.
+        """
+        if sell_qty == 0 or sell_net_eur is None or not legs:
+            return
+        cent = Decimal("0.01")
+        allocated = Decimal("0")
+        for leg in legs[:-1]:
+            leg.proceeds_share_eur = (sell_net_eur * leg.qty / sell_qty).quantize(cent)
+            allocated += leg.proceeds_share_eur
+        legs[-1].proceeds_share_eur = sell_net_eur - allocated
 
     def _convert_syep_interest(self, fx: FxTable | None) -> None:
         if not self.syep_interest:

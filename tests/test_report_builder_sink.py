@@ -315,6 +315,37 @@ def test_excel_report_sink_sorts_account_interest(tmp_path):
     assert descriptions_str == sorted(descriptions_str)
 
 
+@pytest.mark.parametrize(
+    "currency, fx_rates",
+    [
+        ("EUR", None),
+        ("USD", {("USD", "2024-06-15"): Decimal("0.9")}),
+    ],
+    ids=["eur_native", "fx_converted"],
+)
+def test_proceeds_allocation_sums_to_sell_net_eur(currency, fx_rates):
+    """Proceeds split across 3 equal legs must sum exactly to sell_net_eur."""
+    legs = [
+        {
+            "buy_date": dt.date(2023, 1, i),
+            "qty": Decimal("10"),
+            "alloc_cost_ccy": Decimal("30"),
+        }
+        for i in range(1, 4)
+    ]
+    rl = _realized("XYZ", currency, dt.date(2024, 6, 15), legs)
+    # sell_net_ccy = 100 (from _realized helper); 100 / 3 is non-terminating
+
+    rb = ReportBuilder(year=2024)
+    rb.add_realized(rl)
+    fx = _make_fx(fx_rates) if fx_rates else None
+    rb.convert_eur(fx)
+
+    shares = [leg.proceeds_share_eur for leg in rl.legs]
+    assert all(s is not None for s in shares)
+    assert sum(shares) == rl.sell_net_eur
+
+
 def test_excel_report_sink_sorts_withholding(tmp_path):
     rb = ReportBuilder(year=2024)
     rb.set_withholding(
