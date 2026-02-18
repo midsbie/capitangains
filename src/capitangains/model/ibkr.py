@@ -67,17 +67,16 @@ class ParseReport:
 
     def log_with(self, log: logging.Logger) -> None:
         for i in self.issues:
-            prefix = "ERROR" if i.severity == "error" else "WARN"
+            emit = log.error if i.severity == "error" else log.warning
             if i.row_preview is not None:
-                log.warning(
-                    "%s: line %d: %s | row=%s",
-                    prefix,
+                emit(
+                    "line %d: %s | row=%s",
                     i.line_no,
                     i.message,
                     i.row_preview,
                 )
             else:
-                log.warning("%s: line %d: %s", prefix, i.line_no, i.message)
+                emit("line %d: %s", i.line_no, i.message)
 
 
 class IbkrStatementCsvParser:
