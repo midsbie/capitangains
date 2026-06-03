@@ -147,14 +147,21 @@ class IbkrStatementCsvParser:
                     )
 
                 current_section = section
-                current_subtable = _MutableSubtable(header=header)
+                current_subtable = _MutableSubtable(
+                    header=header, header_line_no=line_no
+                )
                 sections_acc.setdefault(current_section, []).append(current_subtable)
                 continue
 
-            # Skip non-data rows without failing the parse. "Total"/"SubTotal" are
-            # intra-section summary tokens; an empty kind marks a statement-level
-            # summary line (e.g. "Total P/L for Statement Period").
-            if kind in _SUMMARY_KINDS or not kind:
+            # "Total"/"SubTotal" are intra-section summary tokens with a recognized
+            # schema (~tens per statement); skip them silently — they are not anomalies.
+            if kind in _SUMMARY_KINDS:
+                continue
+
+            # An empty kind marks a statement-level summary line (e.g. "Total P/L for
+            # Statement Period"): benign, but surface it rather than dropping silently.
+            if not kind:
+                report.info(line_no, "Statement-level summary line; skipped.", row)
                 continue
 
             if kind != "Data":
@@ -179,9 +186,20 @@ class IbkrStatementCsvParser:
                 )
                 continue
 
-            # Map payload to header, with pad/trim to match header length.
-            mapped = _map_row_to_header(payload, current_subtable.header)
-            current_subtable.rows.append(mapped)
+            # Reconcile width to the header. Tally per subtable rather than logging per
+            # row: a systematically narrow section (e.g. the "Codes" legend, whose data
+            # rows are 2 cells under a 4-cell header) would otherwise flood the report.
+            # _map_row_to_header stays pure.
+            sub = current_subtable
+            if len(payload) < len(sub.header):
+                sub.padded_rows += 1
+            elif len(payload) > len(sub.header):
+                sub.trimmed_rows += 1
+
+            mapped = _map_row_to_header(payload, sub.header)
+            sub.rows.append(mapped)
+
+        self._report_width_mismatches(sections_acc, report)
 
         # Freeze into the public immutable dataclasses
         model = IbkrModel(
@@ -192,11 +210,38 @@ class IbkrStatementCsvParser:
         )
         return model, report
 
+    @staticmethod
+    def _report_width_mismatches(
+        sections_acc: dict[str, list[_MutableSubtable]], report: ParseReport
+    ) -> None:
+        """Emit one diagnostic per subtable with width mismatches (not per row).
+
+        Padding a short row is benign (info); trimming a long row drops cells (warning).
+        """
+        for section_name, subs in sections_acc.items():
+            for sub in subs:
+                cols = len(sub.header)
+                if sub.padded_rows:
+                    report.info(
+                        sub.header_line_no,
+                        f"{section_name!r} subtable: {sub.padded_rows} data row(s) "
+                        f"narrower than its {cols}-column header; padded.",
+                    )
+                if sub.trimmed_rows:
+                    report.warn(
+                        sub.header_line_no,
+                        f"{section_name!r} subtable: {sub.trimmed_rows} data row(s) "
+                        f"wider than its {cols}-column header; trailing cells dropped.",
+                    )
+
 
 @dataclass
 class _MutableSubtable:
     header: tuple[str, ...]
+    header_line_no: int
     rows: list[RowDict] = field(default_factory=list)
+    padded_rows: int = 0
+    trimmed_rows: int = 0
 
     def freeze(self) -> Subtable:
         return Subtable(header=self.header, rows=tuple(self.rows))

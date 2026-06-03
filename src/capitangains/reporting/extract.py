@@ -209,6 +209,7 @@ def parse_trades_stocklike(
     """
     scope_set = ALL_SCOPES_SET[asset_scope]
     trades: list[TradeRow] = []
+    skipped_rows = 0
 
     for sub in model.get_subtables("Trades"):
         header = [h.strip() for h in sub.header]
@@ -232,9 +233,13 @@ def parse_trades_stocklike(
                     col[name] = i
                     break
 
-        # Skip subtables without essential columns
-        if any(col[n] is None for n in NEED_TRADE_COLS):
-            logger.debug("Skipping Trades subtable, missing cols: %s", col)
+        # Skip subtables without essential columns. Losing a whole subtable is material,
+        # so warn (default-visible) rather than logging at debug.
+        missing_cols = [n for n in NEED_TRADE_COLS if col[n] is None]
+        if missing_cols:
+            logger.warning(
+                "Skipping Trades subtable: missing required column(s) %s", missing_cols
+            )
             continue
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -247,10 +252,31 @@ def parse_trades_stocklike(
             trade = parse_trades_stocklike_row(scope_set, r, col)
             if trade is not None:
                 trades.append(trade)
+            else:
+                skipped_rows += 1
 
     # Sort by actual execution date/time for deterministic FIFO (buys before sells if
     # same timestamp use quantity sign)
     trades.sort(key=lambda tr: (tr.date, tr.datetime_str, tr.quantity <= 0))
+
+    if skipped_rows:
+        logger.info(
+            "Trades (scope=%r): skipped %d row(s) — out-of-scope asset category "
+            "or zero quantity",
+            asset_scope,
+            skipped_rows,
+        )
+
+    elided_basis = sum(1 for t in trades if t.basis_ccy is None)
+    elided_realized = sum(1 for t in trades if t.realized_pl_ccy is None)
+    if elided_basis or elided_realized:
+        logger.info(
+            "Trades: %d row(s) with elided Basis, %d with elided Realized P/L "
+            "(gap synthesis may be affected)",
+            elided_basis,
+            elided_realized,
+        )
+
     if logger.isEnabledFor(logging.DEBUG):
         buys = sum(1 for t in trades if t.quantity > 0)
         sells = sum(1 for t in trades if t.quantity < 0)
@@ -266,16 +292,18 @@ def parse_trades_stocklike(
 
 def parse_dividends(model: IbkrModel) -> list[DividendRow]:
     out: list[DividendRow] = []
+    skipped_incomplete = 0
     for r in model.iter_rows("Dividends"):
         # Header: Currency,Date,Description,Amount
         cur = r.get("Currency", "").strip()
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
         amount_s = r.get("Amount", "").strip()
-        # Rows lacking currency/date/description are typically totals or non-data lines;
-        # structural anomalies are already reported by the CSV parser, so we silently
-        # filter these here rather than logging again.
+        # Rows lacking currency/date/description are typically totals or non-data lines.
+        # The CSV parser already reports structural anomalies, so rather than re-logging
+        # each row we surface a single aggregate count below.
         if not (cur and date_s and desc):
+            skipped_incomplete += 1
             continue
 
         amt = to_dec_strict(amount_s)
@@ -288,6 +316,12 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
             )
         )
 
+    if skipped_incomplete:
+        logger.info(
+            "Dividends: skipped %d incomplete row(s) "
+            "(missing currency/date/description)",
+            skipped_incomplete,
+        )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d dividend entries", len(out))
     return out
@@ -295,6 +329,7 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
 
 def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
     out: list[WithholdingRow] = []
+    skipped_incomplete = 0
     for r in model.iter_rows("Withholding Tax"):
         cur = r.get("Currency", "").strip()
         date_s = r.get("Date", "").strip()
@@ -303,8 +338,10 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
         code = r.get("Code", "").strip() if "Code" in r else ""
 
         # As with dividends, missing currency/date/description indicates totals or
-        # non-data rows; malformed structure is handled at CSV parse time.
+        # non-data rows; malformed structure is handled at CSV parse time. Surfaced as
+        # an aggregate count below rather than per row.
         if not (cur and date_s and desc):
+            skipped_incomplete += 1
             continue
 
         amt = to_dec_strict(amount_s)
@@ -347,6 +384,12 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
             )
         )
 
+    if skipped_incomplete:
+        logger.info(
+            "Withholding tax: skipped %d incomplete row(s) "
+            "(missing currency/date/description)",
+            skipped_incomplete,
+        )
     if logger.isEnabledFor(logging.DEBUG):
         counts = Counter(w.type for w in out)
         summary = ", ".join(f"{wtype}: {count}" for wtype, count in counts.items())
@@ -423,6 +466,7 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
 
     """
     out: list[InterestRow] = []
+    skipped_incomplete = 0
     for r in model.iter_rows("Interest"):
         cur = r.get("Currency", "").strip()
         if _is_total_or_empty(cur):
@@ -448,7 +492,14 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
                     amount=amt,
                 )
             )
+        else:
+            skipped_incomplete += 1
 
+    if skipped_incomplete:
+        logger.info(
+            "Interest: skipped %d incomplete row(s) (missing date/description)",
+            skipped_incomplete,
+        )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d interest entries", len(out))
     return out
@@ -469,14 +520,27 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
       as a proxy for cost basis, which may differ from IBKR's internal basis.
     """
     out: list[TransferRow] = []
+    skipped_non_stock = 0
 
     for sub in model.get_subtables("Transfers"):
         rows = sub.rows
+
+        # Column-variant fallbacks are applied per row below; surface which alternate a
+        # subtable relies on once, from its header, rather than per row.
+        sub_header = {h.strip() for h in sub.header}
+        if "Qty" not in sub_header and "Quantity" in sub_header:
+            logger.info("Transfers subtable: using 'Quantity' column (no 'Qty')")
+        if "Market Value" not in sub_header and "Cost Basis" in sub_header:
+            logger.info(
+                "Transfers subtable: using 'Cost Basis' column (no 'Market Value') "
+                "as basis"
+            )
 
         # We only care about stock-like transfers
         for r in rows:
             asset_cat = r.get("Asset Category", "").strip()
             if asset_cat not in ASSET_STOCK_LIKE:
+                skipped_non_stock += 1
                 continue
 
             symbol = r.get("Symbol", "").strip()
@@ -557,6 +621,9 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
 
     # Sort by date
     out.sort(key=lambda x: x.date)
+
+    if skipped_non_stock:
+        logger.info("Transfers: skipped %d non-stock row(s)", skipped_non_stock)
 
     if logger.isEnabledFor(logging.DEBUG):
         ins = sum(1 for t in out if t.direction.lower() == "in")

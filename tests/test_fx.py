@@ -1,5 +1,6 @@
 import csv
 import datetime as dt
+import logging
 from decimal import Decimal
 
 import pytest
@@ -65,3 +66,17 @@ def test_fx_get_rate_unknown_currency():
     assert table.get_rate(dt.date(2024, 1, 1), "JPY") is None
     assert table.has_rate_exact(dt.date(2024, 1, 1), "JPY") is False
     assert table.get_rate(dt.date(2024, 1, 1), "EUR") == Decimal("1")
+
+
+def test_fx_short_fallback_logs_info_not_warning(tmp_path, caplog):
+    # A <=7-day stale fallback is benign: it should surface at INFO (-v), not WARNING.
+    path = _write_csv(tmp_path, [["2024-01-05", "USD", "1.20"]])  # Friday
+    table = FxTable.from_csv(path)
+
+    with caplog.at_level(logging.INFO, logger="capitangains.reporting.fx"):
+        rate = table.get_rate(dt.date(2024, 1, 8), "USD")  # Monday: 3 days back
+
+    assert rate == table.get_rate(dt.date(2024, 1, 5), "USD")
+    records = [r for r in caplog.records if "3 days earlier" in r.getMessage()]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO

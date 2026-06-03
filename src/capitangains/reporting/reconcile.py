@@ -11,6 +11,10 @@ from .extract import ASSET_STOCK_LIKE
 
 logger = logging.getLogger(__name__)
 
+# Fallback symbol-column index for summary subtables that omit a Symbol/Ticker/
+# Description header — the position it commonly occupies in IBKR's layout.
+_SYMBOL_FALLBACK_IDX = 2
+
 
 def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
     """Try to read 'Realized & Unrealized Performance Summary' for Stocks.
@@ -19,6 +23,9 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
     If parsing fails (sanitized CSV), returns empty dict.
     """
     result: dict[str, Decimal] = {}
+    skipped_non_stock = 0
+    skipped_empty_symbol = 0
+    skipped_no_numeric = 0
     for sub in model.get_subtables("Realized & Unrealized Performance Summary"):
         header = [h.strip() for h in sub.header]
         rows = sub.rows
@@ -43,8 +50,27 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
                 idx_symbol = header.index(name)
                 break
         if idx_symbol is None:
-            # fall back: assume second column is the symbol bucket
-            idx_symbol = 2 if len(header) > 2 else None
+            if len(header) > _SYMBOL_FALLBACK_IDX:
+                # No recognized symbol column, but the common-layout fallback exists.
+                # Guess it and warn — it can mis-key every row; correctness fix tracked
+                # separately.
+                logger.warning(
+                    "Reconciliation: no Symbol/Ticker/Description column in header %s; "
+                    "falling back to column %d (%r) — reconciliation keys may be wrong",
+                    header,
+                    _SYMBOL_FALLBACK_IDX,
+                    header[_SYMBOL_FALLBACK_IDX],
+                )
+                idx_symbol = _SYMBOL_FALLBACK_IDX
+            else:
+                # Not even the fallback column exists: no usable symbol. Skip the
+                # subtable (default-visible) rather than keying every row off nothing.
+                logger.warning(
+                    "Reconciliation: header %s has no usable symbol column; "
+                    "skipping subtable",
+                    header,
+                )
+                continue
 
         # Try to find a realized EUR column. Heuristic: pick the last numeric column.
         # Because in some sanitized exports values are elided with "...", we may fail.
@@ -66,11 +92,11 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
         for r in rows:
             asset = r.get("Asset Category", "")
             if asset not in ASSET_STOCK_LIKE:
+                skipped_non_stock += 1
                 continue
-            sym = (
-                r.get(header[idx_symbol], "").strip() if idx_symbol is not None else ""
-            )
+            sym = r.get(header[idx_symbol], "").strip()
             if not sym:
+                skipped_empty_symbol += 1
                 continue
 
             # try columns from right to left for a parseable number
@@ -94,6 +120,18 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
                     header[found_col],
                 )
                 result[sym] = result.get(sym, Decimal("0")) + val
+            else:
+                skipped_no_numeric += 1
 
+    total_skipped = skipped_non_stock + skipped_empty_symbol + skipped_no_numeric
+    if total_skipped:
+        logger.info(
+            "Reconciliation: skipped %d row(s) (%d non-stock, %d empty symbol, "
+            "%d no numeric value)",
+            total_skipped,
+            skipped_non_stock,
+            skipped_empty_symbol,
+            skipped_no_numeric,
+        )
     logger.debug("Reconciliation parsed %d symbols from IBKR summary", len(result))
     return result

@@ -58,6 +58,7 @@ from capitangains.reporting import (
     parse_withholding_tax,
     reconcile_with_ibkr_summary,
 )
+from capitangains.reporting.fifo_domain import GapEvent
 from capitangains.reporting.report_sink import ExcelReportSink
 
 # Monetary precision and rounding
@@ -110,6 +111,51 @@ def _event_sort_key(
         sub = 0 if event.quantity > 0 else 1
         return (event.date, 1, event.datetime_str, sub)
     raise ValueError(f"unexpected event type: {type(event)}")
+
+
+def _report_sell_gaps(
+    gaps: Sequence[GapEvent], fix_sell_gaps: bool, logger: logging.Logger
+) -> None:
+    """Surface unmatched sells at the CLI boundary.
+
+    Without auto-fix this is fatal (exit 2). With it, each *synthesized* residual lot is
+    recorded as a default-visible warning, so the synthetic cost basis behind the
+    affected realized lines is never silent. Gaps the policy could *not* fix (missing
+    Basis, guardrail violations) are already warned about by the matcher as they occur,
+    so they are not repeated here.
+    """
+    if not gaps:
+        return
+
+    if not fix_sell_gaps:
+        for ge in gaps:
+            logger.error(
+                "Unmatched SELL: symbol=%s date=%s qty=%s currency=%s | %s",
+                ge.symbol,
+                ge.date,
+                ge.remaining_qty,
+                ge.currency,
+                ge.message,
+            )
+        logger.error(
+            "Encountered %d unmatched sell(s). "
+            "Rerun with --auto-fix-sell-gaps to synthesize residual lots "
+            "from IBKR Basis.",
+            len(gaps),
+        )
+        raise SystemExit(2)
+
+    for ge in gaps:
+        if ge.fixed:
+            logger.warning(
+                "Synthesized residual lot for unmatched SELL: symbol=%s date=%s "
+                "qty=%s currency=%s | %s",
+                ge.symbol,
+                ge.date,
+                ge.remaining_qty,
+                ge.currency,
+                ge.message,
+            )
 
 
 def process_files(args: argparse.Namespace) -> None:
@@ -186,24 +232,7 @@ def process_files(args: argparse.Namespace) -> None:
         len(realized),
     )
 
-    # If auto-fix is disabled and there were unmatched sells, abort
-    if not fix_sell_gaps and matcher.gap_events:
-        for ge in matcher.gap_events:
-            logger.error(
-                "Unmatched SELL: symbol=%s date=%s qty=%s currency=%s | %s",
-                ge.symbol,
-                ge.date,
-                ge.remaining_qty,
-                ge.currency,
-                ge.message,
-            )
-        logger.error(
-            "Encountered %d unmatched sell(s). "
-            "Rerun with --auto-fix-sell-gaps to synthesize residual lots "
-            "from IBKR Basis.",
-            len(matcher.gap_events),
-        )
-        raise SystemExit(2)
+    _report_sell_gaps(matcher.gap_events, fix_sell_gaps, logger)
 
     # Build report
     rb = ReportBuilder(year=args.year)
@@ -236,6 +265,12 @@ def process_files(args: argparse.Namespace) -> None:
             logger.exception("Failed to prepare FX conversion: %s", e)
             raise
     rb.convert_eur(fx)
+    if rb.fx_missing:
+        logger.warning(
+            "EUR conversion incomplete: some amounts could not be converted "
+            "(missing FX rates or no FX table); affected EUR figures are blank. "
+            "Run with -v for per-amount detail."
+        )
 
     # Soft reconciliation
     if len(inputs) == 1:

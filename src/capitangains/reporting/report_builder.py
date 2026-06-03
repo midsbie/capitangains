@@ -123,10 +123,11 @@ class ReportBuilder:
     def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable) -> None:
         sell_rate = fx.get_rate(rl.sell_date, rl.currency)
         if sell_rate is None:
-            logger.debug(
-                "Sell FX rate missing for %s on %s, proceeds marked as missing",
+            logger.info(
+                "Sell FX rate missing for %s on %s; %s proceeds left unconverted",
                 rl.currency,
                 rl.sell_date,
+                rl.symbol,
             )
             self.fx_missing = True
             return
@@ -147,9 +148,19 @@ class ReportBuilder:
         alloc_eur = Decimal("0")
         for leg in rl.legs:
             bd = leg.buy_date
-            rate = sell_rate  # fallback
+            rate = sell_rate  # fallback when the buy-date rate is unavailable
             if bd is not None:
-                rate = fx.get_rate(bd, rl.currency) or sell_rate
+                buy_rate = fx.get_rate(bd, rl.currency)
+                if buy_rate is not None:
+                    rate = buy_rate
+                else:
+                    logger.info(
+                        "Buy-date FX rate missing for %s on %s; using sell-date rate "
+                        "for %s cost basis",
+                        rl.currency,
+                        bd,
+                        rl.symbol,
+                    )
             leg_eur = (leg.alloc_cost_ccy * rate).quantize(Decimal("0.01"))
             leg.alloc_cost_eur = leg_eur
             alloc_eur += leg_eur
@@ -232,6 +243,12 @@ class ReportBuilder:
 
         rate = fx.get_rate(date, cur)
         if rate is None:
+            logger.info(
+                "FX rate missing for %s on %s; amount %s left unconverted",
+                cur,
+                date,
+                amount,
+            )
             self.fx_missing = True
             return None
 

@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from capitangains.model.ibkr import IbkrStatementCsvParser
@@ -137,3 +138,77 @@ def test_reconcile_returns_empty_when_missing_columns():
     model = _parse_rows(rows)
 
     assert reconcile_with_ibkr_summary(model) == {}
+
+
+def test_reconcile_symbol_column_fallback_warns(caplog):
+    # No Symbol/Ticker/Description column: the parser guesses index 2, which can
+    # mis-key every row, so it must warn (default-visible).
+    rows = [
+        [
+            "Realized & Unrealized Performance Summary",
+            "Header",
+            "Asset Category",
+            "Total",
+            "Realized",
+        ],
+        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "1", "10.00"],
+    ]
+    model = _parse_rows(rows)
+
+    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.reconcile"):
+        reconcile_with_ibkr_summary(model)
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "no Symbol/Ticker/Description column" in warnings[0].getMessage()
+
+
+def test_reconcile_skips_subtable_without_usable_symbol_column(caplog):
+    # "Asset Category" present (so the subtable is considered) but too few columns to
+    # even guess a symbol column: skip it with a default-visible warning, don't crash.
+    rows = [
+        [
+            "Realized & Unrealized Performance Summary",
+            "Header",
+            "Asset Category",
+            "Total",
+        ],
+        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "10.00"],
+    ]
+    model = _parse_rows(rows)
+
+    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.reconcile"):
+        result = reconcile_with_ibkr_summary(model)
+
+    assert result == {}
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "no usable symbol column" in warnings[0].getMessage()
+
+
+def test_reconcile_skipped_rows_logged_as_info(caplog):
+    rows = [
+        [
+            "Realized & Unrealized Performance Summary",
+            "Header",
+            "Asset Category",
+            "Symbol",
+            "Total",
+        ],
+        # non-stock, empty symbol, and unparseable value -> three distinct skips
+        ["Realized & Unrealized Performance Summary", "Data", "Forex", "USD", "5.00"],
+        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "", "3.00"],
+        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "ABC", "..."],
+    ]
+    model = _parse_rows(rows)
+
+    with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
+        reconcile_with_ibkr_summary(model)
+
+    infos = [r for r in caplog.records if "Reconciliation: skipped" in r.getMessage()]
+    assert len(infos) == 1
+    assert infos[0].levelno == logging.INFO
+    msg = infos[0].getMessage()
+    assert "1 non-stock" in msg
+    assert "1 empty symbol" in msg
+    assert "1 no numeric value" in msg

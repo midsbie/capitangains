@@ -139,8 +139,8 @@ class FxTable:
                     fallback_date,
                 )
             else:
-                logger.debug(
-                    "FX rate lookup: %s on %s: fallback to %s (%d days earlier) = %s",
+                logger.info(
+                    "FX rate for %s on %s: using rate from %s (%d days earlier) = %s",
                     c,
                     date,
                     fallback_date,

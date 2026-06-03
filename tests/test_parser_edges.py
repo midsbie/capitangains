@@ -77,3 +77,60 @@ def test_empty_kind_statement_summary_line_is_skipped_not_errored():
     assert list(model.iter_rows("Trades")) == [
         {"Currency": "EUR", "Symbol": "ASML", "Quantity": "10"},
     ]
+
+
+def test_empty_kind_summary_line_recorded_as_info():
+    # Same skip as above, but now surfaced as an info-severity issue (visible at -v),
+    # not dropped silently. has_errors must stay False so the CLI does not abort.
+    rows = [
+        ["Trades", "Header", "Currency", "Symbol", "Quantity"],
+        ["Trades", "Data", "EUR", "ASML", "10"],
+        ["Total P/L for Statement Period", "", "", "", "-7856.59", ""],
+    ]
+    _, report = IbkrStatementCsvParser().parse_rows(rows)
+
+    infos = [i for i in report.issues if i.severity == "info"]
+    assert len(infos) == 1
+    assert infos[0].line_no == 3
+    assert "summary line" in infos[0].message.lower()
+    assert not report.has_errors
+
+
+def test_short_data_rows_are_padded_and_aggregated_as_info():
+    # Two short rows under one header -> a single aggregate info, not one per row
+    # (avoids flooding on systematically narrow sections like the IBKR "Codes" legend).
+    rows = [
+        ["Trades", "Header", "Currency", "Symbol", "Quantity"],
+        ["Trades", "Data", "EUR", "ASML"],  # one cell short of the header
+        ["Trades", "Data", "USD", "AAPL"],  # also short
+    ]
+    model, report = IbkrStatementCsvParser().parse_rows(rows)
+
+    infos = [i for i in report.issues if i.severity == "info"]
+    assert len(infos) == 1
+    assert "2 data row(s)" in infos[0].message
+    assert "padded" in infos[0].message
+    assert not report.has_errors
+    # Padding fills the missing trailing cell with an empty string.
+    assert list(model.iter_rows("Trades")) == [
+        {"Currency": "EUR", "Symbol": "ASML", "Quantity": ""},
+        {"Currency": "USD", "Symbol": "AAPL", "Quantity": ""},
+    ]
+
+
+def test_long_data_rows_are_trimmed_and_aggregated_as_warning():
+    rows = [
+        ["Trades", "Header", "Currency", "Symbol", "Quantity"],
+        ["Trades", "Data", "EUR", "ASML", "10", "EXTRA"],  # one cell too many
+    ]
+    model, report = IbkrStatementCsvParser().parse_rows(rows)
+
+    warnings = [i for i in report.issues if i.severity == "warning"]
+    assert len(warnings) == 1
+    assert "1 data row(s)" in warnings[0].message
+    assert "dropped" in warnings[0].message
+    # Trimming drops the trailing cell; this is a warning (data loss), not an error.
+    assert not report.has_errors
+    assert list(model.iter_rows("Trades")) == [
+        {"Currency": "EUR", "Symbol": "ASML", "Quantity": "10"},
+    ]
