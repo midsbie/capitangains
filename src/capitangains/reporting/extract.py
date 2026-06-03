@@ -29,6 +29,17 @@ def _is_total_or_empty(value: str) -> bool:
     return not value or value.lower().startswith("total")
 
 
+def _is_data_row(currency: str, date: str, description: str) -> bool:
+    """Return True if a cash-flow row carries the core fields of a data line.
+
+    A row is a data line only when currency, date, and description are all present;
+    rows failing this are typically Total/summary or otherwise non-data lines. Genuine
+    structural anomalies are already surfaced by IbkrStatementCsvParser, so callers skip
+    these quietly (aggregating a count) rather than re-logging per row.
+    """
+    return bool(currency and date and description)
+
+
 def _require_fields(label: str, **fields: str) -> None:
     """Raise ValueError naming every empty required field."""
     missing = [k for k, v in fields.items() if not v]
@@ -299,10 +310,7 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
         amount_s = r.get("Amount", "").strip()
-        # Rows lacking currency/date/description are typically totals or non-data lines.
-        # The CSV parser already reports structural anomalies, so rather than re-logging
-        # each row we surface a single aggregate count below.
-        if not (cur and date_s and desc):
+        if not _is_data_row(cur, date_s, desc):
             skipped_incomplete += 1
             continue
 
@@ -337,10 +345,7 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
         amount_s = r.get("Amount", "").strip()
         code = r.get("Code", "").strip() if "Code" in r else ""
 
-        # As with dividends, missing currency/date/description indicates totals or
-        # non-data rows; malformed structure is handled at CSV parse time. Surfaced as
-        # an aggregate count below rather than per row.
-        if not (cur and date_s and desc):
+        if not _is_data_row(cur, date_s, desc):
             skipped_incomplete += 1
             continue
 
@@ -474,15 +479,9 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
         amount_s = r.get("Amount", "").strip()
-        # Only rows with full currency/date/description are treated as interest lines:
-        # - In IBKR exports, rows that fail this check are typically 'Total' or similar
-        #   summary lines, which we intentionally ignore at the domain level.
-        # - Truly malformed CSV structure is already surfaced by IbkrStatementCsvParser
-        #   via ParseReport, so re-logging here would add noise without new signal.
-        #
-        # If we ever decide that a partial row here is an invariant violation, the
-        # correct response would be to raise, not to emit a quiet debug log.
-        if cur and date_s and desc:
+        # If we ever decide a partial interest row is an invariant violation, the
+        # correct response would be to raise here, not to skip-and-count.
+        if _is_data_row(cur, date_s, desc):
             amt = to_dec_strict(amount_s)
             out.append(
                 InterestRow(
