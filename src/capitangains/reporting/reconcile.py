@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from decimal import Decimal
 
 from capitangains.conv import to_dec_strict
@@ -16,6 +17,20 @@ logger = logging.getLogger(__name__)
 _SYMBOL_FALLBACK_IDX = 2
 
 
+def _report_skips(label: str, counts: Counter[str]) -> None:
+    """Emit one aggregate INFO line for row-level skips, omitting zero-count reasons.
+
+    Reasons are tallied during the per-row loop and reported once here, so a subtable
+    with many skips produces a single line rather than per-row noise. Nothing is logged
+    when no rows were skipped. Reasons retain their seeded order for stable output.
+    """
+    total = sum(counts.values())
+    if not total:
+        return
+    breakdown = ", ".join(f"{n} {reason}" for reason, n in counts.items() if n)
+    logger.info("%s: skipped %d row(s) (%s)", label, total, breakdown)
+
+
 def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
     """Try to read 'Realized & Unrealized Performance Summary' for Stocks.
 
@@ -23,9 +38,10 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
     If parsing fails (sanitized CSV), returns empty dict.
     """
     result: dict[str, Decimal] = {}
-    skipped_non_stock = 0
-    skipped_empty_symbol = 0
-    skipped_no_numeric = 0
+    # Seeded with zero so the breakdown keeps a stable, documented reason order.
+    skips: Counter[str] = Counter(
+        {"non-stock": 0, "empty symbol": 0, "no numeric value": 0}
+    )
     for sub in model.get_subtables("Realized & Unrealized Performance Summary"):
         header = [h.strip() for h in sub.header]
         rows = sub.rows
@@ -92,11 +108,11 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
         for r in rows:
             asset = r.get("Asset Category", "")
             if asset not in ASSET_STOCK_LIKE:
-                skipped_non_stock += 1
+                skips["non-stock"] += 1
                 continue
             sym = r.get(header[idx_symbol], "").strip()
             if not sym:
-                skipped_empty_symbol += 1
+                skips["empty symbol"] += 1
                 continue
 
             # try columns from right to left for a parseable number
@@ -121,17 +137,8 @@ def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
                 )
                 result[sym] = result.get(sym, Decimal("0")) + val
             else:
-                skipped_no_numeric += 1
+                skips["no numeric value"] += 1
 
-    total_skipped = skipped_non_stock + skipped_empty_symbol + skipped_no_numeric
-    if total_skipped:
-        logger.info(
-            "Reconciliation: skipped %d row(s) (%d non-stock, %d empty symbol, "
-            "%d no numeric value)",
-            total_skipped,
-            skipped_non_stock,
-            skipped_empty_symbol,
-            skipped_no_numeric,
-        )
+    _report_skips("Reconciliation", skips)
     logger.debug("Reconciliation parsed %d symbols from IBKR summary", len(result))
     return result
