@@ -141,7 +141,10 @@ class IbkrStatementCsvParser:
                 sections_acc.setdefault(current_section, []).append(current_subtable)
                 continue
 
-            if kind in _SUMMARY_KINDS:
+            # Skip non-data rows without failing the parse. "Total"/"SubTotal" are
+            # intra-section summary tokens; an empty kind marks a statement-level
+            # summary line (e.g. "Total P/L for Statement Period").
+            if kind in _SUMMARY_KINDS or not kind:
                 continue
 
             if kind != "Data":
