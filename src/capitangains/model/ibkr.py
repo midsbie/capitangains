@@ -148,7 +148,9 @@ class IbkrStatementCsvParser:
                 continue
 
             if kind != "Data":
-                report.error(line_no, f"Unknown kind '{kind}'; row skipped.", row)
+                # Unknown kind: skip but warn rather than error, so IBKR format drift
+                # stays visible without aborting the run.
+                report.warn(line_no, f"Unknown kind {kind!r}; row skipped.", row)
                 continue
 
             # "Data" row
