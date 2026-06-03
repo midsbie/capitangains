@@ -41,10 +41,20 @@ class IbkrModel:
             yield from sub.rows
 
 
+Severity = Literal["info", "warning", "error"]
+
+# ParseIssue severity -> logging level, consumed by ParseReport.log_with.
+_SEVERITY_TO_LEVEL: dict[Severity, int] = {
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+
 @dataclass(frozen=True)
 class ParseIssue:
     line_no: int
-    severity: Literal["warning", "error"]
+    severity: Severity
     message: str
     row_preview: Sequence[str] | None = None
 
@@ -54,6 +64,9 @@ class ParseReport:
     """Non-fatal diagnostics collected during parsing."""
 
     issues: list[ParseIssue] = field(default_factory=list)
+
+    def info(self, line_no: int, msg: str, row: Sequence[str] | None = None) -> None:
+        self.issues.append(ParseIssue(line_no, "info", msg, row))
 
     def warn(self, line_no: int, msg: str, row: Sequence[str] | None = None) -> None:
         self.issues.append(ParseIssue(line_no, "warning", msg, row))
@@ -67,16 +80,13 @@ class ParseReport:
 
     def log_with(self, log: logging.Logger) -> None:
         for i in self.issues:
-            emit = log.error if i.severity == "error" else log.warning
+            level = _SEVERITY_TO_LEVEL[i.severity]
             if i.row_preview is not None:
-                emit(
-                    "line %d: %s | row=%s",
-                    i.line_no,
-                    i.message,
-                    i.row_preview,
+                log.log(
+                    level, "line %d: %s | row=%s", i.line_no, i.message, i.row_preview
                 )
             else:
-                emit("line %d: %s", i.line_no, i.message)
+                log.log(level, "line %d: %s", i.line_no, i.message)
 
 
 class IbkrStatementCsvParser:
