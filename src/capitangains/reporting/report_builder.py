@@ -10,6 +10,7 @@ from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
 from .fifo_domain import SellMatchLeg, TransferProtocol
 from .fx import FxTable
+from .money import quantize_money
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +115,8 @@ class ReportBuilder:
         for leg in rl.legs:
             leg.alloc_cost_eur = leg.alloc_cost_ccy
             alloc_eur += leg.alloc_cost_eur
-        rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
-        rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
-            Decimal("0.01")
-        )
+        rl.alloc_cost_eur = quantize_money(alloc_eur)
+        rl.realized_pl_eur = quantize_money(rl.sell_net_eur - rl.alloc_cost_eur)
         self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
 
     def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable) -> None:
@@ -132,7 +131,7 @@ class ReportBuilder:
             self.fx_missing = True
             return
 
-        proceeds_eur = (rl.sell_gross_ccy * sell_rate).quantize(Decimal("0.01"))
+        proceeds_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
         logger.debug(
             "Sell FX conversion: %s %s: EUR (rate: %s) = %s EUR",
             rl.sell_gross_ccy,
@@ -142,8 +141,8 @@ class ReportBuilder:
         )
 
         rl.sell_gross_eur = proceeds_eur
-        rl.sell_comm_eur = (rl.sell_comm_ccy * sell_rate).quantize(Decimal("0.01"))
-        rl.sell_net_eur = (rl.sell_net_ccy * sell_rate).quantize(Decimal("0.01"))
+        rl.sell_comm_eur = quantize_money(rl.sell_comm_ccy * sell_rate)
+        rl.sell_net_eur = quantize_money(rl.sell_net_ccy * sell_rate)
 
         alloc_eur = Decimal("0")
         for leg in rl.legs:
@@ -161,13 +160,11 @@ class ReportBuilder:
                         bd,
                         rl.symbol,
                     )
-            leg_eur = (leg.alloc_cost_ccy * rate).quantize(Decimal("0.01"))
+            leg_eur = quantize_money(leg.alloc_cost_ccy * rate)
             leg.alloc_cost_eur = leg_eur
             alloc_eur += leg_eur
-        rl.alloc_cost_eur = alloc_eur.quantize(Decimal("0.01"))
-        rl.realized_pl_eur = (rl.sell_net_eur - rl.alloc_cost_eur).quantize(
-            Decimal("0.01")
-        )
+        rl.alloc_cost_eur = quantize_money(alloc_eur)
+        rl.realized_pl_eur = quantize_money(rl.sell_net_eur - rl.alloc_cost_eur)
         self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
 
     @staticmethod
@@ -182,10 +179,9 @@ class ReportBuilder:
         """
         if sell_qty == 0 or sell_net_eur is None or not legs:
             return
-        cent = Decimal("0.01")
         allocated = Decimal("0")
         for leg in legs[:-1]:
-            leg.proceeds_share_eur = (sell_net_eur * leg.qty / sell_qty).quantize(cent)
+            leg.proceeds_share_eur = quantize_money(sell_net_eur * leg.qty / sell_qty)
             allocated += leg.proceeds_share_eur
         legs[-1].proceeds_share_eur = sell_net_eur - allocated
 
@@ -235,7 +231,7 @@ class ReportBuilder:
         cur = currency.upper()
 
         if cur == "EUR":
-            return amount.quantize(Decimal("0.01"))
+            return quantize_money(amount)
 
         if fx is None or date is None:
             self.fx_missing = True
@@ -252,7 +248,7 @@ class ReportBuilder:
             self.fx_missing = True
             return None
 
-        return (amount * rate).quantize(Decimal("0.01"))
+        return quantize_money(amount * rate)
 
     def _recompute_aggregates(self) -> None:
         # Recompute EUR aggregates per symbol after conversions

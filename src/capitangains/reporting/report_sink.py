@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from .money import quantize_money
 from .report_builder import ReportBuilder
 
 # Column ranges for realized trades sheet formatting (1-indexed Excel columns)
@@ -420,7 +421,7 @@ class ExcelReportSink:
                 proceeds_eur = leg.proceeds_share_eur
                 pl_eur = None
                 if alloc_eur is not None and proceeds_eur is not None:
-                    pl_eur = (proceeds_eur - alloc_eur).quantize(Decimal("0.01"))
+                    pl_eur = quantize_money(proceeds_eur - alloc_eur)
                 # Check if lot was from a transfer
                 is_transferred = leg.transferred
                 ws.append(

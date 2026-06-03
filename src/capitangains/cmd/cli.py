@@ -39,7 +39,7 @@ import datetime as dt
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
-from decimal import ROUND_HALF_UP, Decimal, getcontext
+from decimal import Decimal
 from pathlib import Path
 
 from capitangains.logging import configure_logging
@@ -60,10 +60,6 @@ from capitangains.reporting import (
 )
 from capitangains.reporting.fifo_domain import GapEvent
 from capitangains.reporting.report_sink import ExcelReportSink
-
-# Monetary precision and rounding
-getcontext().prec = 28
-getcontext().rounding = ROUND_HALF_UP
 
 # Threshold for reconciliation mismatches (EUR)
 RECONCILIATION_MISMATCH_THRESHOLD = Decimal("0.05")
