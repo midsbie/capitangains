@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
 from capitangains.reporting.extract import TradeRow
-from capitangains.reporting.report_builder import SymbolTotals
+from capitangains.reporting.fifo_domain import RealizedLine
 
 logger = logging.getLogger(__name__)
 
 # Our realized P/L is quantized to the cent once per sell (build_realized_line), while
 # IBKR's per-trade column is unrounded. Summing N sells therefore accumulates at most
 # half a cent of rounding each, so a true match must be tolerated to that bound rather
-# than to a flat constant — otherwise heavily-traded symbols raise false mismatches.
+# than to a flat constant -- otherwise heavily-traded symbols raise false mismatches.
 _HALF_CENT = Decimal("0.005")
 
 
@@ -26,7 +26,7 @@ class SymbolReconciliation:
     stands between them: a difference beyond cent rounding is a genuine accounting gap,
     not a rate artifact. ``computed`` is our FIFO realized P/L; ``ibkr`` is the sum of
     IBKR's per-trade ``Realized P/L`` column. A ``None`` on either side means that side
-    booked no realized P/L for the key — itself a discrepancy worth surfacing.
+    booked no realized P/L for the key -- itself a discrepancy worth surfacing.
     """
 
     symbol: str
@@ -51,11 +51,30 @@ class SymbolReconciliation:
         return d is not None and d <= self.tolerance
 
 
+@dataclass(frozen=True)
+class ReconciliationReport:
+    """Outcome of the IBKR realized-P/L cross-check, partitioned by trust level.
+
+    ``reconciled`` holds the (symbol, currency) keys whose FIFO realized P/L was checked
+    *independently* against IBKR's per-trade column -- ``is_match`` separates OK from
+    MISMATCH. ``synthetic`` holds keys whose basis was synthesized from IBKR's own
+    ``Basis`` (under ``--auto-fix-sell-gaps``): the check is tautological (we back the
+    cost out of the very figure IBKR used to compute its realized P/L), so they are
+    surfaced as *not independently confirmed* rather than counted as a passing match.
+    ``incomplete`` holds keys IBKR elided realized P/L for on a closing trade, leaving
+    nothing trustworthy to compare against; they are skipped.
+    """
+
+    reconciled: list[SymbolReconciliation]
+    synthetic: list[SymbolReconciliation]
+    incomplete: list[tuple[str, str]]
+
+
 def reconcile_realized_against_ibkr(
     trades: Sequence[TradeRow],
-    symbol_totals: Mapping[str, SymbolTotals],
+    realized_lines: Sequence[RealizedLine],
     year: int,
-) -> list[SymbolReconciliation]:
+) -> ReconciliationReport:
     """Cross-check our realized P/L against IBKR's, per symbol, in the trade currency.
 
     IBKR reports a per-trade ``Realized P/L`` in each instrument's own currency; summed
@@ -66,8 +85,12 @@ def reconcile_realized_against_ibkr(
     by different methods. This is why the reconciliation reads the per-trade realized
     column and not the EUR ``Realized & Unrealized Performance Summary``.
 
-    A symbol whose IBKR realized P/L is elided on any closing trade cannot be trusted
-    and is omitted from the result (logged once as INFO).
+    Both inputs are filtered to ``year`` internally, so the contract is uniform: hand it
+    the full trade stream and the full set of realized lines. The result is partitioned
+    by how far each key can be trusted (see ``ReconciliationReport``). A line whose
+    basis was synthesized from IBKR's ``Basis`` is split out of the independent
+    ``reconciled`` set: its agreement with IBKR is tautological, so a "green"
+    reconciliation must not claim it.
     """
     ibkr_realized: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
     n_sells: dict[tuple[str, str], int] = defaultdict(int)
@@ -86,30 +109,38 @@ def reconcile_realized_against_ibkr(
             continue
         ibkr_realized[key] += t.realized_pl_ccy
 
-    computed_realized: dict[tuple[str, str], Decimal] = {
-        (sym, ccy): tot.realized
-        for sym, st in symbol_totals.items()
-        for ccy, tot in st.by_currency.items()
-    }
+    computed_realized: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+    synthetic_keys: set[tuple[str, str]] = set()
+    for rl in realized_lines:
+        if rl.sell_date.year != year:
+            continue
+        key = (rl.symbol, rl.currency)
+        computed_realized[key] += rl.realized_pl_ccy
+        if rl.gap_fixed:
+            synthetic_keys.add(key)
 
     # Reconcile only keys with realized activity: a pure open buy lot carries a zero
-    # IBKR realized and no FIFO line, and is not a discrepancy.
+    # IBKR realized and no FIFO line, and is not a discrepancy. Keys IBKR elided on a
+    # closing trade are dropped here and reported as ``incomplete`` instead.
     keys = {
         key
         for key in ibkr_realized.keys() | computed_realized.keys()
         if key not in incomplete
         and (n_sells.get(key, 0) > 0 or key in computed_realized)
     }
-    results = [
-        SymbolReconciliation(
+
+    def _entry(key: tuple[str, str]) -> SymbolReconciliation:
+        sym, ccy = key
+        return SymbolReconciliation(
             symbol=sym,
             currency=ccy,
-            computed=computed_realized.get((sym, ccy)),
-            ibkr=ibkr_realized.get((sym, ccy)),
-            n_sells=n_sells.get((sym, ccy), 0),
+            computed=computed_realized.get(key),
+            ibkr=ibkr_realized.get(key),
+            n_sells=n_sells.get(key, 0),
         )
-        for sym, ccy in sorted(keys)
-    ]
+
+    reconciled = [_entry(k) for k in sorted(keys - synthetic_keys)]
+    synthetic = [_entry(k) for k in sorted(keys & synthetic_keys)]
 
     if incomplete:
         logger.info(
@@ -117,4 +148,8 @@ def reconcile_realized_against_ibkr(
             len(incomplete),
             ", ".join(sorted(f"{s} ({c})" for s, c in incomplete)),
         )
-    return results
+    return ReconciliationReport(
+        reconciled=reconciled,
+        synthetic=synthetic,
+        incomplete=sorted(incomplete),
+    )

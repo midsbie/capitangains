@@ -71,7 +71,7 @@ def validate_symbol_currency_uniqueness(
     denominated in a single currency.  If the same ticker appears on exchanges with
     different currencies (e.g. "RY" on NYSE/USD and TSX/CAD), the CSV data must
     disambiguate them with distinct symbols.  Allowing multiple currencies per symbol
-    would make the per-symbol summary incoherent — trade-currency columns can only
+    would make the per-symbol summary incoherent -- trade-currency columns can only
     represent one denomination, while EUR columns aggregate across all, producing
     rows that cannot be reconciled.
     """
@@ -87,7 +87,7 @@ def validate_symbol_currency_uniqueness(
         for sym, ccys in sorted(violations.items())
     )
     raise DataQualityError(
-        f"symbol-currency uniqueness violated — each symbol must map to exactly "
+        f"symbol-currency uniqueness violated -- each symbol must map to exactly "
         f"one trade currency, but the following appear in multiple:\n{details}"
     )
 
@@ -299,10 +299,10 @@ def process_files(args: argparse.Namespace) -> None:
     # column cannot be meaningfully summed across periods.
     if len(inputs) == 1:
         try:
-            reconciliations = reconcile_realized_against_ibkr(
-                trades, rb.symbol_totals, args.year
+            report = reconcile_realized_against_ibkr(
+                trades, rb.realized_lines, args.year
             )
-            for r in reconciliations:
+            for r in report.reconciled:
                 logger.debug(
                     "Reconciliation: %s (%s) - mine: %s, IBKR: %s, diff: %s (%s)",
                     r.symbol,
@@ -312,7 +312,7 @@ def process_files(args: argparse.Namespace) -> None:
                     r.diff,
                     "OK" if r.is_match else "MISMATCH",
                 )
-            mismatches = [r for r in reconciliations if not r.is_match]
+            mismatches = [r for r in report.reconciled if not r.is_match]
             if mismatches:
                 logger.warning(
                     "Reconciliation: %d symbol(s) disagree with IBKR realized P/L "
@@ -322,6 +322,16 @@ def process_files(args: argparse.Namespace) -> None:
                         (r.symbol, r.currency, r.computed, r.ibkr)
                         for r in mismatches[:10]
                     ],
+                )
+            if report.synthetic:
+                # Synthesized basis is backed out of IBKR's own `Basis`, so it agrees
+                # with IBKR by construction; report it separately so a green
+                # reconciliation is not read as independent confirmation.
+                logger.info(
+                    "Reconciliation: %d symbol(s) carry synthesized basis -- not "
+                    "independently confirmed: %s",
+                    len(report.synthetic),
+                    ", ".join(f"{r.symbol} ({r.currency})" for r in report.synthetic),
                 )
         except Exception:
             logger.exception("Reconciliation failed; continuing without it.")

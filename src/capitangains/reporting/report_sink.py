@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from .fifo_domain import RealizedLine
 from .money import quantize_money
 from .report_builder import ReportBuilder
 
@@ -19,6 +20,20 @@ from .report_builder import ReportBuilder
 #          net_eur(12), alloc_eur(13), pl_eur(14), legs_json(15)
 _REALIZED_TCY_MONEY_COLS = range(5, 10)  # Trade currency columns (gross..pl)
 _REALIZED_EUR_MONEY_COLS = range(10, 15)  # EUR columns (gross..pl)
+
+
+def _gap_status(rl: RealizedLine) -> str:
+    """Human-readable basis provenance for a realized line's status column.
+
+    Distinguishes a clean FIFO match (empty) from the two gap outcomes: a residual lot
+    synthesized from IBKR's ``Basis`` versus an unmatched remainder left at zero cost.
+    ``gap_fixed`` implies ``has_gap``, so it is checked first.
+    """
+    if not rl.has_gap:
+        return ""
+    if rl.gap_fixed:
+        return "synthesized from Basis"
+    return "zero-cost gap"
 
 
 class ReportSink(Protocol):
@@ -75,6 +90,7 @@ class ExcelReportSink:
                     "alloc_eur": "Allocated Cost Basis (EUR)",
                     "pl_eur": "Realized P/L (EUR)",
                     "legs_json": "Matched Buy Lots (JSON)",
+                    "gap_status": "Basis Status",
                 },
                 "anexo_j": {
                     "ticker": "Ticker",
@@ -86,6 +102,7 @@ class ExcelReportSink:
                     "proceeds_eur": "Disposal Value (EUR)",
                     "pl_eur": "Realized P/L (EUR)",
                     "transferred": "Transferred",
+                    "synthetic": "Synthetic",
                 },
                 "per_symbol": {
                     "ticker": "Ticker",
@@ -96,6 +113,7 @@ class ExcelReportSink:
                     "pl_eur": "Realized P/L (EUR)",
                     "net_eur": "Net Proceeds (EUR)",
                     "alloc_eur": "Allocated Cost Basis (EUR)",
+                    "has_gap": "Gap / Synthetic",
                 },
                 "dividends": {
                     "date": "Date",
@@ -180,6 +198,7 @@ class ExcelReportSink:
                 "alloc_eur": "Custo Alocado (EUR)",
                 "pl_eur": "Resultado Realizado (EUR)",
                 "legs_json": "Lotes de Compra (JSON)",
+                "gap_status": "Estado do Custo",
             },
             "anexo_j": {
                 "ticker": "Símbolo",
@@ -191,6 +210,7 @@ class ExcelReportSink:
                 "proceeds_eur": "Valor de Realização (EUR)",
                 "pl_eur": "Mais/menos‑valia (EUR)",
                 "transferred": "Transferido",
+                "synthetic": "Sintético",
             },
             "per_symbol": {
                 "ticker": "Símbolo",
@@ -201,6 +221,7 @@ class ExcelReportSink:
                 "pl_eur": "Resultado Realizado (EUR)",
                 "net_eur": "Proveitos Líquidos (EUR)",
                 "alloc_eur": "Custo Alocado (EUR)",
+                "has_gap": "Lacuna / Sintético",
             },
             "dividends": {
                 "date": "Data",
@@ -346,6 +367,7 @@ class ExcelReportSink:
                 labels["realized"]["alloc_eur"],
                 labels["realized"]["pl_eur"],
                 labels["realized"]["legs_json"],
+                labels["realized"]["gap_status"],
             ]
         )
 
@@ -381,6 +403,7 @@ class ExcelReportSink:
                     (None if rl.alloc_cost_eur is None else float(rl.alloc_cost_eur)),
                     (None if rl.realized_pl_eur is None else float(rl.realized_pl_eur)),
                     legs_json,
+                    _gap_status(rl),
                 ]
             )
             r = ws.max_row
@@ -409,6 +432,7 @@ class ExcelReportSink:
                 labels["anexo_j"]["proceeds_eur"],
                 labels["anexo_j"]["pl_eur"],
                 labels["anexo_j"]["transferred"],
+                labels["anexo_j"]["synthetic"],
             ]
         )
 
@@ -435,6 +459,7 @@ class ExcelReportSink:
                         (None if proceeds_eur is None else float(proceeds_eur)),
                         (None if pl_eur is None else float(pl_eur)),
                         "Yes" if is_transferred else "",
+                        "Yes" if leg.synthetic else "",
                     ]
                 )
                 r = ws.max_row
@@ -461,8 +486,13 @@ class ExcelReportSink:
                 labels["per_symbol"]["pl_eur"],
                 labels["per_symbol"]["net_eur"],
                 labels["per_symbol"]["alloc_eur"],
+                labels["per_symbol"]["has_gap"],
             ]
         )
+
+        # A symbol's per-symbol totals silently fold in any gap-filled or synthesized
+        # line; flag the symbol so the aggregate isn't read as a clean FIFO result.
+        gap_symbols = {rl.symbol for rl in report.realized_lines if rl.has_gap}
 
         # Invariant: each symbol maps to exactly one trade currency
         # (enforced by validate_symbol_currency_uniqueness at ingestion).
@@ -477,6 +507,7 @@ class ExcelReportSink:
                 float(totals.eur.realized),
                 float(totals.eur.proceeds),
                 float(totals.eur.alloc_cost),
+                "Yes" if symbol in gap_symbols else "",
             ]
             ws.append(row)
 

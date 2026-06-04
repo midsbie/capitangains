@@ -3,8 +3,8 @@ import logging
 from decimal import Decimal
 
 from capitangains.reporting.extract import TradeRow
+from capitangains.reporting.fifo_domain import RealizedLine
 from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
-from capitangains.reporting.report_builder import CurrencyTotals, SymbolTotals
 
 
 def _trade(symbol, currency, quantity, realized, *, year=2024, month=6, day=1):
@@ -25,11 +25,24 @@ def _trade(symbol, currency, quantity, realized, *, year=2024, month=6, day=1):
     )
 
 
-def _totals(by_currency):
-    st = SymbolTotals()
-    for ccy, realized in by_currency.items():
-        st.by_currency[ccy] = CurrencyTotals(realized=Decimal(realized))
-    return st
+def _line(symbol, ccy, realized, *, gap_fixed=False, year=2024):
+    """A minimal RealizedLine carrying only what the reconciler reads.
+
+    The reconciler keys off ``symbol``/``currency``, sums ``realized_pl_ccy``, filters
+    on ``sell_date.year`` and partitions on ``gap_fixed``; other fields are zeroed.
+    """
+    return RealizedLine(
+        symbol=symbol,
+        currency=ccy,
+        sell_date=dt.date(year, 6, 1),
+        sell_qty=Decimal("0"),
+        sell_gross_ccy=Decimal("0"),
+        sell_comm_ccy=Decimal("0"),
+        sell_net_ccy=Decimal("0"),
+        legs=[],
+        realized_pl_ccy=Decimal(realized),
+        gap_fixed=gap_fixed,
+    )
 
 
 def test_realized_matches_ibkr_in_trade_currency():
@@ -39,9 +52,9 @@ def test_realized_matches_ibkr_in_trade_currency():
         _trade("GOOGL", "USD", "450", "0"),  # opening buy, realized 0
         _trade("GOOGL", "USD", "-450", "22493.07342"),  # closing sell
     ]
-    totals = {"GOOGL": _totals({"USD": "22493.07"})}
+    lines = [_line("GOOGL", "USD", "22493.07")]
 
-    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert (r.symbol, r.currency) == ("GOOGL", "USD")
     assert r.computed == Decimal("22493.07")
@@ -60,9 +73,9 @@ def test_reconciles_realized_not_grand_total():
         _trade("AMD", "USD", "200", "0"),  # buy
         _trade("AMD", "USD", "-100", "1202.17137978"),  # partial close -> realized
     ]
-    totals = {"AMD": _totals({"USD": "1202.17"})}
+    lines = [_line("AMD", "USD", "1202.17")]
 
-    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert r.ibkr == Decimal("1202.17137978")  # realized, not the 1146.09 grand Total
     assert r.is_match
@@ -72,17 +85,20 @@ def test_open_only_position_is_not_a_mismatch():
     """A purely-unrealized position (only a buy, no close) has no realized activity, so
     it must not be reconciled — the old code compared its grand Total against zero."""
     trades = [_trade("AAL", "USD", "100", "0")]  # opening buy only
-    totals: dict[str, SymbolTotals] = {}  # no FIFO realized line: position still open
+    lines: list[RealizedLine] = []  # no FIFO realized line: position still open
 
-    assert reconcile_realized_against_ibkr(trades, totals, 2024) == []
+    report = reconcile_realized_against_ibkr(trades, lines, 2024)
+
+    assert report.reconciled == []
+    assert report.synthetic == []
 
 
 def test_material_difference_is_flagged():
     # A missing buy lot zeroed our cost basis, inflating the gain far beyond rounding.
     trades = [_trade("INTC", "USD", "-100", "-38115.23")]
-    totals = {"INTC": _totals({"USD": "0"})}
+    lines = [_line("INTC", "USD", "0")]
 
-    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert not r.is_match
     assert r.diff == Decimal("38115.23")
@@ -92,9 +108,9 @@ def test_rounding_tolerance_scales_with_sell_count():
     # Five sells, each rounded to the cent on our side, accumulate up to 0.025 of
     # rounding. A flat 0.01 tolerance would false-positive; the scaled one must not.
     trades = [_trade("XYZ", "USD", "-10", "1.004", day=d) for d in range(1, 6)]
-    totals = {"XYZ": _totals({"USD": "5.00"})}  # IBKR exact 5.020 vs our 5.00
+    lines = [_line("XYZ", "USD", "5.00")]  # IBKR exact 5.020 vs our 5.00
 
-    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert r.n_sells == 5
     assert r.diff == Decimal("0.020")
@@ -107,12 +123,13 @@ def test_elided_ibkr_realized_skips_symbol(caplog):
         _trade("ABC", "USD", "100", "0"),
         _trade("ABC", "USD", "-100", None),  # closing trade, realized value elided
     ]
-    totals = {"ABC": _totals({"USD": "50.00"})}
+    lines = [_line("ABC", "USD", "50.00")]
 
     with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
-        results = reconcile_realized_against_ibkr(trades, totals, 2024)
+        report = reconcile_realized_against_ibkr(trades, lines, 2024)
 
-    assert results == []  # IBKR total untrustworthy -> not reconciled
+    assert report.reconciled == []  # IBKR total untrustworthy -> not reconciled
+    assert report.incomplete == [("ABC", "USD")]
     assert any(
         "skipped" in rec.getMessage() and "ABC" in rec.getMessage()
         for rec in caplog.records
@@ -124,11 +141,15 @@ def test_year_filter_ignores_other_periods():
         _trade("ABC", "USD", "-100", "100.00", year=2023),  # prior year -> ignored
         _trade("ABC", "USD", "-50", "30.00", year=2024),
     ]
-    totals = {"ABC": _totals({"USD": "30.00"})}
+    lines = [
+        _line("ABC", "USD", "999.00", year=2023),  # prior-year line -> ignored
+        _line("ABC", "USD", "30.00", year=2024),
+    ]
 
-    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert r.ibkr == Decimal("30.00")  # only the 2024 sell counted
+    assert r.computed == Decimal("30.00")  # only the 2024 realized line counted
     assert r.n_sells == 1
     assert r.is_match
 
@@ -137,7 +158,7 @@ def test_ibkr_realized_without_our_line_is_mismatch():
     # IBKR booked realized for a symbol we produced no FIFO line for (dropped sell).
     trades = [_trade("ZZZ", "USD", "-100", "500.00")]
 
-    [r] = reconcile_realized_against_ibkr(trades, {}, 2024)
+    [r] = reconcile_realized_against_ibkr(trades, [], 2024).reconciled
 
     assert r.computed is None
     assert r.ibkr == Decimal("500.00")
@@ -145,15 +166,25 @@ def test_ibkr_realized_without_our_line_is_mismatch():
 
 
 def test_our_line_without_ibkr_realized_is_mismatch():
-    # We report realized for a symbol IBKR shows no in-year trades for (e.g. a
-    # synthesized gap lot).
-    totals = {"SYN": _totals({"USD": "42.00"})}
+    # We report realized for a symbol IBKR shows no in-year trades for (a dropped or
+    # zero-cost-gap sell). A genuine FIFO line with no IBKR counterpart is a mismatch.
+    lines = [_line("SYN", "USD", "42.00")]
 
-    [r] = reconcile_realized_against_ibkr([], totals, 2024)
+    [r] = reconcile_realized_against_ibkr([], lines, 2024).reconciled
 
     assert r.ibkr is None
     assert r.computed == Decimal("42.00")
     assert not r.is_match
+
+    # But a *synthesized* line is backed out of IBKR's own Basis, so its agreement is
+    # tautological: it must land in `synthetic`, never in the independent `reconciled`.
+    synth = [_line("SYN", "USD", "42.00", gap_fixed=True)]
+    report = reconcile_realized_against_ibkr([], synth, 2024)
+
+    assert report.reconciled == []
+    [s] = report.synthetic
+    assert (s.symbol, s.currency) == ("SYN", "USD")
+    assert s.computed == Decimal("42.00")
 
 
 def test_each_symbol_compared_in_its_own_currency():
@@ -161,12 +192,12 @@ def test_each_symbol_compared_in_its_own_currency():
         _trade("AZN", "GBP", "-100", "569.74"),
         _trade("GOOGL", "USD", "-100", "20753.46"),
     ]
-    totals = {
-        "AZN": _totals({"GBP": "569.74"}),
-        "GOOGL": _totals({"USD": "20753.46"}),
-    }
+    lines = [
+        _line("AZN", "GBP", "569.74"),
+        _line("GOOGL", "USD", "20753.46"),
+    ]
 
-    results = reconcile_realized_against_ibkr(trades, totals, 2024)
+    results = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert [(r.symbol, r.currency) for r in results] == [
         ("AZN", "GBP"),

@@ -10,7 +10,11 @@ from .extract import (
 )
 from .fifo import FifoMatcher, Lot, RealizedLine
 from .fx import FxTable
-from .reconcile import SymbolReconciliation, reconcile_realized_against_ibkr
+from .reconcile import (
+    ReconciliationReport,
+    SymbolReconciliation,
+    reconcile_realized_against_ibkr,
+)
 from .report_builder import ReportBuilder
 from .report_sink import ExcelReportSink, OdsReportSink, ReportSink
 
@@ -28,6 +32,7 @@ __all__ = [
     "Lot",
     "FxTable",
     "reconcile_realized_against_ibkr",
+    "ReconciliationReport",
     "SymbolReconciliation",
     "ReportBuilder",
     "ReportSink",
