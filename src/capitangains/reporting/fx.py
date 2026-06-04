@@ -12,7 +12,11 @@ from capitangains.conv import date_key, to_dec_strict
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of days to look back for FX rate before warning
+# Hard cap on how stale a fallback rate may be. The nearest prior observation is
+# accepted only within this window (covers weekends/holidays); a gap wider than the cap
+# makes get_rate return None so the rate is reported missing rather than silently
+# extrapolated. The usual cause is a lookup that runs more than this many days past the
+# table's last entry.
 _MAX_FX_LOOKBACK_DAYS = 7
 
 
@@ -90,10 +94,14 @@ class FxTable:
         return c in self.data and d in self.data[c]
 
     def get_rate(self, date: dt.date, currency: str) -> Decimal | None:
-        """Return EUR per 1 unit of currency.
+        """Return EUR per 1 unit of currency, or None if no fresh rate is available.
 
-        If the exact date isn't available, falls back to the nearest previous
-        available date for that currency (to accommodate weekends/holidays).
+        Falls back to the nearest *previous* observation to absorb weekends/holidays,
+        but only within ``_MAX_FX_LOOKBACK_DAYS``. A gap wider than that window returns
+        None rather than an over-stale rate -- the usual cause being a lookup that runs
+        more than that many days past the table's last entry -- and the caller then
+        reports it missing (the same fatal path as an absent rate). Never forward-fills:
+        a past event is not priced at a future rate (cf. finding #2).
         """
         c = currency.upper()
         if c == "EUR":
@@ -110,8 +118,8 @@ class FxTable:
             logger.debug("FX rate lookup: %s on %s = %s (exact match)", c, date, rate)
             return rate
 
-        # fallback to nearest previous date (weekends/holidays)
-        # Find the latest date <= d in sorted list
+        # Fall back to the nearest previous observation, but only within the staleness
+        # cap (see _MAX_FX_LOOKBACK_DAYS). Find the latest date <= d in the sorted list.
         dates = self.date_index[c]
 
         pos = bisect.bisect_right(dates, d)
@@ -124,36 +132,44 @@ class FxTable:
             return None
 
         fallback_date_str = dates[pos - 1]
-        rate = self.data[c][fallback_date_str]
-        # Best-effort logging of fallback distance; do not crash on malformed keys.
+
+        # Freshness must be provable. An unparseable key means we cannot bound the
+        # staleness, so fail closed (report missing) rather than return an unverifiable
+        # rate. Such keys only arise from a malformed FX CSV (see finding #12).
         try:
             fallback_date = dt.date.fromisoformat(fallback_date_str)
-            days_back = (date - fallback_date).days
-            if days_back > _MAX_FX_LOOKBACK_DAYS:
-                logger.warning(
-                    "FX rate for %s on %s using %d-day-old rate from %s. "
-                    "Consider providing more recent FX data.",
-                    c,
-                    date,
-                    days_back,
-                    fallback_date,
-                )
-            else:
-                logger.info(
-                    "FX rate for %s on %s: using rate from %s (%d days earlier) = %s",
-                    c,
-                    date,
-                    fallback_date,
-                    days_back,
-                    rate,
-                )
         except ValueError:
-            logger.debug(
-                "FX rate lookup: %s on %s: fallback to %r (unparseable date key) = %s",
+            logger.warning(
+                "FX rate for %s on %s: nearest key %r is unparseable; treating as "
+                "missing.",
                 c,
                 date,
                 fallback_date_str,
-                rate,
             )
+            return None
 
+        days_back = (date - fallback_date).days
+        if days_back > _MAX_FX_LOOKBACK_DAYS:
+            # Past the cap the rate is too stale to trust; report it missing so the
+            # caller's "FX incomplete" gate fires instead of silently extrapolating.
+            logger.warning(
+                "FX rate for %s on %s: nearest prior rate is %d days old (%s), beyond "
+                "the %d-day staleness cap; treating as missing.",
+                c,
+                date,
+                days_back,
+                fallback_date,
+                _MAX_FX_LOOKBACK_DAYS,
+            )
+            return None
+
+        rate = self.data[c][fallback_date_str]
+        logger.info(
+            "FX rate for %s on %s: using rate from %s (%d days earlier) = %s",
+            c,
+            date,
+            fallback_date,
+            days_back,
+            rate,
+        )
         return rate

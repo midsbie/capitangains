@@ -80,3 +80,45 @@ def test_fx_short_fallback_logs_info_not_warning(tmp_path, caplog):
     records = [r for r in caplog.records if "3 days earlier" in r.getMessage()]
     assert len(records) == 1
     assert records[0].levelno == logging.INFO
+
+
+def test_fx_fallback_at_cap_boundary_is_returned(tmp_path):
+    # Exactly _MAX_FX_LOOKBACK_DAYS (7) back is still fresh enough -> rate returned.
+    path = _write_csv(tmp_path, [["2024-01-05", "USD", "1.20"]])
+    table = FxTable.from_csv(path)
+    assert table.get_rate(dt.date(2024, 1, 12), "USD") == table.get_rate(
+        dt.date(2024, 1, 5), "USD"
+    )
+
+
+def test_fx_stale_fallback_beyond_cap_returns_none(tmp_path, caplog):
+    # One day past the cap (8 days) is too stale: report missing, not an extrapolation.
+    path = _write_csv(tmp_path, [["2024-01-05", "USD", "1.20"]])
+    table = FxTable.from_csv(path)
+
+    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.fx"):
+        rate = table.get_rate(dt.date(2024, 1, 13), "USD")  # 8 days back
+
+    assert rate is None
+    assert any("staleness cap" in r.getMessage() for r in caplog.records)
+
+
+def test_fx_date_past_table_end_returns_none(tmp_path):
+    # The "FX table ends in October, sale settles in December" case (finding #10,
+    # defect B): a date far past the last entry must not silently reuse the last rate.
+    path = _write_csv(tmp_path, [["2024-10-31", "USD", "1.20"]])
+    table = FxTable.from_csv(path)
+    assert table.get_rate(dt.date(2024, 12, 15), "USD") is None
+
+
+def test_fx_unparseable_fallback_key_returns_none(tmp_path, caplog):
+    # An unvalidated, malformed date key (finding #12) makes staleness unprovable, so
+    # get_rate fails closed rather than returning an unverifiable rate.
+    path = _write_csv(tmp_path, [["2024-13-01", "USD", "1.20"]])  # month 13: invalid
+    table = FxTable.from_csv(path)
+
+    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.fx"):
+        rate = table.get_rate(dt.date(2025, 1, 1), "USD")
+
+    assert rate is None
+    assert any("unparseable" in r.getMessage() for r in caplog.records)
