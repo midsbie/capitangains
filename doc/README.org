@@ -1,0 +1,36 @@
+#+TITLE: IBKR Reporting Guide — Source Documents
+#+OPTIONS: toc:nil
+
+* Overview
+
+This directory holds the official Interactive Brokers (IBKR) reporting guide, which contains the authoritative specifications for IBKR reports and statements.
+
+* Files
+
+- =IBKR-reporting_guide.pdf= :: The original IBKR reporting guide containing the official reporting/statement document specifications.
+
+- =IBKR-reporting_guide.txt= :: A textual version derived from the PDF, produced by running:
+
+  #+begin_src sh
+  pdftotext -layout ./doc/IBKR-reporting_guide.pdf ./doc/IBKR-reporting_guide.txt
+  #+end_src
+
+  The above followed an initial verification performed as follows:
+
+  #+begin_src sh
+  $ pdffonts ./doc/IBKR-reporting_guide.pdf
+  name                                 type              encoding         emb sub uni object ID
+  ------------------------------------ ----------------- ---------------- --- --- --- ---------
+  IEAHJX+Arial-BoldMT                  CID TrueType      Identity-H       yes yes yes      6  0
+  PAWMAJ+ArialMT                       CID TrueType      Identity-H       yes yes yes      7  0
+  NMEDKB+CourierNewPSMT                CID TrueType      Identity-H       yes yes yes   1257  0
+  WCKPBM+Wingdings-Regular             CID TrueType      Identity-H       yes yes yes   1259  0
+  JDFRTL+Arial-ItalicMT                CID TrueType      Identity-H       yes yes yes   1523  0
+  #+end_src
+
+* Sources
+
+- The official HTML version of the guide is at:
+  https://www.ibkrguides.com/reportingreference/home.htm
+- The PDF version was downloaded from:
+  https://www.interactivebrokers.com.hk/download/reportingguide.pdf
