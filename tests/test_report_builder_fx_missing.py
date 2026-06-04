@@ -63,7 +63,7 @@ def test_missing_buy_rate_records_gap_without_substituting_sell_rate():
     # Sell-date rate present; buy-date (and any earlier) rate absent.
     rb.convert_eur(_make_fx({("USD", "2024-06-10"): Decimal("0.9")}))
 
-    # The buy-date gap is recorded and the whole line is left unconverted — the
+    # The buy-date gap is recorded and the whole line is left unconverted -- the
     # sell-date rate is never substituted for the missing acquisition rate.
     assert rb.fx_missing == {(dt.date(2023, 1, 1), "USD")}
     assert rl.legs[0].alloc_cost_eur is None

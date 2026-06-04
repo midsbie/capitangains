@@ -1,4 +1,4 @@
-#+TITLE: IBKR Reporting Guide — Source Documents
+#+TITLE: IBKR Reporting Guide -- Source Documents
 #+OPTIONS: toc:nil
 
 * Overview

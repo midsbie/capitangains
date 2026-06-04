@@ -57,7 +57,7 @@ def test_total_and_subtotal_rows_are_silently_skipped():
 
 def test_empty_kind_statement_summary_line_is_skipped_not_errored():
     # IBKR Activity Statements contain standalone, statement-level summary lines whose
-    # "kind" cell (column 1) is empty — e.g. "Total P/L for Statement Period". They
+    # "kind" cell (column 1) is empty -- e.g. "Total P/L for Statement Period". They
     # carry no subtable data and must be skipped WITHOUT failing the parse: an error
     # here makes the CLI abort (exit 2) and write no workbook.
     rows = [

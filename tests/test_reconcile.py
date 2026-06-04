@@ -83,7 +83,7 @@ def test_reconciles_realized_not_grand_total():
 
 def test_open_only_position_is_not_a_mismatch():
     """A purely-unrealized position (only a buy, no close) has no realized activity, so
-    it must not be reconciled — the old code compared its grand Total against zero."""
+    it must not be reconciled -- the old code compared its grand Total against zero."""
     trades = [_trade("AAL", "USD", "100", "0")]  # opening buy only
     lines: list[RealizedLine] = []  # no FIFO realized line: position still open
 

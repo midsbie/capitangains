@@ -148,7 +148,7 @@ class ReportBuilder:
     ) -> Decimal | None:
         """Resolve the EUR-per-unit rate for (date, currency); record a miss if absent.
 
-        Returns None — and accumulates (date, currency) in ``fx_missing`` — when no
+        Returns None -- and accumulates (date, currency) in ``fx_missing`` -- when no
         table is given, the currency is absent, or no rate exists on/before the date.
         Never substitutes another date's rate (finding #2).
         """

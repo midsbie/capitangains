@@ -247,7 +247,7 @@ def test_sell_matches_only_lots_in_same_currency():
         )
     )
 
-    # Sell 100 XYZ denominated in USD — should NOT consume the EUR lot
+    # Sell 100 XYZ denominated in USD -- should NOT consume the EUR lot
     line = matcher.ingest_trade(
         _trade(
             "XYZ",

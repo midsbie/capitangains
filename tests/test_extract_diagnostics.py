@@ -82,7 +82,7 @@ def test_trades_elided_basis_counted_as_info(caplog):
 
 
 def test_trades_subtable_missing_required_column_warns(caplog):
-    # Header without "Proceeds": the whole subtable is dropped — that is material.
+    # Header without "Proceeds": the whole subtable is dropped -- that is material.
     rows = [
         [
             "Trades",

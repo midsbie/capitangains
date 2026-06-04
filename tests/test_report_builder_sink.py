@@ -102,7 +102,7 @@ def test_multi_currency_same_symbol_rejected():
 
 def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
     """A missing buy- or sell-date rate leaves the WHOLE line unconverted and records
-    every unresolved (date, currency) — no substitution of another date's rate (#2)."""
+    every unresolved (date, currency) -- no substitution of another date's rate (#2)."""
     rb = ReportBuilder(year=2024)
     # Sell-date rate present, but the first leg's buy date predates the table → missing.
     usd_legs: list[dict[str, Any]] = [

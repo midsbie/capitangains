@@ -294,7 +294,7 @@ def parse_trades_stocklike(
 
     if skipped_rows:
         logger.info(
-            "Trades (scope=%r): skipped %d row(s) — out-of-scope asset category "
+            "Trades (scope=%r): skipped %d row(s) -- out-of-scope asset category "
             "or zero quantity",
             asset_scope,
             skipped_rows,
