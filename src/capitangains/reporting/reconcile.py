@@ -1,144 +1,120 @@
 from __future__ import annotations
 
 import logging
-import re
-from collections import Counter
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
-from capitangains.conv import to_dec_strict
-from capitangains.model import IbkrModel
-
-from .extract import ASSET_STOCK_LIKE
+from capitangains.reporting.extract import TradeRow
+from capitangains.reporting.report_builder import SymbolTotals
 
 logger = logging.getLogger(__name__)
 
-# Fallback symbol-column index for summary subtables that omit a Symbol/Ticker/
-# Description header — the position it commonly occupies in IBKR's layout.
-_SYMBOL_FALLBACK_IDX = 2
+# Our realized P/L is quantized to the cent once per sell (build_realized_line), while
+# IBKR's per-trade column is unrounded. Summing N sells therefore accumulates at most
+# half a cent of rounding each, so a true match must be tolerated to that bound rather
+# than to a flat constant — otherwise heavily-traded symbols raise false mismatches.
+_HALF_CENT = Decimal("0.005")
 
 
-def _report_skips(label: str, counts: Counter[str]) -> None:
-    """Emit one aggregate INFO line for row-level skips, omitting zero-count reasons.
+@dataclass(frozen=True)
+class SymbolReconciliation:
+    """Realized-P/L cross-check for one (symbol, currency), in the trade currency.
 
-    Reasons are tallied during the per-row loop and reported once here, so a subtable
-    with many skips produces a single line rather than per-row noise. Nothing is logged
-    when no rows were skipped. Reasons retain their seeded order for stable output.
+    Both sides are expressed in the instrument's own currency, so no FX conversion
+    stands between them: a difference beyond cent rounding is a genuine accounting gap,
+    not a rate artifact. ``computed`` is our FIFO realized P/L; ``ibkr`` is the sum of
+    IBKR's per-trade ``Realized P/L`` column. A ``None`` on either side means that side
+    booked no realized P/L for the key — itself a discrepancy worth surfacing.
     """
-    total = sum(counts.values())
-    if not total:
-        return
-    breakdown = ", ".join(f"{n} {reason}" for reason, n in counts.items() if n)
-    logger.info("%s: skipped %d row(s) (%s)", label, total, breakdown)
+
+    symbol: str
+    currency: str
+    computed: Decimal | None
+    ibkr: Decimal | None
+    n_sells: int  # closing trades behind ``ibkr``; bounds the accumulated rounding gap
+
+    @property
+    def diff(self) -> Decimal | None:
+        if self.computed is None or self.ibkr is None:
+            return None
+        return (self.computed - self.ibkr).copy_abs()
+
+    @property
+    def tolerance(self) -> Decimal:
+        return (self.n_sells + 1) * _HALF_CENT
+
+    @property
+    def is_match(self) -> bool:
+        d = self.diff
+        return d is not None and d <= self.tolerance
 
 
-def reconcile_with_ibkr_summary(model: IbkrModel) -> dict[str, Decimal]:
-    """Try to read 'Realized & Unrealized Performance Summary' for Stocks.
+def reconcile_realized_against_ibkr(
+    trades: Sequence[TradeRow],
+    symbol_totals: Mapping[str, SymbolTotals],
+    year: int,
+) -> list[SymbolReconciliation]:
+    """Cross-check our realized P/L against IBKR's, per symbol, in the trade currency.
 
-    Returns map: symbol -> realized_eur.
-    If parsing fails (sanitized CSV), returns empty dict.
+    IBKR reports a per-trade ``Realized P/L`` in each instrument's own currency; summed
+    per (symbol, currency) over the reporting year it reproduces IBKR's per-symbol
+    subtotal. Comparing that against our FIFO total in the same currency needs no FX
+    rate, so any difference beyond cent rounding is a real discrepancy (a missing buy
+    lot, a gap-filled sell) rather than an artifact of the two sides converting to EUR
+    by different methods. This is why the reconciliation reads the per-trade realized
+    column and not the EUR ``Realized & Unrealized Performance Summary``.
+
+    A symbol whose IBKR realized P/L is elided on any closing trade cannot be trusted
+    and is omitted from the result (logged once as INFO).
     """
-    result: dict[str, Decimal] = {}
-    # Seeded with zero so the breakdown keeps a stable, documented reason order.
-    skips: Counter[str] = Counter(
-        {"non-stock": 0, "empty symbol": 0, "no numeric value": 0}
-    )
-    for sub in model.get_subtables("Realized & Unrealized Performance Summary"):
-        header = [h.strip() for h in sub.header]
-        rows = sub.rows
-
-        logger.debug(
-            "Found 'Realized & Unrealized Performance Summary' subtable with %d rows",
-            len(rows),
-        )
-
-        # Heuristic: Find columns for Asset Category, Symbol, Total (or Realized Total).
-        # In many IBKR statements, columns include fields for realized/unrealized P/L
-        # and a final "Total".
-        try:
-            header.index("Asset Category")
-        except ValueError:
+    ibkr_realized: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+    n_sells: dict[tuple[str, str], int] = defaultdict(int)
+    incomplete: set[tuple[str, str]] = set()
+    for t in trades:
+        if t.date.year != year:
             continue
+        key = (t.symbol, t.currency)
+        if t.quantity < 0:
+            n_sells[key] += 1
+        if t.realized_pl_ccy is None:
+            # An opening trade's realized P/L is definitionally zero, so eliding it is
+            # harmless; on a closing trade it makes the symbol's total unusable.
+            if t.quantity < 0:
+                incomplete.add(key)
+            continue
+        ibkr_realized[key] += t.realized_pl_ccy
 
-        # Try to find symbol column: sometimes it's at index 2 (after "Asset Category")
-        idx_symbol = None
-        for name in ["Symbol", "Ticker", "Description"]:
-            if name in header:
-                idx_symbol = header.index(name)
-                break
-        if idx_symbol is None:
-            if len(header) > _SYMBOL_FALLBACK_IDX:
-                # No recognized symbol column, but the common-layout fallback exists.
-                # Guess it and warn — it can mis-key every row; correctness fix tracked
-                # separately.
-                logger.warning(
-                    "Reconciliation: no Symbol/Ticker/Description column in header %s; "
-                    "falling back to column %d (%r) — reconciliation keys may be wrong",
-                    header,
-                    _SYMBOL_FALLBACK_IDX,
-                    header[_SYMBOL_FALLBACK_IDX],
-                )
-                idx_symbol = _SYMBOL_FALLBACK_IDX
-            else:
-                # Not even the fallback column exists: no usable symbol. Skip the
-                # subtable (default-visible) rather than keying every row off nothing.
-                logger.warning(
-                    "Reconciliation: header %s has no usable symbol column; "
-                    "skipping subtable",
-                    header,
-                )
-                continue
+    computed_realized: dict[tuple[str, str], Decimal] = {
+        (sym, ccy): tot.realized
+        for sym, st in symbol_totals.items()
+        for ccy, tot in st.by_currency.items()
+    }
 
-        # Try to find a realized EUR column. Heuristic: pick the last numeric column.
-        # Because in some sanitized exports values are elided with "...", we may fail.
-        numeric_cols = [
-            i
-            for i, h in enumerate(header)
-            if re.search(r"(Total|Realized|P/L|Profit|Loss)", h, re.I)
-        ]
-        candidate_cols = numeric_cols or list(
-            range(max(0, len(header) - 10), len(header))
+    # Reconcile only keys with realized activity: a pure open buy lot carries a zero
+    # IBKR realized and no FIFO line, and is not a discrepancy.
+    keys = {
+        key
+        for key in ibkr_realized.keys() | computed_realized.keys()
+        if key not in incomplete
+        and (n_sells.get(key, 0) > 0 or key in computed_realized)
+    }
+    results = [
+        SymbolReconciliation(
+            symbol=sym,
+            currency=ccy,
+            computed=computed_realized.get((sym, ccy)),
+            ibkr=ibkr_realized.get((sym, ccy)),
+            n_sells=n_sells.get((sym, ccy), 0),
         )
+        for sym, ccy in sorted(keys)
+    ]
 
-        logger.debug(
-            "Reconciliation column mapping: symbol_idx=%s, candidate_cols=%s",
-            idx_symbol,
-            candidate_cols,
+    if incomplete:
+        logger.info(
+            "Reconciliation: %d symbol(s) skipped (IBKR realized P/L elided): %s",
+            len(incomplete),
+            ", ".join(sorted(f"{s} ({c})" for s, c in incomplete)),
         )
-
-        for r in rows:
-            asset = r.get("Asset Category", "")
-            if asset not in ASSET_STOCK_LIKE:
-                skips["non-stock"] += 1
-                continue
-            sym = r.get(header[idx_symbol], "").strip()
-            if not sym:
-                skips["empty symbol"] += 1
-                continue
-
-            # try columns from right to left for a parseable number
-            val = None
-            found_col: int | None = None
-            for ci in reversed(candidate_cols):
-                v = r.get(header[ci], "")
-                try:
-                    val = to_dec_strict(v)
-                    found_col = ci
-                    break
-                except ValueError:
-                    continue
-
-            if val is not None and found_col is not None:
-                logger.debug(
-                    "Reconciliation extracted: %s: %s EUR (from col %d: %s)",
-                    sym,
-                    val,
-                    found_col,
-                    header[found_col],
-                )
-                result[sym] = result.get(sym, Decimal("0")) + val
-            else:
-                skips["no numeric value"] += 1
-
-    _report_skips("Reconciliation", skips)
-    logger.debug("Reconciliation parsed %d symbols from IBKR summary", len(result))
-    return result
+    return results

@@ -39,7 +39,6 @@ import datetime as dt
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
-from decimal import Decimal
 from pathlib import Path
 
 from capitangains.errors import DataQualityError
@@ -57,13 +56,10 @@ from capitangains.reporting import (
     parse_trades_stocklike,
     parse_transfers,
     parse_withholding_tax,
-    reconcile_with_ibkr_summary,
+    reconcile_realized_against_ibkr,
 )
 from capitangains.reporting.fifo_domain import GapEvent
 from capitangains.reporting.report_sink import ExcelReportSink
-
-# Threshold for reconciliation mismatches (EUR)
-RECONCILIATION_MISMATCH_THRESHOLD = Decimal("0.05")
 
 
 def validate_symbol_currency_uniqueness(
@@ -296,49 +292,42 @@ def process_files(args: argparse.Namespace) -> None:
     rb.convert_eur(fx)
     _report_missing_fx(rb.fx_missing, logger)
 
-    # Soft reconciliation
+    # Soft reconciliation: cross-check our realized P/L against IBKR's own per-trade
+    # `Realized P/L`, per symbol, in each instrument's trade currency. No FX stands
+    # between the two sides, so a disagreement beyond cent rounding is a real accounting
+    # gap rather than a rate artifact. Single-file only: IBKR's per-statement realized
+    # column cannot be meaningfully summed across periods.
     if len(inputs) == 1:
         try:
-            ibkr_sum = reconcile_with_ibkr_summary(model)
-            if ibkr_sum:
+            reconciliations = reconcile_realized_against_ibkr(
+                trades, rb.symbol_totals, args.year
+            )
+            for r in reconciliations:
                 logger.debug(
-                    "Reconciling %d symbols against IBKR summary", len(ibkr_sum)
+                    "Reconciliation: %s (%s) - mine: %s, IBKR: %s, diff: %s (%s)",
+                    r.symbol,
+                    r.currency,
+                    r.computed,
+                    r.ibkr,
+                    r.diff,
+                    "OK" if r.is_match else "MISMATCH",
                 )
-                mismatches = []
-                for sym, ibkr_val in ibkr_sum.items():
-                    sym_totals = rb.symbol_totals.get(sym)
-                    my_val = sym_totals.eur.realized if sym_totals else None
-                    if my_val is not None:
-                        diff = (my_val - ibkr_val).copy_abs()
-                        is_ok = diff <= RECONCILIATION_MISMATCH_THRESHOLD
-                        logger.debug(
-                            "Reconciliation: %s - mine: %s EUR, IBKR: %s EUR, "
-                            "diff: %s EUR (%s)",
-                            sym,
-                            my_val,
-                            ibkr_val,
-                            diff,
-                            "OK" if is_ok else "MISMATCH",
-                        )
-                        if diff > RECONCILIATION_MISMATCH_THRESHOLD:
-                            mismatches.append((sym, my_val, ibkr_val))
-                    else:
-                        logger.debug(
-                            "Reconciliation: %s - mine: N/A, IBKR: %s EUR "
-                            "(symbol not in my totals)",
-                            sym,
-                            ibkr_val,
-                        )
-                if mismatches:
-                    logger.warning(
-                        "Reconciliation mismatches (my EUR vs IBKR EUR): %s",
-                        mismatches[:5],
-                    )
+            mismatches = [r for r in reconciliations if not r.is_match]
+            if mismatches:
+                logger.warning(
+                    "Reconciliation: %d symbol(s) disagree with IBKR realized P/L "
+                    "[symbol, currency, mine, IBKR]: %s",
+                    len(mismatches),
+                    [
+                        (r.symbol, r.currency, r.computed, r.ibkr)
+                        for r in mismatches[:10]
+                    ],
+                )
         except Exception:
             logger.exception("Reconciliation failed; continuing without it.")
     else:
         logger.info(
-            "Skipping IBKR summary reconciliation for multi-file input "
+            "Skipping IBKR realized-P/L reconciliation for multi-file input "
             "(spans multiple periods)."
         )
 

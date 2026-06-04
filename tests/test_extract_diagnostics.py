@@ -67,9 +67,7 @@ def test_trades_out_of_scope_rows_counted_as_info(caplog):
 
     assert [t.symbol for t in trades] == ["AAPL"]  # bond filtered out
     msgs = [r.getMessage() for r in caplog.records]
-    assert any(
-        "Trades (scope='stocks_etfs'): skipped 1 row(s)" in m for m in msgs
-    )
+    assert any("Trades (scope='stocks_etfs'): skipped 1 row(s)" in m for m in msgs)
 
 
 def test_trades_elided_basis_counted_as_info(caplog):

@@ -1,214 +1,175 @@
+import datetime as dt
 import logging
 from decimal import Decimal
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
-from capitangains.reporting.reconcile import reconcile_with_ibkr_summary
+from capitangains.reporting.extract import TradeRow
+from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
+from capitangains.reporting.report_builder import CurrencyTotals, SymbolTotals
 
 
-def _parse_rows(rows):
-    parser = IbkrStatementCsvParser()
-    model, _ = parser.parse_rows(rows)
-    return model
+def _trade(symbol, currency, quantity, realized, *, year=2024, month=6, day=1):
+    """A minimal stock TradeRow carrying IBKR's per-trade `Realized P/L` (trade ccy)."""
+    return TradeRow(
+        section="Trades",
+        asset_category="Stocks",
+        currency=currency,
+        symbol=symbol,
+        datetime_str=f"{year}-{month:02d}-{day:02d}, 10:00:00",
+        date=dt.date(year, month, day),
+        quantity=Decimal(quantity),
+        t_price=Decimal("1"),
+        proceeds=Decimal("0"),
+        comm_fee=Decimal("0"),
+        code="",
+        realized_pl_ccy=None if realized is None else Decimal(realized),
+    )
 
 
-def test_reconcile_collects_stock_symbols_only():
-    rows = [
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Symbol",
-            "Total",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "ABC",
-            "10.00",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Forex",
-            "USD",
-            "5.00",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "ABC",
-            "2.50",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Description",
-            "Realized",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "XYZ",
-            "15.00",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "LMN",
-            "...",
-        ],
+def _totals(by_currency):
+    st = SymbolTotals()
+    for ccy, realized in by_currency.items():
+        st.by_currency[ccy] = CurrencyTotals(realized=Decimal(realized))
+    return st
+
+
+def test_realized_matches_ibkr_in_trade_currency():
+    # IBKR per-trade realized sums to 22493.07342 USD; our FIFO total quantizes to the
+    # cent. Same currency, so they agree within the per-sell rounding band.
+    trades = [
+        _trade("GOOGL", "USD", "450", "0"),  # opening buy, realized 0
+        _trade("GOOGL", "USD", "-450", "22493.07342"),  # closing sell
     ]
-    model = _parse_rows(rows)
+    totals = {"GOOGL": _totals({"USD": "22493.07"})}
 
-    result = reconcile_with_ibkr_summary(model)
-    assert result == {
-        "ABC": Decimal("12.50"),
-        "XYZ": Decimal("15.00"),
-    }
+    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+
+    assert (r.symbol, r.currency) == ("GOOGL", "USD")
+    assert r.computed == Decimal("22493.07")
+    assert r.ibkr == Decimal("22493.07342")
+    assert r.is_match
 
 
-def test_reconcile_fallback_prefers_rightmost_numeric_column():
-    """When no header matches the P&L regex, the fallback should pick the
-    rightmost parseable numeric column (scanning right-to-left)."""
-    rows = [
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Symbol",
-            "Quantity",
-            "Amount",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "ABC",
-            "100.00",
-            "7.50",
-        ],
+def test_reconciles_realized_not_grand_total():
+    """Regression for finding #4: a partially-closed position must reconcile against
+    realized P/L, never IBKR's grand Total (= realized + unrealized).
+
+    AMD-like: realized 1202.17, unrealized -56.08, grand Total 1146.09. The old code
+    read the rightmost `Total` column (1146.09) and produced a false mismatch.
+    """
+    trades = [
+        _trade("AMD", "USD", "200", "0"),  # buy
+        _trade("AMD", "USD", "-100", "1202.17137978"),  # partial close -> realized
     ]
-    model = _parse_rows(rows)
+    totals = {"AMD": _totals({"USD": "1202.17"})}
 
-    # "Amount" (rightmost) should win over "Quantity"
-    assert reconcile_with_ibkr_summary(model) == {"ABC": Decimal("7.50")}
+    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+
+    assert r.ibkr == Decimal("1202.17137978")  # realized, not the 1146.09 grand Total
+    assert r.is_match
 
 
-def test_reconcile_preserves_zero_realized_pl():
-    """A legitimate 0.00 realized P/L must be included, not dropped."""
-    rows = [
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Symbol",
-            "Total",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "ABC",
-            "0.00",
-        ],
-        [
-            "Realized & Unrealized Performance Summary",
-            "Data",
-            "Stocks",
-            "XYZ",
-            "5.00",
-        ],
+def test_open_only_position_is_not_a_mismatch():
+    """A purely-unrealized position (only a buy, no close) has no realized activity, so
+    it must not be reconciled — the old code compared its grand Total against zero."""
+    trades = [_trade("AAL", "USD", "100", "0")]  # opening buy only
+    totals: dict[str, SymbolTotals] = {}  # no FIFO realized line: position still open
+
+    assert reconcile_realized_against_ibkr(trades, totals, 2024) == []
+
+
+def test_material_difference_is_flagged():
+    # A missing buy lot zeroed our cost basis, inflating the gain far beyond rounding.
+    trades = [_trade("INTC", "USD", "-100", "-38115.23")]
+    totals = {"INTC": _totals({"USD": "0"})}
+
+    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+
+    assert not r.is_match
+    assert r.diff == Decimal("38115.23")
+
+
+def test_rounding_tolerance_scales_with_sell_count():
+    # Five sells, each rounded to the cent on our side, accumulate up to 0.025 of
+    # rounding. A flat 0.01 tolerance would false-positive; the scaled one must not.
+    trades = [_trade("XYZ", "USD", "-10", "1.004", day=d) for d in range(1, 6)]
+    totals = {"XYZ": _totals({"USD": "5.00"})}  # IBKR exact 5.020 vs our 5.00
+
+    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+
+    assert r.n_sells == 5
+    assert r.diff == Decimal("0.020")
+    assert r.tolerance == Decimal("0.030")  # (5 + 1) * 0.005
+    assert r.is_match
+
+
+def test_elided_ibkr_realized_skips_symbol(caplog):
+    trades = [
+        _trade("ABC", "USD", "100", "0"),
+        _trade("ABC", "USD", "-100", None),  # closing trade, realized value elided
     ]
-    model = _parse_rows(rows)
-
-    result = reconcile_with_ibkr_summary(model)
-    assert result == {"ABC": Decimal("0.00"), "XYZ": Decimal("5.00")}
-
-
-def test_reconcile_returns_empty_when_missing_columns():
-    rows = [
-        ["Realized & Unrealized Performance Summary", "Header", "Symbol", "Total"],
-        ["Realized & Unrealized Performance Summary", "Data", "ABC", "10.00"],
-    ]
-    model = _parse_rows(rows)
-
-    assert reconcile_with_ibkr_summary(model) == {}
-
-
-def test_reconcile_symbol_column_fallback_warns(caplog):
-    # No Symbol/Ticker/Description column: the parser guesses index 2, which can
-    # mis-key every row, so it must warn (default-visible).
-    rows = [
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Total",
-            "Realized",
-        ],
-        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "1", "10.00"],
-    ]
-    model = _parse_rows(rows)
-
-    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.reconcile"):
-        reconcile_with_ibkr_summary(model)
-
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert "no Symbol/Ticker/Description column" in warnings[0].getMessage()
-
-
-def test_reconcile_skips_subtable_without_usable_symbol_column(caplog):
-    # "Asset Category" present (so the subtable is considered) but too few columns to
-    # even guess a symbol column: skip it with a default-visible warning, don't crash.
-    rows = [
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Total",
-        ],
-        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "10.00"],
-    ]
-    model = _parse_rows(rows)
-
-    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.reconcile"):
-        result = reconcile_with_ibkr_summary(model)
-
-    assert result == {}
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert len(warnings) == 1
-    assert "no usable symbol column" in warnings[0].getMessage()
-
-
-def test_reconcile_skipped_rows_logged_as_info(caplog):
-    rows = [
-        [
-            "Realized & Unrealized Performance Summary",
-            "Header",
-            "Asset Category",
-            "Symbol",
-            "Total",
-        ],
-        # non-stock, empty symbol, and unparseable value -> three distinct skips
-        ["Realized & Unrealized Performance Summary", "Data", "Forex", "USD", "5.00"],
-        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "", "3.00"],
-        ["Realized & Unrealized Performance Summary", "Data", "Stocks", "ABC", "..."],
-    ]
-    model = _parse_rows(rows)
+    totals = {"ABC": _totals({"USD": "50.00"})}
 
     with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
-        reconcile_with_ibkr_summary(model)
+        results = reconcile_realized_against_ibkr(trades, totals, 2024)
 
-    infos = [r for r in caplog.records if "Reconciliation: skipped" in r.getMessage()]
-    assert len(infos) == 1
-    assert infos[0].levelno == logging.INFO
-    msg = infos[0].getMessage()
-    assert "1 non-stock" in msg
-    assert "1 empty symbol" in msg
-    assert "1 no numeric value" in msg
+    assert results == []  # IBKR total untrustworthy -> not reconciled
+    assert any(
+        "skipped" in rec.getMessage() and "ABC" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+
+def test_year_filter_ignores_other_periods():
+    trades = [
+        _trade("ABC", "USD", "-100", "100.00", year=2023),  # prior year -> ignored
+        _trade("ABC", "USD", "-50", "30.00", year=2024),
+    ]
+    totals = {"ABC": _totals({"USD": "30.00"})}
+
+    [r] = reconcile_realized_against_ibkr(trades, totals, 2024)
+
+    assert r.ibkr == Decimal("30.00")  # only the 2024 sell counted
+    assert r.n_sells == 1
+    assert r.is_match
+
+
+def test_ibkr_realized_without_our_line_is_mismatch():
+    # IBKR booked realized for a symbol we produced no FIFO line for (dropped sell).
+    trades = [_trade("ZZZ", "USD", "-100", "500.00")]
+
+    [r] = reconcile_realized_against_ibkr(trades, {}, 2024)
+
+    assert r.computed is None
+    assert r.ibkr == Decimal("500.00")
+    assert not r.is_match
+
+
+def test_our_line_without_ibkr_realized_is_mismatch():
+    # We report realized for a symbol IBKR shows no in-year trades for (e.g. a
+    # synthesized gap lot).
+    totals = {"SYN": _totals({"USD": "42.00"})}
+
+    [r] = reconcile_realized_against_ibkr([], totals, 2024)
+
+    assert r.ibkr is None
+    assert r.computed == Decimal("42.00")
+    assert not r.is_match
+
+
+def test_each_symbol_compared_in_its_own_currency():
+    trades = [
+        _trade("AZN", "GBP", "-100", "569.74"),
+        _trade("GOOGL", "USD", "-100", "20753.46"),
+    ]
+    totals = {
+        "AZN": _totals({"GBP": "569.74"}),
+        "GOOGL": _totals({"USD": "20753.46"}),
+    }
+
+    results = reconcile_realized_against_ibkr(trades, totals, 2024)
+
+    assert [(r.symbol, r.currency) for r in results] == [
+        ("AZN", "GBP"),
+        ("GOOGL", "USD"),
+    ]
+    assert all(r.is_match for r in results)
