@@ -20,6 +20,10 @@ def _default_basis_getter(trade: TradeProtocol) -> Decimal | None:
     return getattr(trade, "basis_ccy", None)
 
 
+def _default_realized_getter(trade: TradeProtocol) -> Decimal | None:
+    return getattr(trade, "realized_pl_ccy", None)
+
+
 class FifoMatcher:
     def __init__(
         self,
@@ -46,6 +50,7 @@ class FifoMatcher:
             return BasisSynthesisPolicy(
                 tolerance=self.gap_tolerance,
                 basis_getter=_default_basis_getter,
+                realized_getter=_default_realized_getter,
             )
         return StrictGapPolicy()
 

@@ -241,3 +241,43 @@ def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
     assert exc.value.code == 2
     assert not out.exists()
     assert any("Amount" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_exits_2_on_basis_inconsistent_with_realized(tmp_path, caplog):
+    # Under --auto-fix-sell-gaps, a Basis that contradicts IBKR's own Realized P/L
+    # (Proceeds + Comm + Basis != Realized) is corrupt; synthesizing from it would
+    # fabricate the gain, so the run must abort with exit 2 and write no workbook.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    # SELL 10 with no buy history: Basis -99999 cannot be reconciled with Realized 200
+    # (1200 + 0 - 99999 != 200), so the auto-fix guardrail rejects it.
+    sell = [
+        "Trades",
+        "Data",
+        "Order",
+        "Stocks",
+        "USD",
+        "CORRUPT",
+        "2024-06-10, 10:00:00",
+        "-10",
+        "120",
+        "1200",
+        "0",
+        "C",
+        "-99999",
+        "200",
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows([_TRADES_HEADER, sell])
+    args = _args(stmt, out)
+    args.auto_fix_sell_gaps = True
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(args)
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any(
+        "Basis" in r.getMessage() and "Realized" in r.getMessage()
+        for r in caplog.records
+    )

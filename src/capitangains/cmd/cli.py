@@ -240,17 +240,25 @@ def process_files(args: argparse.Namespace) -> None:
     events: list[TradeRow | TransferRow] = [*trades, *transfers]
     events.sort(key=_event_sort_key)
 
+    # FIFO matching can surface a corrupt IBKR Basis as a DataQualityError (the auto-fix
+    # consistency guardrail); translate it to a clean exit 2, as extraction does.
     realized = []
-    for event in events:
-        if isinstance(event, TransferRow):
-            matcher.ingest_transfer(event)
-            continue
-        elif not isinstance(event, TradeRow):
-            raise ValueError(f"unexpected event type in merged stream: {type(event)}")
+    try:
+        for event in events:
+            if isinstance(event, TransferRow):
+                matcher.ingest_transfer(event)
+                continue
+            elif not isinstance(event, TradeRow):
+                raise ValueError(
+                    f"unexpected event type in merged stream: {type(event)}"
+                )
 
-        rl = matcher.ingest_trade(event)
-        if rl is not None:  # keep only realized lines generated from sells
-            realized.append(rl)
+            rl = matcher.ingest_trade(event)
+            if rl is not None:  # keep only realized lines generated from sells
+                realized.append(rl)
+    except DataQualityError as e:
+        logger.error("%s", e)
+        raise SystemExit(2) from e
 
     logger.info(
         "FIFO matching: %d trades processed, %d realized lines generated",

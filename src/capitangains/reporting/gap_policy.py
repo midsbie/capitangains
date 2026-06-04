@@ -5,10 +5,20 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Protocol
 
+from capitangains.errors import DataQualityError
+
 from .fifo_domain import GapEvent, SellMatchLeg, TradeProtocol
 from .money import abs_decimal, quantize_allocation
 
 logger = logging.getLogger(__name__)
+
+
+# IBKR's per-trade columns satisfy Proceeds + Comm + Basis = Realized to sub-cent
+# precision (observed residuals <= ~1e-6 on real statements). A residual beyond this
+# band means the Basis cell is internally inconsistent with Realized -- a typo or
+# corruption -- so a cost synthesized from it would be fabricated, not approximate.
+# 0.02 sits well above rounding noise and far below any realistic Basis typo.
+_IDENTITY_TOLERANCE = Decimal("0.02")
 
 
 class GapPolicy(Protocol):
@@ -74,9 +84,11 @@ class BasisSynthesisPolicy:
         *,
         tolerance: Decimal,
         basis_getter: Callable[[TradeProtocol], Decimal | None],
+        realized_getter: Callable[[TradeProtocol], Decimal | None],
     ) -> None:
         self.tolerance = tolerance
         self._basis_getter = basis_getter
+        self._realized_getter = realized_getter
 
     def resolve(
         self,
@@ -161,6 +173,11 @@ class BasisSynthesisPolicy:
                     ),
                 )
 
+        # Past here we commit to IBKR's Basis as the cost figure; first reject it if
+        # IBKR's own columns prove it corrupt (otherwise an unbounded positive residual
+        # from a typo'd Basis would be accepted as a "fixed" synthetic cost).
+        self._guard_basis_consistency(trade, basis)
+
         synth_cost = quantize_allocation(residual)
         avg_price = synth_cost / qty_remaining if qty_remaining > 0 else Decimal("0")
         logger.debug(
@@ -196,3 +213,29 @@ class BasisSynthesisPolicy:
                 fixed=True,
             ),
         )
+
+    def _guard_basis_consistency(self, trade: TradeProtocol, basis: Decimal) -> None:
+        """Reject a Basis that IBKR's own Realized P/L contradicts.
+
+        Synthesis trusts IBKR's Basis as the cost, but IBKR also publishes a per-trade
+        Realized P/L, and its columns satisfy Proceeds + Comm + Basis = Realized to
+        sub-cent precision. When Realized is present and that identity is violated
+        beyond _IDENTITY_TOLERANCE, the Basis cell is provably corrupt (a typo), so the
+        cost synthesized from it would be fabricated rather than approximate -- abort
+        instead of inventing a worse number. The identity, not a magnitude factor, is
+        what distinguishes a corrupt Basis from a legitimate near-total loss: a
+        penny-stock collapse has basis far above proceeds yet still satisfies it.
+        """
+        realized = self._realized_getter(trade)
+        if realized is None:
+            return
+
+        implied = trade.proceeds + trade.comm_fee + basis
+        discrepancy = abs_decimal(implied - realized)
+        if discrepancy > _IDENTITY_TOLERANCE:
+            raise DataQualityError(
+                f"IBKR Basis ({basis}) for {trade.symbol} on {trade.date} is "
+                f"inconsistent with its Realized P/L: Proceeds + Comm + Basis = "
+                f"{implied}, but Realized P/L is {realized} (off by {discrepancy}). "
+                f"Refusing to synthesize a cost basis from a corrupt cell."
+            )

@@ -3,6 +3,9 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+import pytest
+
+from capitangains.errors import DataQualityError
 from capitangains.reporting.extract import TradeRow
 from capitangains.reporting.fifo import FifoMatcher
 from capitangains.reporting.fx import FxTable
@@ -189,3 +192,25 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
     # Legs should have per-leg EUR alloc and proceeds share
     assert all(leg.alloc_cost_eur is not None for leg in rl.legs)
     assert all(leg.proceeds_share_eur is not None for leg in rl.legs)
+
+
+def test_fifo_auto_fix_rejects_basis_inconsistent_with_realized():
+    m = FifoMatcher(fix_sell_gaps=True)
+    # No buy history: the whole 120 is a gap. IBKR Basis -1200 would synthesize a 1200
+    # cost, but IBKR's own Realized P/L (999) contradicts the identity (1200 + 0 - 1200
+    # = 0), so the Basis cell is corrupt and synthesis must abort, not fabricate a cost.
+    sell = _sell("BAD", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+    sell.realized_pl_ccy = Decimal("999")
+    with pytest.raises(DataQualityError, match="Basis"):
+        m.ingest_trade(sell)
+
+
+def test_fifo_auto_fix_accepts_synthesis_when_realized_confirms_basis():
+    m = FifoMatcher(fix_sell_gaps=True)
+    # IBKR Basis -1200 and Realized 0 are mutually consistent (1200 + 0 - 1200 = 0), so
+    # synthesis proceeds: the realized_getter wiring must not reject a valid Basis.
+    sell = _sell("OKAY", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+    sell.realized_pl_ccy = Decimal("0")
+    rl = m.ingest_trade(sell)
+    assert rl is not None and rl.gap_fixed is True
+    assert rl.legs[-1].synthetic is True

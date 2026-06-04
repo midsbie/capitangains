@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from fixtures import Trade
 
+from capitangains.errors import DataQualityError
 from capitangains.reporting.fifo_domain import Lot, SellMatchLeg
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
 from capitangains.reporting.positions import PositionBook
@@ -99,7 +100,9 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
         basis_ccy=Decimal("-1200"),
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: None,
     )
     legs = [
         SellMatchLeg(
@@ -129,7 +132,9 @@ def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
         basis_ccy=Decimal("-900"),
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: None,
     )
     legs: list[SellMatchLeg] = []
     legs_after, alloc_after, event = policy.resolve(
@@ -151,7 +156,9 @@ def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
         basis_ccy=None,
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: None,
     )
     legs: list[SellMatchLeg] = []
     legs_after, alloc_after, event = policy.resolve(
@@ -173,7 +180,9 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
         basis_ccy=Decimal("-1000"),
     )
     policy = BasisSynthesisPolicy(
-        tolerance=Decimal("0.02"), basis_getter=lambda t: getattr(t, "basis_ccy", None)
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: None,
     )
     legs = [
         SellMatchLeg(
@@ -189,6 +198,71 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
     assert event.fixed is True
     assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
     assert alloc_after == Decimal("1000.02000000")
+
+
+def test_basis_synthesis_policy_rejects_basis_inconsistent_with_realized():
+    # IBKR's columns satisfy Proceeds + Comm + Basis = Realized; a Basis that breaks the
+    # identity is corrupt, so synthesizing a cost from it must abort, not fabricate one.
+    trade = Trade(
+        symbol="BAD",
+        date=dt.date(2024, 3, 5),
+        currency="USD",
+        quantity=Decimal("-10"),
+        proceeds=Decimal("1200"),
+        comm_fee=Decimal("0"),
+        basis_ccy=Decimal("-9999"),  # corrupt: the true basis would be ~-1000
+    )
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: Decimal("200"),  # 1200 + 0 - 1000 (the true basis)
+    )
+    with pytest.raises(DataQualityError, match="Basis"):
+        policy.resolve(trade, Decimal("10"), [], Decimal("0"))
+
+
+def test_basis_synthesis_policy_accepts_near_total_loss_satisfying_identity():
+    # basis >> proceeds (a penny-stock collapse) is legitimate when the IBKR identity
+    # holds. A magnitude factor would wrongly reject it; the identity check accepts it.
+    trade = Trade(
+        symbol="PNY",
+        date=dt.date(2024, 3, 6),
+        currency="USD",
+        quantity=Decimal("-50000"),
+        proceeds=Decimal("450"),
+        comm_fee=Decimal("-12.84851"),
+        basis_ccy=Decimal("-550.45"),
+    )
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: Decimal("-113.29851"),  # 450 - 12.84851 - 550.45
+    )
+    legs, alloc, event = policy.resolve(trade, Decimal("50000"), [], Decimal("0"))
+    assert event.fixed is True
+    assert legs[-1].synthetic is True
+    assert alloc == Decimal("550.45000000")  # synthesized to the (valid) Basis
+
+
+def test_basis_synthesis_policy_skips_identity_check_without_realized():
+    # No IBKR Realized P/L -> nothing to check the Basis against -> synthesize.
+    trade = Trade(
+        symbol="NOR",
+        date=dt.date(2024, 3, 7),
+        currency="USD",
+        quantity=Decimal("-10"),
+        proceeds=Decimal("1200"),
+        comm_fee=Decimal("0"),
+        basis_ccy=Decimal("-9999"),  # inconsistent, but no Realized to catch it
+    )
+    policy = BasisSynthesisPolicy(
+        tolerance=Decimal("0.02"),
+        basis_getter=lambda t: getattr(t, "basis_ccy", None),
+        realized_getter=lambda t: None,
+    )
+    _, alloc, event = policy.resolve(trade, Decimal("10"), [], Decimal("0"))
+    assert event.fixed is True  # no realized -> guardrail cannot fire
+    assert alloc == Decimal("9999.00000000")
 
 
 def test_realized_line_builder_rounds_realized_pl():
