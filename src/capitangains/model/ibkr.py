@@ -154,7 +154,8 @@ class IbkrStatementCsvParser:
                 continue
 
             # "Total"/"SubTotal" are intra-section summary tokens with a recognized
-            # schema (~tens per statement); skip them silently -- they are not anomalies.
+            # schema (~tens per statement); skip them silently -- they are not
+            # anomalies.
             if kind in _SUMMARY_KINDS:
                 continue
 

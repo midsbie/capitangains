@@ -141,8 +141,9 @@ def _report_sell_gaps(
     for ge in gaps:
         if ge.fixed:
             logger.warning(
-                "Synthesized residual lot for unmatched SELL: symbol=%s date=%s "
-                "qty=%s currency=%s | %s",
+                "Synthesized residual lot for unmatched SELL -- basis taken from IBKR "
+                "Basis, not independently verified: symbol=%s date=%s qty=%s "
+                "currency=%s | %s",
                 ge.symbol,
                 ge.date,
                 ge.remaining_qty,
@@ -324,14 +325,19 @@ def process_files(args: argparse.Namespace) -> None:
                     ],
                 )
             if report.synthetic:
-                # Synthesized basis is backed out of IBKR's own `Basis`, so it agrees
-                # with IBKR by construction; report it separately so a green
-                # reconciliation is not read as independent confirmation.
+                # A synthesized line agrees with IBKR by construction, so report these
+                # separately: a green reconciliation must not read as independent
+                # confirmation. The figures still matter since, where a symbol mixes
+                # synthesized and genuine sells, the diff tracks the genuine portion, so
+                # a large diff here is a real gap, not a tautology.
                 logger.info(
                     "Reconciliation: %d symbol(s) carry synthesized basis -- not "
-                    "independently confirmed: %s",
+                    "independently confirmed [symbol, currency, mine, IBKR, diff]: %s",
                     len(report.synthetic),
-                    ", ".join(f"{r.symbol} ({r.currency})" for r in report.synthetic),
+                    [
+                        (r.symbol, r.currency, r.computed, r.ibkr, r.diff)
+                        for r in report.synthetic[:10]
+                    ],
                 )
         except Exception:
             logger.exception("Reconciliation failed; continuing without it.")

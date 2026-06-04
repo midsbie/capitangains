@@ -41,6 +41,7 @@ def _line(symbol, ccy, realized, *, gap_fixed=False, year=2024):
         sell_net_ccy=Decimal("0"),
         legs=[],
         realized_pl_ccy=Decimal(realized),
+        has_gap=gap_fixed,  # synthesis only happens on a gap; keep the pair consistent
         gap_fixed=gap_fixed,
     )
 

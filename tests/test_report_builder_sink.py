@@ -16,7 +16,7 @@ from capitangains.reporting.extract import (
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
-from capitangains.reporting.report_sink import ExcelReportSink
+from capitangains.reporting.report_sink import ExcelReportSink, _gap_status
 
 
 def _make_fx(rates):
@@ -29,7 +29,13 @@ def _make_fx(rates):
 
 
 def _realized(
-    symbol: str, currency: str, sell_date: dt.date, legs: list[dict[str, Any]]
+    symbol: str,
+    currency: str,
+    sell_date: dt.date,
+    legs: list[dict[str, Any]],
+    *,
+    has_gap: bool = False,
+    gap_fixed: bool = False,
 ):
     leg_objs = [
         SellMatchLeg(
@@ -54,6 +60,8 @@ def _realized(
         legs=leg_objs,
         realized_pl_ccy=sell_net
         - sum((leg.alloc_cost_ccy for leg in leg_objs), Decimal("0")),
+        has_gap=has_gap,
+        gap_fixed=gap_fixed,
     )
 
 
@@ -262,6 +270,46 @@ def test_excel_report_sink_serializes_legs(tmp_path):
     ws = wb["Realized Trades"]
     legs_json = ws.cell(row=2, column=15).value
     assert isinstance(legs_json, str) and '"buy_date": "2023-01-01"' in legs_json
+
+
+def test_gap_status_reflects_basis_provenance():
+    leg = {
+        "buy_date": dt.date(2023, 1, 1),
+        "qty": Decimal("5"),
+        "alloc_cost_ccy": Decimal("40"),
+    }
+    clean = _realized("AAA", "USD", dt.date(2024, 1, 1), [leg])
+    synth = _realized(
+        "BBB", "USD", dt.date(2024, 1, 2), [leg], has_gap=True, gap_fixed=True
+    )
+    zero = _realized("CCC", "USD", dt.date(2024, 1, 3), [leg], has_gap=True)
+
+    assert _gap_status(clean) == ""
+    assert _gap_status(synth) == "synthesized from Basis"
+    assert _gap_status(zero) == "zero-cost gap"
+
+
+def test_realized_sheet_flags_synthesized_basis(tmp_path):
+    rb = ReportBuilder(year=2024)
+    leg = {
+        "buy_date": dt.date(2023, 1, 1),
+        "qty": Decimal("5"),
+        "alloc_cost_ccy": Decimal("40"),
+    }
+    rb.add_realized(
+        _realized(
+            "SYN", "USD", dt.date(2024, 1, 1), [leg], has_gap=True, gap_fixed=True
+        )
+    )
+    rb.convert_eur(_make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
+
+    out_path = tmp_path / "synth.xlsx"
+    ExcelReportSink(out_path=out_path, locale="EN").write(rb)
+
+    ws = load_workbook(out_path)["Realized Trades"]
+    col = ws.max_column  # "Basis Status" is appended last
+    assert ws.cell(row=1, column=col).value == "Basis Status"
+    assert ws.cell(row=2, column=col).value == "synthesized from Basis"
 
 
 def test_excel_report_sink_sorts_dividends_by_description(tmp_path):

@@ -169,19 +169,6 @@ class BasisSynthesisPolicy:
             avg_price,
             synth_cost,
         )
-        # A synthesized basis is the best figure available (IBKR's own Basis) but is not
-        # independently verifiable, so it must never be silent: warn by default at the
-        # point of synthesis, naming the line and the cost taken on. Visibility in the
-        # workbook and exclusion from the reconciliation cross-check carry the rest.
-        logger.warning(
-            "Synthesized cost basis for %s on %s from IBKR Basis: %s %s for %s share(s)"
-            " -- not independently verified.",
-            trade.symbol,
-            trade.date,
-            synth_cost,
-            trade.currency,
-            qty_remaining,
-        )
         legs.append(
             SellMatchLeg(
                 buy_date=trade.date,
