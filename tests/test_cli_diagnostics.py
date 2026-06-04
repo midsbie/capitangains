@@ -131,3 +131,108 @@ def test_process_files_warns_when_eur_conversion_incomplete(tmp_path, caplog):
 
     assert any("EUR conversion incomplete" in r.getMessage() for r in caplog.records)
     assert out.exists()  # the workbook is still written despite the gap
+
+
+_TRADES_HEADER = [
+    "Trades",
+    "Header",
+    "DataDiscriminator",
+    "Asset Category",
+    "Currency",
+    "Symbol",
+    "Date/Time",
+    "Quantity",
+    "T. Price",
+    "Proceeds",
+    "Comm/Fee",
+    "Code",
+    "Basis",
+    "Realized P/L",
+]
+
+
+def _trade(symbol, currency, *, date="2024-01-10, 10:00:00", qty="10"):
+    return [
+        "Trades",
+        "Data",
+        "Order",
+        "Stocks",
+        currency,
+        symbol,
+        date,
+        qty,
+        "100",
+        "-1000",
+        "-1",
+        "O",
+        "1000",
+        "0",
+    ]
+
+
+def _args(stmt, out):
+    return argparse.Namespace(
+        input=[str(stmt)],
+        year=2024,
+        fx_table=None,
+        locale="EN",
+        output=str(out),
+        auto_fix_sell_gaps=False,
+        verbose=0,
+    )
+
+
+def test_process_files_exits_2_on_malformed_trade_row(tmp_path, caplog):
+    # A row-level parse defect (blank Date/Time) must abort cleanly with exit 2, not a
+    # raw traceback (exit 1), and write no workbook.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows([_TRADES_HEADER, _trade("AAPL", "USD", date="")])
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any("Date/Time" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_exits_2_on_symbol_currency_violation(tmp_path, caplog):
+    # A legitimate-but-rejected data condition (one symbol in two currencies) must abort
+    # with exit 2, not a raw traceback.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(
+            [_TRADES_HEADER, _trade("ABC", "USD"), _trade("ABC", "EUR")]
+        )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any("symbol-currency uniqueness" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
+    # A present-but-malformed cash-flow value (bad dividend Amount) must abort with
+    # exit 2 like trades/SYEP/transfers, not escape as a raw traceback. The
+    # skip-incomplete gate only drops rows missing core fields, not malformed amounts.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(
+            [
+                ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
+                ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
+            ]
+        )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any("Amount" in r.getMessage() for r in caplog.records)

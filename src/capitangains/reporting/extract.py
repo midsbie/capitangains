@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from capitangains.conv import parse_date, to_dec, to_dec_strict
+from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 logger = logging.getLogger(__name__)
@@ -41,10 +42,31 @@ def _is_data_row(currency: str, date: str, description: str) -> bool:
 
 
 def _require_fields(label: str, **fields: str) -> None:
-    """Raise ValueError naming every empty required field."""
+    """Raise DataQualityError naming every empty required field."""
     missing = [k for k, v in fields.items() if not v]
     if missing:
-        raise ValueError(f"Invalid {label}: missing {', '.join(missing)}")
+        raise DataQualityError(f"Invalid {label}: missing {', '.join(missing)}")
+
+
+def _require_decimal(label: str, field: str, value: str) -> Decimal:
+    """Strictly parse a required numeric field, reporting failures as data errors.
+
+    Wraps ``to_dec_strict`` so a missing/placeholder/malformed value surfaces as a
+    structured ``DataQualityError`` (exit 2 at the CLI boundary) instead of an
+    uncaught ``ValueError`` traceback. The original cause text is preserved.
+    """
+    try:
+        return to_dec_strict(value)
+    except ValueError as e:
+        raise DataQualityError(f"Invalid {label}: bad {field} {value!r} ({e})") from e
+
+
+def _require_date(label: str, field: str, value: str) -> dt.date:
+    """Parse a required date field, reporting failures as data errors (see above)."""
+    try:
+        return parse_date(value)
+    except ValueError as e:
+        raise DataQualityError(f"Invalid {label}: bad {field} {value!r} ({e})") from e
 
 
 TRADE_COLS = [
@@ -198,10 +220,10 @@ def parse_trades_stocklike_row(
         currency=currency,
         symbol=symbol,
         datetime_str=dt_str,
-        date=parse_date(dt_str),
-        quantity=to_dec_strict(qty_s),
-        t_price=to_dec_strict(t_price_s),
-        proceeds=to_dec_strict(proceeds_s),
+        date=_require_date("trade row", "Date/Time", dt_str),
+        quantity=_require_decimal("trade row", "Quantity", qty_s),
+        t_price=_require_decimal("trade row", "T. Price", t_price_s),
+        proceeds=_require_decimal("trade row", "Proceeds", proceeds_s),
         comm_fee=to_dec(comm_s),
         code=code,
         basis_ccy=basis_opt,
@@ -314,11 +336,11 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
             skipped_incomplete += 1
             continue
 
-        amt = to_dec_strict(amount_s)
+        amt = _require_decimal("dividend row", "Amount", amount_s)
         out.append(
             DividendRow(
                 currency=cur,
-                date=parse_date(date_s),
+                date=_require_date("dividend row", "Date", date_s),
                 description=desc,
                 amount=amt,
             )
@@ -349,7 +371,7 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
             skipped_incomplete += 1
             continue
 
-        amt = to_dec_strict(amount_s)
+        amt = _require_decimal("withholding tax row", "Amount", amount_s)
         dlow = desc.lower()
         # Classify withholding tax type with explicit precedence
         # Most specific patterns first, then generic fallbacks
@@ -380,7 +402,7 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
         out.append(
             WithholdingRow(
                 currency=cur,
-                date=parse_date(date_s),
+                date=_require_date("withholding tax row", "Date", date_s),
                 description=desc,
                 amount=amt,
                 code=code,
@@ -433,20 +455,38 @@ def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
             continue
 
         if not (qty_s and collat_s and mkt_rate_s and cust_rate_s and paid_s):
-            raise ValueError(f"Invalid SYEP interest row (missing numeric fields): {r}")
+            raise DataQualityError(
+                f"Invalid SYEP interest row (missing numeric fields): {r}"
+            )
 
-        quantity = to_dec_strict(qty_s)
-        collateral_amount = to_dec_strict(collat_s)
-        market_rate_pct = to_dec_strict(mkt_rate_s)
-        customer_rate_pct = to_dec_strict(cust_rate_s)
-        interest_paid = to_dec_strict(paid_s)
+        quantity = _require_decimal("SYEP interest row", "Quantity", qty_s)
+        collateral_amount = _require_decimal(
+            "SYEP interest row", "Collateral Amount", collat_s
+        )
+        market_rate_pct = _require_decimal(
+            "SYEP interest row", "Market-based Rate (%)", mkt_rate_s
+        )
+        customer_rate_pct = _require_decimal(
+            "SYEP interest row", "Interest Rate on Customer Collateral (%)", cust_rate_s
+        )
+        interest_paid = _require_decimal(
+            "SYEP interest row", "Interest Paid to Customer", paid_s
+        )
 
         out.append(
             SyepInterestRow(
                 currency=cur,
-                value_date=(parse_date(value_date_s) if value_date_s else None),
+                value_date=(
+                    _require_date("SYEP interest row", "Value Date", value_date_s)
+                    if value_date_s
+                    else None
+                ),
                 symbol=sym,
-                start_date=(parse_date(start_date_s) if start_date_s else None),
+                start_date=(
+                    _require_date("SYEP interest row", "Start Date", start_date_s)
+                    if start_date_s
+                    else None
+                ),
                 quantity=quantity,
                 collateral_amount=collateral_amount,
                 market_rate_pct=market_rate_pct,
@@ -482,11 +522,11 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
         # If we ever decide a partial interest row is an invariant violation, the
         # correct response would be to raise here, not to skip-and-count.
         if _is_data_row(cur, date_s, desc):
-            amt = to_dec_strict(amount_s)
+            amt = _require_decimal("interest row", "Amount", amount_s)
             out.append(
                 InterestRow(
                     currency=cur,
-                    date=parse_date(date_s),
+                    date=_require_date("interest row", "Date", date_s),
                     description=desc,
                     amount=amt,
                 )
@@ -579,13 +619,13 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
 
             direction_norm = direction.lower()
             if direction_norm not in {"in", "out"}:
-                raise ValueError(
+                raise DataQualityError(
                     f"Unsupported transfer direction {direction!r} for row: {r}"
                 )
 
-            quantity = to_dec_strict(qty_s)
+            quantity = _require_decimal("transfer row", "Quantity", qty_s)
             if quantity <= 0:
-                raise ValueError(
+                raise DataQualityError(
                     f"Transfer quantity must be positive for {symbol!r} on {date_s!r}: "
                     f"{quantity}"
                 )
@@ -594,11 +634,13 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
             # placeholder Market Value / Cost Basis as a hard error.
             if direction_norm == "in":
                 if not val_s:
-                    raise ValueError(
+                    raise DataQualityError(
                         f"Transfer IN for {symbol!r} on {date_s!r} is missing "
                         "Market Value/Cost Basis."
                     )
-                market_value = to_dec_strict(val_s)
+                market_value = _require_decimal(
+                    "transfer row", "Market Value/Cost Basis", val_s
+                )
             else:
                 # For OUT (or other) transfers, the market value is not used in FIFO
                 # matching.
@@ -610,7 +652,7 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
                     asset_category=asset_cat,
                     currency=currency,
                     symbol=symbol,
-                    date=parse_date(date_s),
+                    date=_require_date("transfer row", "Date", date_s),
                     direction=direction,
                     quantity=quantity,
                     market_value=market_value,

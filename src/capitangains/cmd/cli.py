@@ -42,6 +42,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
 
+from capitangains.errors import DataQualityError
 from capitangains.logging import configure_logging
 from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
 from capitangains.reporting import (
@@ -89,7 +90,7 @@ def validate_symbol_currency_uniqueness(
         f"  {sym}: {', '.join(sorted(ccys))}"
         for sym, ccys in sorted(violations.items())
     )
-    raise ValueError(
+    raise DataQualityError(
         f"symbol-currency uniqueness violated — each symbol must map to exactly "
         f"one trade currency, but the following appear in multiple:\n{details}"
     )
@@ -182,24 +183,31 @@ def process_files(args: argparse.Namespace) -> None:
     if parse_report.has_errors:
         raise SystemExit(2)
 
-    # Extract data
-    trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
-    transfers = parse_transfers(model)
-    dividends = parse_dividends(model)
-    withholding = parse_withholding_tax(model)
-    syep_interest = parse_syep_interest_details(model)
-    interest = parse_interest(model)
+    # Extraction and validation surface predictable input defects as DataQualityError;
+    # translate them to a clean exit-2 here rather than letting them escape as a raw
+    # traceback (exit 1). Consistent with the parse-error abort above.
+    try:
+        trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
+        transfers = parse_transfers(model)
+        dividends = parse_dividends(model)
+        withholding = parse_withholding_tax(model)
+        syep_interest = parse_syep_interest_details(model)
+        interest = parse_interest(model)
 
-    logger.info(
-        "Extracted: %d trades, %d dividends, %d withholding, %d interest, %d transfers",
-        len(trades),
-        len(dividends),
-        len(withholding),
-        len(interest),
-        len(transfers),
-    )
+        logger.info(
+            "Extracted: %d trades, %d dividends, %d withholding, %d interest, "
+            "%d transfers",
+            len(trades),
+            len(dividends),
+            len(withholding),
+            len(interest),
+            len(transfers),
+        )
 
-    validate_symbol_currency_uniqueness(trades, transfers)
+        validate_symbol_currency_uniqueness(trades, transfers)
+    except DataQualityError as e:
+        logger.error("%s", e)
+        raise SystemExit(2) from e
 
     # Build FIFO realized
     matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)
