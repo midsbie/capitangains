@@ -2,7 +2,8 @@
 
 - ``_report_sell_gaps``: fatal without auto-fix; per-synthesized-lot audit warning with
   it (so synthetic cost basis is never silent).
-- ``process_files``: a default-visible warning when EUR conversion is incomplete.
+- ``process_files``: aborts (exit 2, no workbook) when the FX table cannot supply
+  every rate the EUR report needs.
 """
 
 import argparse
@@ -112,25 +113,29 @@ def _write_statement(path):
         csv.writer(fp).writerows(rows)
 
 
-def test_process_files_warns_when_eur_conversion_incomplete(tmp_path, caplog):
+def test_process_files_exits_2_when_fx_table_incomplete(tmp_path, caplog):
+    # Non-EUR data with no FX table cannot be converted. A complete table is a
+    # precondition, so this aborts with exit 2 and writes no workbook with
+    # blank/substituted EUR figures (findings #2/#3), rather than warning + exit 0.
     stmt = tmp_path / "stmt.csv"
     _write_statement(stmt)
     out = tmp_path / "out.xlsx"
     args = argparse.Namespace(
         input=[str(stmt)],
         year=2024,
-        fx_table=None,  # no FX table: USD proceeds cannot be converted to EUR
+        fx_table=None,  # no FX table: USD proceeds/cost cannot be converted to EUR
         locale="EN",
         output=str(out),
         auto_fix_sell_gaps=False,
         verbose=0,
     )
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         process_files(args)
 
-    assert any("EUR conversion incomplete" in r.getMessage() for r in caplog.records)
-    assert out.exists()  # the workbook is still written despite the gap
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any("Missing FX rate" in r.getMessage() for r in caplog.records)
 
 
 _TRADES_HEADER = [

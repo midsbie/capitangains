@@ -155,6 +155,31 @@ def _report_sell_gaps(
             )
 
 
+def _report_missing_fx(
+    missing: set[tuple[dt.date, str]], logger: logging.Logger
+) -> None:
+    """Abort if the FX table could not supply every rate the EUR report needs.
+
+    A complete table is a precondition: substituting another date's rate would silently
+    misstate cost basis or proceeds, and blank EUR cells would understate totals. List
+    every missing (date, currency) so the table can be completed in one pass, then exit
+    2 without writing a workbook.
+    """
+    if not missing:
+        return
+
+    for d, ccy in sorted(missing):
+        logger.error("Missing FX rate: %s on %s", ccy, d)
+
+    logger.error(
+        "EUR conversion incomplete: %d required FX rate(s) absent from the table; "
+        "no workbook written. Add the rate(s) above (or widen the table's date range) "
+        "and rerun.",
+        len(missing),
+    )
+    raise SystemExit(2)
+
+
 def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
     logger = logging.getLogger(__name__)
@@ -269,12 +294,7 @@ def process_files(args: argparse.Namespace) -> None:
             logger.exception("Failed to prepare FX conversion: %s", e)
             raise
     rb.convert_eur(fx)
-    if rb.fx_missing:
-        logger.warning(
-            "EUR conversion incomplete: some amounts could not be converted "
-            "(missing FX rates or no FX table); affected EUR figures are blank. "
-            "Run with -v for per-amount detail."
-        )
+    _report_missing_fx(rb.fx_missing, logger)
 
     # Soft reconciliation
     if len(inputs) == 1:

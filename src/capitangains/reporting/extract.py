@@ -108,7 +108,7 @@ class TradeRow:
     datetime_str: str
     date: dt.date
     quantity: Decimal  # positive buy, negative sell
-    t_price: Decimal
+    t_price: Decimal  # strict-parsed as an integrity check; not consumed downstream
     proceeds: Decimal  # signed: negative buy cash, positive sell cash
     comm_fee: Decimal  # signed: negative fee/commission, rarely positive rebates
     code: str

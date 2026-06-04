@@ -100,21 +100,25 @@ def test_multi_currency_same_symbol_rejected():
         validate_symbol_currency_uniqueness(trades, [])
 
 
-def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
+def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
+    """A missing buy- or sell-date rate leaves the WHOLE line unconverted and records
+    every unresolved (date, currency) — no substitution of another date's rate (#2)."""
     rb = ReportBuilder(year=2024)
+    # Sell-date rate present, but the first leg's buy date predates the table → missing.
     usd_legs: list[dict[str, Any]] = [
         {
             "buy_date": dt.date(2023, 6, 1),
             "qty": Decimal("5"),
             "alloc_cost_ccy": Decimal("40"),
         },
-        {
+        {  # zero-cost gap leg: no buy date, cost 0
             "buy_date": None,
             "qty": Decimal("5"),
-            "alloc_cost_ccy": Decimal("50"),
+            "alloc_cost_ccy": Decimal("0"),
         },
     ]
     rl_usd = _realized("USD1", "USD", dt.date(2024, 3, 1), usd_legs)
+    # GBP entirely absent from the table → even the sell-date rate is missing.
     gbp_legs = [
         {
             "buy_date": dt.date(2024, 2, 1),
@@ -126,20 +130,24 @@ def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
     rb.add_realized(rl_usd)
     rb.add_realized(rl_gbp)
 
-    fx = _make_fx(
-        {
-            ("USD", "2024-03-01"): Decimal("0.9"),
-        }
-    )
+    rb.convert_eur(_make_fx({("USD", "2024-03-01"): Decimal("0.9")}))
 
-    rb.convert_eur(fx)
+    # USD line left wholly unconverted because one leg's buy-date rate is missing,
+    # even though the sell-date rate was available.
+    assert all(leg.alloc_cost_eur is None for leg in rl_usd.legs)
+    assert rl_usd.alloc_cost_eur is None
+    assert rl_usd.realized_pl_eur is None
+    assert rl_usd.sell_net_eur is None
+    # Every unresolved lookup is recorded for the CLI to abort on.
+    assert rb.fx_missing == {
+        (dt.date(2023, 6, 1), "USD"),
+        (dt.date(2024, 1, 10), "GBP"),
+        (dt.date(2024, 2, 1), "GBP"),
+    }
 
-    # USD trade should convert using fallback rate for missing buy date leg
-    allocs = [leg.alloc_cost_eur for leg in rl_usd.legs]
-    assert all(val is not None for val in allocs)
-    assert rb.fx_missing is True  # GBP missing rate sets this flag
 
-    # Zero sell quantity should skip proceeds share allocation gracefully
+def test_convert_eur_zero_sell_qty_skips_proceeds_allocation():
+    rb = ReportBuilder(year=2024)
     zero_qty_rl = RealizedLine(
         symbol="ZQ",
         currency="USD",
@@ -159,7 +167,8 @@ def test_report_builder_convert_eur_handles_missing_fx_and_leg_fallback():
         realized_pl_ccy=Decimal("0"),
     )
     rb.add_realized(zero_qty_rl)
-    rb.convert_eur(fx)
+    rb.convert_eur(_make_fx({("USD", "2024-04-01"): Decimal("0.9")}))
+    assert not rb.fx_missing
     assert zero_qty_rl.legs[0].proceeds_share_eur is None
 
 
@@ -319,7 +328,15 @@ def test_excel_report_sink_sorts_account_interest(tmp_path):
     "currency, fx_rates",
     [
         ("EUR", None),
-        ("USD", {("USD", "2024-06-15"): Decimal("0.9")}),
+        (
+            "USD",
+            {
+                ("USD", "2024-06-15"): Decimal("0.9"),  # sell date
+                ("USD", "2023-01-01"): Decimal("0.9"),  # buy dates
+                ("USD", "2023-01-02"): Decimal("0.9"),
+                ("USD", "2023-01-03"): Decimal("0.9"),
+            },
+        ),
     ],
     ids=["eur_native", "fx_converted"],
 )

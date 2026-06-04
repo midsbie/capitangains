@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -11,8 +10,6 @@ from .fifo import RealizedLine
 from .fifo_domain import SellMatchLeg, TransferProtocol
 from .fx import FxTable
 from .money import quantize_money
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,9 +46,10 @@ class ReportBuilder:
     syep_interest: list[SyepInterestRow] = field(default_factory=list)
     interest: list[InterestRow] = field(default_factory=list)
     transfers: list[TransferProtocol] = field(default_factory=list)
-    # Flags
-    fx_needed: bool = False
-    fx_missing: bool = False
+    # Every (date, currency) lookup no FX rate could satisfy. A complete table is a
+    # precondition for the EUR report: the CLI aborts (exit 2) when this is non-empty
+    # rather than emit substituted or blank EUR figures (findings #2 and #3).
+    fx_missing: set[tuple[dt.date, str]] = field(default_factory=set)
 
     def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
@@ -101,10 +99,8 @@ class ReportBuilder:
         for rl in self.realized_lines:
             if rl.currency == "EUR":
                 self._convert_realized_line_eur(rl)
-            elif fx is not None:
-                self._convert_realized_line_fx(rl, fx)
             else:
-                self.fx_missing = True
+                self._convert_realized_line_fx(rl, fx)
 
     def _convert_realized_line_eur(self, rl: RealizedLine) -> None:
         rl.sell_gross_eur = rl.sell_gross_ccy
@@ -119,53 +115,50 @@ class ReportBuilder:
         rl.realized_pl_eur = quantize_money(rl.sell_net_eur - rl.alloc_cost_eur)
         self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
 
-    def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable) -> None:
-        sell_rate = fx.get_rate(rl.sell_date, rl.currency)
-        if sell_rate is None:
-            logger.info(
-                "Sell FX rate missing for %s on %s; %s proceeds left unconverted",
-                rl.currency,
-                rl.sell_date,
-                rl.symbol,
-            )
-            self.fx_missing = True
+    def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable | None) -> None:
+        # PT practice: proceeds convert at the sell-date rate, each acquisition leg at
+        # its own buy-date rate. If ANY required rate is missing the whole line is left
+        # unconverted (and the gap recorded); a rate from another date is never
+        # substituted, as that would silently misstate cost basis or proceeds.
+        sell_rate = self._rate_or_record(rl.sell_date, rl.currency, fx)
+        leg_rates = [
+            sell_rate
+            if leg.buy_date is None
+            else self._rate_or_record(leg.buy_date, rl.currency, fx)
+            for leg in rl.legs
+        ]
+        if sell_rate is None or any(rate is None for rate in leg_rates):
             return
 
-        proceeds_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
-        logger.debug(
-            "Sell FX conversion: %s %s: EUR (rate: %s) = %s EUR",
-            rl.sell_gross_ccy,
-            rl.currency,
-            sell_rate,
-            proceeds_eur,
-        )
-
-        rl.sell_gross_eur = proceeds_eur
+        rl.sell_gross_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
         rl.sell_comm_eur = quantize_money(rl.sell_comm_ccy * sell_rate)
         rl.sell_net_eur = quantize_money(rl.sell_net_ccy * sell_rate)
 
         alloc_eur = Decimal("0")
-        for leg in rl.legs:
-            bd = leg.buy_date
-            rate = sell_rate  # fallback when the buy-date rate is unavailable
-            if bd is not None:
-                buy_rate = fx.get_rate(bd, rl.currency)
-                if buy_rate is not None:
-                    rate = buy_rate
-                else:
-                    logger.info(
-                        "Buy-date FX rate missing for %s on %s; using sell-date rate "
-                        "for %s cost basis",
-                        rl.currency,
-                        bd,
-                        rl.symbol,
-                    )
-            leg_eur = quantize_money(leg.alloc_cost_ccy * rate)
-            leg.alloc_cost_eur = leg_eur
-            alloc_eur += leg_eur
+        for leg, rate in zip(rl.legs, leg_rates, strict=True):
+            assert rate is not None  # guaranteed by the guard above; narrows for mypy
+            leg.alloc_cost_eur = quantize_money(leg.alloc_cost_ccy * rate)
+            alloc_eur += leg.alloc_cost_eur
         rl.alloc_cost_eur = quantize_money(alloc_eur)
         rl.realized_pl_eur = quantize_money(rl.sell_net_eur - rl.alloc_cost_eur)
         self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
+
+    def _rate_or_record(
+        self, date: dt.date, currency: str, fx: FxTable | None
+    ) -> Decimal | None:
+        """Resolve the EUR-per-unit rate for (date, currency); record a miss if absent.
+
+        Returns None — and accumulates (date, currency) in ``fx_missing`` — when no
+        table is given, the currency is absent, or no rate exists on/before the date.
+        Never substitutes another date's rate (finding #2).
+        """
+        cur = currency.upper()
+        if cur == "EUR":
+            return Decimal("1")
+        rate = fx.get_rate(date, cur) if fx is not None else None
+        if rate is None:
+            self.fx_missing.add((date, cur))
+        return rate
 
     @staticmethod
     def _allocate_proceeds_to_legs(
@@ -224,30 +217,19 @@ class ReportBuilder:
         amount: Decimal,
         fx: FxTable | None,
     ) -> Decimal | None:
-        """Convert a single amount to EUR using FX rates.
+        """Convert a single amount to EUR, or None when no rate is available.
 
-        Returns the EUR amount, or None if conversion is not possible (missing FX data).
+        A non-EUR amount with no date cannot be priced; the CLI's year filter already
+        drops SYEP rows lacking a value date, so this returns None without recording an
+        FX-table gap (the absence is a source-data issue, not a missing rate).
         """
-        cur = currency.upper()
-
-        if cur == "EUR":
+        if currency.upper() == "EUR":
             return quantize_money(amount)
-
-        if fx is None or date is None:
-            self.fx_missing = True
+        if date is None:
             return None
-
-        rate = fx.get_rate(date, cur)
+        rate = self._rate_or_record(date, currency, fx)
         if rate is None:
-            logger.info(
-                "FX rate missing for %s on %s; amount %s left unconverted",
-                cur,
-                date,
-                amount,
-            )
-            self.fx_missing = True
             return None
-
         return quantize_money(amount * rate)
 
     def _recompute_aggregates(self) -> None:
