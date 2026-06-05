@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 
 from .events import EventRecorder
-from .fifo_domain import GapEvent, Lot, RealizedLine, TradeProtocol, TransferProtocol
-from .gap_policy import BasisSynthesisPolicy, GapPolicy, StrictGapPolicy
+from .fifo_domain import (
+    GapEvent,
+    GapResolution,
+    Lot,
+    RealizedLine,
+    TradeProtocol,
+    TransferProtocol,
+)
+from .gap_policy import GapPolicy
 from .money import abs_decimal
 from .positions import PositionBook
 from .realized_builder import build_realized_line
@@ -13,46 +19,18 @@ from .trade_math import buy_cost_ccy
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_GAP_TOLERANCE = Decimal("0.02")
-
-
-def _default_basis_getter(trade: TradeProtocol) -> Decimal | None:
-    return getattr(trade, "basis_ccy", None)
-
-
-def _default_realized_getter(trade: TradeProtocol) -> Decimal | None:
-    return getattr(trade, "realized_pl_ccy", None)
-
 
 class FifoMatcher:
     def __init__(
         self,
         *,
+        gap_policy: GapPolicy,
         positions: PositionBook | None = None,
-        gap_policy: GapPolicy | None = None,
         recorder: EventRecorder | None = None,
-        fix_sell_gaps: bool | None = None,
-        gap_tolerance: Decimal | None = None,
     ) -> None:
         self.positions = positions or PositionBook()
         self.recorder = recorder or EventRecorder()
-
-        self.fix_sell_gaps = bool(fix_sell_gaps) if fix_sell_gaps is not None else False
-        self.gap_tolerance = (
-            gap_tolerance if gap_tolerance is not None else _DEFAULT_GAP_TOLERANCE
-        )
-        self._gap_policy = self._resolve_gap_policy(gap_policy)
-
-    def _resolve_gap_policy(self, policy: GapPolicy | None) -> GapPolicy:
-        if policy is not None:
-            return policy
-        if self.fix_sell_gaps:
-            return BasisSynthesisPolicy(
-                tolerance=self.gap_tolerance,
-                basis_getter=_default_basis_getter,
-                realized_getter=_default_realized_getter,
-            )
-        return StrictGapPolicy()
+        self._gap_policy = gap_policy
 
     @property
     def gap_events(self) -> list[GapEvent]:
@@ -217,27 +195,24 @@ class FifoMatcher:
                 matched_qty,
             )
             logger.debug("Invoking gap policy: %s", type(self._gap_policy).__name__)
-            legs, alloc_cost_ccy, gap_event = self._gap_policy.resolve(
-                trade, qty_remaining, legs, alloc_cost_ccy
-            )
+            result = self._gap_policy.resolve(trade, qty_remaining, alloc_cost_ccy)
+            legs.append(result.leg)
+            alloc_cost_ccy = result.alloc_cost
+            gap_event = result.event
             if gap_event is not None:
-                gap_fixed = gap_event.fixed
+                gap_fixed = gap_event.outcome is GapResolution.SYNTHESIZED
                 if gap_fixed:
-                    # Find the fix leg (last one added)
-                    fix_leg = legs[-1] if legs else None
-                    if fix_leg:
-                        logger.info(
-                            "Gap resolved by policy: added leg with %s shares "
-                            "(cost: %s %s)",
-                            fix_leg.qty,
-                            fix_leg.alloc_cost_ccy,
-                            trade.currency,
-                        )
-                else:
-                    logger.warning(
-                        "Gap NOT resolved: %s",
-                        gap_event.message if gap_event else "unknown reason",
+                    logger.info(
+                        "Gap resolved by policy: added leg with %s shares "
+                        "(cost: %s %s)",
+                        result.leg.qty,
+                        result.leg.alloc_cost_ccy,
+                        trade.currency,
                     )
+                else:
+                    # The CLI boundary owns user-facing reporting of unresolved gaps
+                    # (the two-way acknowledgment tie-out); keep this at debug.
+                    logger.debug("Gap NOT resolved: %s", gap_event.message)
 
         if gap_event is not None:
             self.recorder.record_gap(gap_event)

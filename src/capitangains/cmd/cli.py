@@ -41,6 +41,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
+from capitangains.conv import parse_date
 from capitangains.errors import DataQualityError
 from capitangains.logging import configure_logging
 from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
@@ -58,7 +59,8 @@ from capitangains.reporting import (
     parse_withholding_tax,
     reconcile_realized_against_ibkr,
 )
-from capitangains.reporting.fifo_domain import GapEvent
+from capitangains.reporting.fifo_domain import GapEvent, GapKey, GapResolution
+from capitangains.reporting.gap_policy import build_gap_policy
 from capitangains.reporting.report_sink import ExcelReportSink
 
 
@@ -106,40 +108,121 @@ def _event_sort_key(
     raise ValueError(f"unexpected event type: {type(event)}")
 
 
-def _report_sell_gaps(
-    gaps: Sequence[GapEvent], fix_sell_gaps: bool, logger: logging.Logger
-) -> None:
-    """Surface unmatched sells at the CLI boundary.
+def _parse_acknowledged_gaps(spec: str | None) -> frozenset[GapKey]:
+    """Parse the operator's itemized gap-acknowledgment spec into a set of keys.
 
-    Without auto-fix this is fatal (exit 2). With it, each *synthesized* residual lot is
-    recorded as a default-visible warning, so the synthetic cost basis behind the
-    affected realized lines is never silent. Gaps the policy could *not* fix (missing
-    Basis, guardrail violations) are already warned about by the matcher as they occur,
-    so they are not repeated here.
+    The spec is a comma-separated list of ``SYMBOL@YYYY-MM-DD`` tokens, each naming one
+    unmatched SELL the operator has reviewed and authorized to be valued from IBKR's
+    per-trade Basis. Symbols are case-sensitive and compared verbatim (only surrounding
+    whitespace is stripped); a single key authorizes every gap sharing that
+    ``(symbol, date)``. Empty tokens (from a leading, trailing, or doubled comma) are
+    skipped; ``None`` or an all-empty spec yields an empty set -- zero acknowledgments.
+    Every malformed token is collected and reported together as one ``DataQualityError``
+    so the spec can be fixed in a single pass.
     """
-    if not gaps:
+    if spec is None:
+        return frozenset()
+
+    keys: set[GapKey] = set()
+    malformed: list[str] = []
+    for raw in spec.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        parts = token.split("@")
+        if len(parts) != 2:
+            malformed.append(token)
+            continue
+        symbol, date_str = parts[0].strip(), parts[1].strip()
+        if not symbol or not date_str:
+            malformed.append(token)
+            continue
+        try:
+            key_date = parse_date(date_str)
+        except ValueError:
+            malformed.append(token)
+            continue
+        keys.add((symbol, key_date))
+
+    if malformed:
+        raise DataQualityError(
+            "Malformed --auto-fix-sell-gaps acknowledgment(s) "
+            f"(expected SYMBOL@YYYY-MM-DD): {', '.join(malformed)}"
+        )
+    return frozenset(keys)
+
+
+def _report_gap_acknowledgments(
+    gaps: Sequence[GapEvent],
+    acknowledged: frozenset[GapKey],
+    logger: logging.Logger,
+) -> None:
+    """Tie out the gaps found against the operator's acknowledgments, at the boundary.
+
+    A SELL gap is always a real, in-scope disposal that must be reported; the only
+    open question is the valuation of its cost basis, and that valuation is never
+    auto-applied without explicit, audited sign-off. So this reconciles two ways:
+
+    - Every gap must be acknowledged: an UNACKNOWLEDGED gap is fatal.
+    - Every acknowledged gap must have a usable IBKR Basis: a DEFECTIVE one (missing
+      Basis, or a Basis its own Realized P/L contradicts) is fatal.
+    - Every acknowledgment must match a gap found this run: an orphan acknowledgment
+      (stale, mistyped, or for a gap that did not occur) is fatal.
+
+    All three are accumulated into one pre-flight report: one ERROR per offending item,
+    a summary ERROR, then a single SystemExit(2) -- no fail-fast, so the operator sees
+    every problem in one pass. Only when the tie-out is clean does each SYNTHESIZED gap
+    emit its per-lot audit WARNING (the synthetic cost basis is never silent).
+    """
+    if not gaps and not acknowledged:
         return
 
-    if not fix_sell_gaps:
-        for ge in gaps:
+    gap_keys = {(ge.symbol, ge.date) for ge in gaps}
+    orphans = sorted(acknowledged - gap_keys)
+    unacknowledged = [ge for ge in gaps if ge.outcome is GapResolution.UNACKNOWLEDGED]
+    defective = [ge for ge in gaps if ge.outcome is GapResolution.DEFECTIVE]
+
+    if unacknowledged or defective or orphans:
+        for ge in unacknowledged:
             logger.error(
-                "Unmatched SELL: symbol=%s date=%s qty=%s currency=%s | %s",
+                "Unacknowledged SELL gap: symbol=%s date=%s qty=%s currency=%s | %s",
                 ge.symbol,
                 ge.date,
                 ge.remaining_qty,
                 ge.currency,
                 ge.message,
             )
+        for ge in defective:
+            logger.error(
+                "Acknowledged SELL gap has a defective IBKR Basis: symbol=%s date=%s "
+                "qty=%s currency=%s | %s",
+                ge.symbol,
+                ge.date,
+                ge.remaining_qty,
+                ge.currency,
+                ge.message,
+            )
+        for sym, day in orphans:
+            logger.error(
+                "Orphan acknowledgment: %s@%s matched no SELL gap this run "
+                "(stale, mistyped, or for a gap that did not occur).",
+                sym,
+                day,
+            )
         logger.error(
-            "Encountered %d unmatched sell(s). "
-            "Rerun with --auto-fix-sell-gaps to synthesize residual lots "
-            "from IBKR Basis.",
-            len(gaps),
+            "Gap acknowledgment tie-out failed: %d unacknowledged gap(s), %d "
+            "acknowledged gap(s) with a defective Basis, %d orphan acknowledgment(s). "
+            "Acknowledge each reviewed gap explicitly with "
+            '--auto-fix-sell-gaps "SYMBOL@YYYY-MM-DD[,...]" (only after verifying its '
+            "IBKR Basis), and drop any acknowledgment that matches no gap.",
+            len(unacknowledged),
+            len(defective),
+            len(orphans),
         )
         raise SystemExit(2)
 
     for ge in gaps:
-        if ge.fixed:
+        if ge.outcome is GapResolution.SYNTHESIZED:
             logger.warning(
                 "Synthesized residual lot for unmatched SELL -- basis taken from IBKR "
                 "Basis, not independently verified: symbol=%s date=%s qty=%s "
@@ -181,8 +264,17 @@ def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
     logger = logging.getLogger(__name__)
 
+    # Parse the gap-acknowledgment spec before any file I/O so a malformed spec fails
+    # fast (exit 2) without touching the statements.
+    try:
+        acknowledged = _parse_acknowledged_gaps(
+            getattr(args, "auto_fix_sell_gaps", None)
+        )
+    except DataQualityError as e:
+        logger.error("%s", e)
+        raise SystemExit(2) from e
+
     # Parse one or more CSVs
-    fix_sell_gaps = getattr(args, "auto_fix_sell_gaps", False)
     inputs = args.input if isinstance(args.input, list) else [args.input]
     logger.info("Reading %d file(s): %s", len(inputs), ", ".join(inputs))
 
@@ -199,6 +291,7 @@ def process_files(args: argparse.Namespace) -> None:
         )
         models.append(m)
         reports.append(rep)
+
     model = merge_models(models)
     parse_report = merge_reports(reports)
     parse_report.log_with(logger)
@@ -231,8 +324,9 @@ def process_files(args: argparse.Namespace) -> None:
         logger.error("%s", e)
         raise SystemExit(2) from e
 
-    # Build FIFO realized
-    matcher = FifoMatcher(fix_sell_gaps=fix_sell_gaps)
+    # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
+    # itself stays agnostic of how gaps are resolved.
+    matcher = FifoMatcher(gap_policy=build_gap_policy(acknowledged))
 
     # Merge trades and transfers into a single chronological stream so that FIFO lot
     # creation/consumption respects actual event ordering.
@@ -240,25 +334,17 @@ def process_files(args: argparse.Namespace) -> None:
     events: list[TradeRow | TransferRow] = [*trades, *transfers]
     events.sort(key=_event_sort_key)
 
-    # FIFO matching can surface a corrupt IBKR Basis as a DataQualityError (the auto-fix
-    # consistency guardrail); translate it to a clean exit 2, as extraction does.
     realized = []
-    try:
-        for event in events:
-            if isinstance(event, TransferRow):
-                matcher.ingest_transfer(event)
-                continue
-            elif not isinstance(event, TradeRow):
-                raise ValueError(
-                    f"unexpected event type in merged stream: {type(event)}"
-                )
+    for event in events:
+        if isinstance(event, TransferRow):
+            matcher.ingest_transfer(event)
+            continue
+        elif not isinstance(event, TradeRow):
+            raise ValueError(f"unexpected event type in merged stream: {type(event)}")
 
-            rl = matcher.ingest_trade(event)
-            if rl is not None:  # keep only realized lines generated from sells
-                realized.append(rl)
-    except DataQualityError as e:
-        logger.error("%s", e)
-        raise SystemExit(2) from e
+        rl = matcher.ingest_trade(event)
+        if rl is not None:  # keep only realized lines generated from sells
+            realized.append(rl)
 
     logger.info(
         "FIFO matching: %d trades processed, %d realized lines generated",
@@ -266,7 +352,7 @@ def process_files(args: argparse.Namespace) -> None:
         len(realized),
     )
 
-    _report_sell_gaps(matcher.gap_events, fix_sell_gaps, logger)
+    _report_gap_acknowledgments(matcher.gap_events, acknowledged, logger)
 
     # Build report
     rb = ReportBuilder(year=args.year)
@@ -401,10 +487,16 @@ def build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--auto-fix-sell-gaps",
-        action="store_true",
+        type=str,
+        default=None,
+        metavar="SYMBOL@YYYY-MM-DD[,...]",
         help=(
-            "When a SELL lacks sufficient buy lots, use IBKR per-trade Basis "
-            "to synthesize a residual lot for the remaining quantity."
+            "Itemized acknowledgment of unmatched SELLs (gaps) whose cost basis you "
+            "authorize to be synthesized from IBKR's per-trade Basis. Pass a "
+            "comma-separated list of SYMBOL@YYYY-MM-DD keys, one per gap you have "
+            "reviewed (symbols are case-sensitive). The run is fatal (exit 2, no "
+            "workbook) if any gap is left unlisted, any acknowledged gap has a missing "
+            "or corrupt Basis, or any acknowledgment matches no gap found this run."
         ),
     )
     p.add_argument(

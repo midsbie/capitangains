@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import enum
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Protocol, runtime_checkable
+from typing import NamedTuple, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
 # Protocol types for duck-typed trade/transfer objects
@@ -88,6 +89,33 @@ class RealizedLine:
     realized_pl_eur: Decimal | None = None
 
 
+class GapResolution(enum.Enum):
+    """Outcome of resolving an unmatched SELL (a "gap"), partitioned at the boundary.
+
+    A gap is always a real, in-scope disposal that must be reported; the only open
+    question is the valuation of its cost basis. These three outcomes encode that
+    valuation verdict so the CLI boundary can decide fatality:
+
+    SYNTHESIZED: the gap was acknowledged and its IBKR Basis is usable, so a real
+        synthetic cost lot was appended. Non-fatal (emits a per-lot audit warning).
+    UNACKNOWLEDGED: the gap was not named in the operator's acknowledgment list. Fatal.
+    DEFECTIVE: the gap was acknowledged, but its IBKR Basis is missing or internally
+        corrupt (fails Proceeds + Comm + Basis = Realized, or undershoots
+        already-matched cost beyond tolerance), so no defensible cost can be
+        synthesized. Fatal.
+    """
+
+    SYNTHESIZED = enum.auto()
+    UNACKNOWLEDGED = enum.auto()
+    DEFECTIVE = enum.auto()
+
+
+# An operator's acknowledgment of one gap, compared directly against (trade.symbol,
+# trade.date). The symbol is whitespace-stripped only (case and dots preserved); the
+# date is parsed the same way TradeRow.date is, so the two are equality-comparable.
+GapKey = tuple[str, dt.date]
+
+
 @dataclass
 class GapEvent:
     symbol: str
@@ -95,4 +123,17 @@ class GapEvent:
     remaining_qty: Decimal
     currency: str
     message: str
-    fixed: bool
+    outcome: GapResolution
+
+
+class ResolvedGap(NamedTuple):
+    """How a gap policy valued one unmatched SELL quantity.
+
+    ``leg`` is the single gap leg to append -- a zero-cost placeholder or a synthetic
+    lot; ``alloc_cost`` is the resulting total allocated cost; ``event`` is the audit
+    record, or None when a policy records nothing.
+    """
+
+    leg: SellMatchLeg
+    alloc_cost: Decimal
+    event: GapEvent | None

@@ -19,6 +19,8 @@ from decimal import Decimal
 
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo import FifoMatcher
+from capitangains.reporting.fifo_domain import GapKey
+from capitangains.reporting.gap_policy import build_gap_policy
 from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
 
 
@@ -80,6 +82,11 @@ def _ingest(matcher: FifoMatcher, trades) -> list:
     return [rl for t in trades if (rl := matcher.ingest_trade(t)) is not None]
 
 
+def _matcher(acknowledged: frozenset[GapKey] = frozenset()) -> FifoMatcher:
+    """A matcher whose gap policy acknowledges exactly `acknowledged`."""
+    return FifoMatcher(gap_policy=build_gap_policy(acknowledged))
+
+
 def test_oracle_multilot_reconciles_against_ibkr_realized():
     """Real FIFO across two buy lots reproduces IBKR's realized P/L within tolerance.
 
@@ -88,7 +95,7 @@ def test_oracle_multilot_reconciles_against_ibkr_realized():
     makes the comparison genuinely test lot-matching completeness, quantity allocation,
     and commission folding -- none of which the inject-``computed`` unit tests touch.
     """
-    m = FifoMatcher(fix_sell_gaps=False)
+    m = _matcher()
     trades = [
         _buy("GOOGL", dt.date(2024, 1, 5), "200", "-27600", "-1.50"),
         _buy("GOOGL", dt.date(2024, 2, 9), "250", "-34500", "-2.00"),
@@ -125,7 +132,7 @@ def test_dropped_buy_lot_is_reconciled_mismatch_not_excluded():
     left at zero cost keeps ``gap_fixed=False``, so it stays in the independent set and
     surfaces the inflated gain as a mismatch rather than hiding in `synthetic`.
     """
-    m = FifoMatcher(fix_sell_gaps=False)
+    m = _matcher()
     # Only 200 of the 450 sold are covered; the 250-share lot is missing.
     trades = [
         _buy("MSFT", dt.date(2024, 1, 5), "200", "-27600", "-1.50"),
@@ -156,7 +163,7 @@ def test_dropped_buy_commission_is_mismatch_proving_non_tautology():
     the quantities tie out, yet because our basis omits the buy fee our realized P/L
     diverges from IBKR's by exactly that fee -- and the reconciler catches it.
     """
-    m = FifoMatcher(fix_sell_gaps=False)
+    m = _matcher()
     trades = [
         # Buy commission dropped to 0 (the real fill paid 50): basis is low by 50.
         _buy("AMD", dt.date(2024, 1, 5), "450", "-62100", "0"),
@@ -185,7 +192,7 @@ def test_transfer_in_basis_divergence_is_flagged():
     it differs from the true basis, our realized P/L is off by the gap; setting IBKR's
     realized to the true-basis value documents and guards that approximation risk.
     """
-    m = FifoMatcher(fix_sell_gaps=False)
+    m = _matcher()
     # Proxy basis 5000 vs a true basis of 4000 -> IBKR realized 2000 vs our 1000.
     m.ingest_transfer(_transfer_in("XFER", dt.date(2024, 1, 3), "100", "5000"))
     sell = _sell("XFER", dt.date(2024, 6, 10), "-100", "6000", "0", realized="2000.00")
@@ -210,7 +217,7 @@ def test_synthesized_gap_sell_lands_in_synthetic_not_reconciled():
     tautological. It would *pass* (``is_match``) -- which is exactly why it must not be
     counted as an independent confirmation.
     """
-    m = FifoMatcher(fix_sell_gaps=True)
+    m = _matcher(frozenset({("SYN", dt.date(2024, 6, 10))}))
     # No buys at all: the whole 100 is a gap, synthesized from IBKR Basis -5000.
     sell = _sell(
         "SYN",

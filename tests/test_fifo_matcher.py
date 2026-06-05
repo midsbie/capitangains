@@ -6,8 +6,14 @@ from fixtures import Trade, Transfer
 
 from capitangains.reporting.events import EventRecorder
 from capitangains.reporting.fifo import FifoMatcher
-from capitangains.reporting.fifo_domain import GapEvent, Lot
-from capitangains.reporting.gap_policy import GapPolicy
+from capitangains.reporting.fifo_domain import (
+    GapEvent,
+    GapResolution,
+    Lot,
+    ResolvedGap,
+    SellMatchLeg,
+)
+from capitangains.reporting.gap_policy import GapPolicy, UnacknowledgedGapPolicy
 from capitangains.reporting.positions import PositionBook
 
 
@@ -15,33 +21,39 @@ class DummyPolicy(GapPolicy):
     def __init__(self) -> None:
         self.calls = 0
 
-    def resolve(self, trade, qty_remaining, legs, alloc_cost_so_far):
+    def resolve(self, trade, qty_remaining, alloc_cost_so_far):
         self.calls += 1
-        return (
-            legs,
-            alloc_cost_so_far,
-            GapEvent(
+        return ResolvedGap(
+            leg=SellMatchLeg(
+                buy_date=trade.date,
+                qty=qty_remaining,
+                lot_qty_before=Decimal("0"),
+                alloc_cost_ccy=Decimal("0"),
+            ),
+            alloc_cost=alloc_cost_so_far,
+            event=GapEvent(
                 symbol=trade.symbol,
                 date=trade.date,
-                remaining_qty=Decimal("0"),
+                remaining_qty=qty_remaining,
                 currency=trade.currency,
                 message="dummy",
-                fixed=True,
+                outcome=GapResolution.SYNTHESIZED,
             ),
         )
 
 
 class NoneEventPolicy(GapPolicy):
-    def resolve(self, trade, qty_remaining, legs, alloc_cost_so_far):
-        legs.append(
-            {
-                "buy_date": None,
-                "qty": qty_remaining,
-                "lot_qty_before": Decimal("0"),
-                "alloc_cost_ccy": Decimal("0"),
-            }
+    def resolve(self, trade, qty_remaining, alloc_cost_so_far):
+        return ResolvedGap(
+            leg=SellMatchLeg(
+                buy_date=None,
+                qty=qty_remaining,
+                lot_qty_before=Decimal("0"),
+                alloc_cost_ccy=Decimal("0"),
+            ),
+            alloc_cost=alloc_cost_so_far,
+            event=None,
         )
-        return legs, alloc_cost_so_far, None
 
 
 def _trade(
@@ -64,7 +76,7 @@ def _trade(
 
 def test_fifo_matcher_buy_uses_injected_position_book():
     book = PositionBook()
-    matcher = FifoMatcher(positions=book)
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy(), positions=book)
     trade = _trade("ABC", Decimal("10"), proceeds=Decimal("-100"), comm=Decimal("-1"))
 
     assert matcher.ingest_trade(trade) is None
@@ -101,7 +113,7 @@ def test_fifo_matcher_gap_policy_can_skip_event():
 
 
 def test_fifo_matcher_validates_quantities():
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     with pytest.raises(ValueError):
         matcher.ingest_trade(
@@ -142,7 +154,7 @@ def _transfer(
 
 def test_transfer_out_after_buy_depletes_lots_before_sell():
     """buy(100) -> transfer-out(100) -> sell(100): sell should gap."""
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     matcher.ingest_trade(
         _trade("ABC", Decimal("100"), proceeds=Decimal("-1000"), comm=Decimal("0"))
@@ -165,7 +177,7 @@ def test_transfer_out_after_buy_depletes_lots_before_sell():
 
 def test_transfer_in_before_sell_funds_sell():
     """transfer-in(100) -> sell(50): sell should match the transferred lot."""
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     matcher.ingest_transfer(_transfer("XYZ", dt.date(2024, 1, 1), "100", "In", "1000"))
     line = matcher.ingest_trade(
@@ -188,7 +200,7 @@ def test_transfer_in_before_sell_funds_sell():
 
 def test_transfer_in_after_sell_does_not_fund_earlier_sell():
     """sell(100) -> transfer-in(100): sell should gap (lot doesn't exist yet)."""
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     line = matcher.ingest_trade(
         Trade(
@@ -208,7 +220,7 @@ def test_transfer_in_after_sell_does_not_fund_earlier_sell():
 
 def test_buy_transfer_out_sell_partial_depletes_correctly():
     """buy(100) -> transfer-out(50) -> sell(50): sell matches remaining 50."""
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     matcher.ingest_trade(
         _trade("ABC", Decimal("100"), proceeds=Decimal("-1000"), comm=Decimal("0"))
@@ -234,7 +246,7 @@ def test_buy_transfer_out_sell_partial_depletes_correctly():
 
 def test_sell_matches_only_lots_in_same_currency():
     """Buy XYZ in EUR, then sell XYZ in USD: lots must not cross-match."""
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     # Buy 100 XYZ denominated in EUR (basis = 1000 EUR)
     matcher.ingest_trade(
@@ -267,7 +279,7 @@ def test_sell_matches_only_lots_in_same_currency():
 
 def test_transfer_in_and_buy_both_fund_sell_in_fifo_order():
     """transfer-in(50) -> buy(50) -> sell(100): FIFO consumes transfer lot first."""
-    matcher = FifoMatcher()
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
 
     matcher.ingest_transfer(_transfer("ABC", dt.date(2024, 1, 1), "50", "In", "400"))
     matcher.ingest_trade(

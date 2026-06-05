@@ -4,8 +4,7 @@ from decimal import Decimal
 import pytest
 from fixtures import Trade
 
-from capitangains.errors import DataQualityError
-from capitangains.reporting.fifo_domain import Lot, SellMatchLeg
+from capitangains.reporting.fifo_domain import GapResolution, Lot, SellMatchLeg
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
 from capitangains.reporting.positions import PositionBook
 from capitangains.reporting.realized_builder import build_realized_line
@@ -104,24 +103,15 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: None,
     )
-    legs = [
-        SellMatchLeg(
-            buy_date=dt.date(2024, 1, 1),
-            qty=Decimal("100"),
-            lot_qty_before=Decimal("100"),
-            alloc_cost_ccy=Decimal("1200.01000000"),
-        )
-    ]
-    legs_after, alloc_after, event = policy.resolve(
-        trade, Decimal("20"), legs, Decimal("1200.01000000")
-    )
-    assert event.fixed is True
-    assert legs_after[-1].synthetic is True
-    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
-    assert alloc_after == Decimal("1200.01000000")
+    result = policy.resolve(trade, Decimal("20"), Decimal("1200.01000000"))
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.SYNTHESIZED
+    assert result.leg.synthetic is True
+    assert result.leg.alloc_cost_ccy == Decimal("0.00000000")
+    assert result.alloc_cost == Decimal("1200.01000000")
 
 
-def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
+def test_basis_synthesis_policy_negative_residual_beyond_tolerance_is_defective():
     trade = Trade(
         symbol="DEF",
         date=dt.date(2024, 3, 2),
@@ -136,16 +126,14 @@ def test_basis_synthesis_policy_guardrails_fallback_to_zero_cost():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: None,
     )
-    legs: list[SellMatchLeg] = []
-    legs_after, alloc_after, event = policy.resolve(
-        trade, Decimal("15"), legs, Decimal("950")
-    )
-    assert event.fixed is False
-    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
-    assert alloc_after == Decimal("950")
+    result = policy.resolve(trade, Decimal("15"), Decimal("950"))
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.DEFECTIVE
+    assert result.leg.alloc_cost_ccy == Decimal("0.00000000")
+    assert result.alloc_cost == Decimal("950")
 
 
-def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
+def test_basis_synthesis_policy_missing_basis_is_defective():
     trade = Trade(
         symbol="GHI",
         date=dt.date(2024, 3, 3),
@@ -160,13 +148,11 @@ def test_basis_synthesis_policy_missing_basis_uses_strict_gap():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: None,
     )
-    legs: list[SellMatchLeg] = []
-    legs_after, alloc_after, event = policy.resolve(
-        trade, Decimal("5"), legs, Decimal("0")
-    )
-    assert event.fixed is False
-    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
-    assert alloc_after == Decimal("0")
+    result = policy.resolve(trade, Decimal("5"), Decimal("0"))
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.DEFECTIVE
+    assert result.leg.alloc_cost_ccy == Decimal("0.00000000")
+    assert result.alloc_cost == Decimal("0")
 
 
 def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
@@ -184,25 +170,17 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: None,
     )
-    legs = [
-        SellMatchLeg(
-            buy_date=dt.date(2024, 1, 1),
-            qty=Decimal("100"),
-            lot_qty_before=Decimal("100"),
-            alloc_cost_ccy=Decimal("1000.02000000"),
-        )
-    ]
-    legs_after, alloc_after, event = policy.resolve(
-        trade, Decimal("10"), legs, Decimal("1000.02000000")
-    )
-    assert event.fixed is True
-    assert legs_after[-1].alloc_cost_ccy == Decimal("0.00000000")
-    assert alloc_after == Decimal("1000.02000000")
+    result = policy.resolve(trade, Decimal("10"), Decimal("1000.02000000"))
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.SYNTHESIZED
+    assert result.leg.alloc_cost_ccy == Decimal("0.00000000")
+    assert result.alloc_cost == Decimal("1000.02000000")
 
 
 def test_basis_synthesis_policy_rejects_basis_inconsistent_with_realized():
     # IBKR's columns satisfy Proceeds + Comm + Basis = Realized; a Basis that breaks the
-    # identity is corrupt, so synthesizing a cost from it must abort, not fabricate one.
+    # identity is corrupt, so synthesis flags it DEFECTIVE (the boundary then aborts)
+    # rather than fabricating a cost from it.
     trade = Trade(
         symbol="BAD",
         date=dt.date(2024, 3, 5),
@@ -217,8 +195,10 @@ def test_basis_synthesis_policy_rejects_basis_inconsistent_with_realized():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: Decimal("200"),  # 1200 + 0 - 1000 (the true basis)
     )
-    with pytest.raises(DataQualityError, match="Basis"):
-        policy.resolve(trade, Decimal("10"), [], Decimal("0"))
+    result = policy.resolve(trade, Decimal("10"), Decimal("0"))
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.DEFECTIVE
+    assert "Basis" in result.event.message and "Realized" in result.event.message
 
 
 def test_basis_synthesis_policy_accepts_near_total_loss_satisfying_identity():
@@ -238,10 +218,12 @@ def test_basis_synthesis_policy_accepts_near_total_loss_satisfying_identity():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: Decimal("-113.29851"),  # 450 - 12.84851 - 550.45
     )
-    legs, alloc, event = policy.resolve(trade, Decimal("50000"), [], Decimal("0"))
-    assert event.fixed is True
-    assert legs[-1].synthetic is True
-    assert alloc == Decimal("550.45000000")  # synthesized to the (valid) Basis
+    result = policy.resolve(trade, Decimal("50000"), Decimal("0"))
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.SYNTHESIZED
+    assert result.leg.synthetic is True
+    # synthesized to the (valid) Basis
+    assert result.alloc_cost == Decimal("550.45000000")
 
 
 def test_basis_synthesis_policy_skips_identity_check_without_realized():
@@ -260,9 +242,11 @@ def test_basis_synthesis_policy_skips_identity_check_without_realized():
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
         realized_getter=lambda t: None,
     )
-    _, alloc, event = policy.resolve(trade, Decimal("10"), [], Decimal("0"))
-    assert event.fixed is True  # no realized -> guardrail cannot fire
-    assert alloc == Decimal("9999.00000000")
+    result = policy.resolve(trade, Decimal("10"), Decimal("0"))
+    # No Realized P/L -> the identity check cannot fire -> synthesize.
+    assert result.event is not None
+    assert result.event.outcome is GapResolution.SYNTHESIZED
+    assert result.alloc_cost == Decimal("9999.00000000")
 
 
 def test_realized_line_builder_rounds_realized_pl():

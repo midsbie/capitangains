@@ -3,12 +3,11 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-import pytest
-
-from capitangains.errors import DataQualityError
 from capitangains.reporting.extract import TradeRow
 from capitangains.reporting.fifo import FifoMatcher
+from capitangains.reporting.fifo_domain import GapKey, GapResolution
 from capitangains.reporting.fx import FxTable
+from capitangains.reporting.gap_policy import build_gap_policy
 from capitangains.reporting.report_builder import ReportBuilder
 
 
@@ -69,8 +68,13 @@ def _sell(
     )
 
 
+def _matcher(acknowledged: frozenset[GapKey] = frozenset()) -> FifoMatcher:
+    """A matcher whose gap policy acknowledges exactly `acknowledged`."""
+    return FifoMatcher(gap_policy=build_gap_policy(acknowledged))
+
+
 def test_fifo_no_fix_records_gap_and_zero_cost():
-    m = FifoMatcher(fix_sell_gaps=False)
+    m = _matcher()
     # Buy 100 cost 1000
     m.ingest_trade(_buy("ABC", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # Sell 120 proceeds 1200, basis -1200 (not used when no fix)
@@ -89,12 +93,13 @@ def test_fifo_no_fix_records_gap_and_zero_cost():
     assert rl.legs[1].alloc_cost_ccy == Decimal("0")
     # Realized = 1200 - 1000
     assert rl.realized_pl_ccy == Decimal("200.00")
-    # Gap event recorded
-    assert len(m.gap_events) == 1 and m.gap_events[0].fixed is False
+    # Gap event recorded as unacknowledged
+    assert len(m.gap_events) == 1
+    assert m.gap_events[0].outcome is GapResolution.UNACKNOWLEDGED
 
 
 def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
-    m = FifoMatcher(fix_sell_gaps=True)
+    m = _matcher(frozenset({("XYZ", dt.date(2024, 2, 1))}))
     m.ingest_trade(_buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # SELL 120, proceeds 1200, IBKR Basis -1200 -> target alloc 1200
     rl = m.ingest_trade(
@@ -116,8 +121,8 @@ def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
     assert rl.realized_pl_ccy == Decimal("0.00")
 
 
-def test_fifo_auto_fix_missing_basis_falls_back_zero_cost():
-    m = FifoMatcher(fix_sell_gaps=True)
+def test_fifo_auto_fix_missing_basis_is_defective():
+    m = _matcher(frozenset({("DEF", dt.date(2024, 2, 1))}))
     m.ingest_trade(_buy("DEF", dt.date(2024, 1, 1), "50", "-500", "0", "USD"))
     # SELL 60, proceeds 600, Basis missing
     rl = m.ingest_trade(
@@ -128,12 +133,13 @@ def test_fifo_auto_fix_missing_basis_falls_back_zero_cost():
     assert rl.gap_fixed is False
     assert len(rl.legs) == 2
     assert rl.legs[1].alloc_cost_ccy == Decimal("0")
-    # Gap event recorded (not fixed)
-    assert any(ev.fixed is False for ev in m.gap_events)
+    # Acknowledged but unusable: a missing Basis is DEFECTIVE (fatal at the boundary)
+    assert m.gap_events[0].outcome is GapResolution.DEFECTIVE
 
 
 def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
-    m = FifoMatcher(fix_sell_gaps=True, gap_tolerance=Decimal("0.02"))
+    # The default synthesis tolerance (0.02) is what makes residual -0.01 clamp below.
+    m = _matcher(frozenset({("CLP", dt.date(2024, 2, 1))}))
     # Buy 90 cost 900
     m.ingest_trade(_buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
     # SELL 100 with IBKR Basis slightly less than matched alloc
@@ -148,8 +154,9 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     assert rl.legs[-1].alloc_cost_ccy == Decimal("0.00000000")
 
 
-def test_fifo_auto_fix_negative_residual_beyond_tolerance_fallback():
-    m = FifoMatcher(fix_sell_gaps=True, gap_tolerance=Decimal("0.02"))
+def test_fifo_auto_fix_negative_residual_beyond_tolerance_is_defective():
+    # The default synthesis tolerance (0.02) is what makes residual -5 DEFECTIVE below.
+    m = _matcher(frozenset({("FLT", dt.date(2024, 2, 1))}))
     # Buy 90 cost 900
     m.ingest_trade(_buy("FLT", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
     # SELL 100 with IBKR Basis much less than matched alloc (residual = -5 -> fallback)
@@ -161,10 +168,11 @@ def test_fifo_auto_fix_negative_residual_beyond_tolerance_fallback():
     assert rl.gap_fixed is False
     assert rl.legs[-1].qty == Decimal("10")
     assert rl.legs[-1].alloc_cost_ccy == Decimal("0")
+    assert m.gap_events[0].outcome is GapResolution.DEFECTIVE
 
 
 def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
-    m = FifoMatcher(fix_sell_gaps=True)
+    m = _matcher(frozenset({("EURX", dt.date(2024, 2, 1))}))
     # Buy 100 cost 1000 USD on 2024-01-01
     m.ingest_trade(_buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
     # Sell 120 on 2024-02-01, proceeds 1200, Basis -1200 so residual = 200
@@ -195,18 +203,21 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
 
 
 def test_fifo_auto_fix_rejects_basis_inconsistent_with_realized():
-    m = FifoMatcher(fix_sell_gaps=True)
+    m = _matcher(frozenset({("BAD", dt.date(2024, 2, 1))}))
     # No buy history: the whole 120 is a gap. IBKR Basis -1200 would synthesize a 1200
     # cost, but IBKR's own Realized P/L (999) contradicts the identity (1200 + 0 - 1200
-    # = 0), so the Basis cell is corrupt and synthesis must abort, not fabricate a cost.
+    # = 0), so the Basis cell is corrupt: synthesis flags it DEFECTIVE (the boundary
+    # then aborts) instead of fabricating a cost.
     sell = _sell("BAD", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
     sell.realized_pl_ccy = Decimal("999")
-    with pytest.raises(DataQualityError, match="Basis"):
-        m.ingest_trade(sell)
+    rl = m.ingest_trade(sell)
+    assert rl is not None and rl.gap_fixed is False
+    assert m.gap_events[0].outcome is GapResolution.DEFECTIVE
+    assert "Basis" in m.gap_events[0].message
 
 
 def test_fifo_auto_fix_accepts_synthesis_when_realized_confirms_basis():
-    m = FifoMatcher(fix_sell_gaps=True)
+    m = _matcher(frozenset({("OKAY", dt.date(2024, 2, 1))}))
     # IBKR Basis -1200 and Realized 0 are mutually consistent (1200 + 0 - 1200 = 0), so
     # synthesis proceeds: the realized_getter wiring must not reject a valid Basis.
     sell = _sell("OKAY", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
