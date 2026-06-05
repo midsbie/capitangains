@@ -61,11 +61,6 @@ class ReportBuilder:
         ccy.realized += rl.realized_pl_ccy
         ccy.proceeds += rl.sell_net_ccy
         ccy.alloc_cost += sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
-        # EUR aggregations if present
-        if rl.realized_pl_eur is not None:
-            t.eur.realized += rl.realized_pl_eur
-            t.eur.proceeds += rl.sell_net_eur or Decimal("0")
-            t.eur.alloc_cost += rl.alloc_cost_eur or Decimal("0")
 
     def set_dividends(self, rows: list[DividendRow]) -> None:
         self.dividends = rows
