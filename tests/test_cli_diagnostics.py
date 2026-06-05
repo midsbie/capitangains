@@ -24,10 +24,12 @@ import pytest
 from capitangains.cmd.cli import (
     _parse_acknowledged_gaps,
     _report_gap_acknowledgments,
+    _report_transfer_ordering_collisions,
     build_argparser,
     process_files,
 )
 from capitangains.errors import DataQualityError
+from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo_domain import GapEvent, GapResolution
 
 
@@ -145,6 +147,95 @@ def test_report_gap_acknowledgments_accumulates_every_fatal_category(caplog):
     assert any("tie-out failed" in m for m in messages)
 
 
+# --- _report_transfer_ordering_collisions ---------------------------------------------
+
+
+def _trade_row(symbol, currency, date, qty="10"):
+    quantity = Decimal(qty)
+    return TradeRow(
+        section="Trades",
+        asset_category="Stocks",
+        currency=currency,
+        symbol=symbol,
+        datetime_str=f"{date}, 10:00:00",
+        date=dt.date.fromisoformat(date),
+        quantity=quantity,
+        t_price=Decimal("100"),
+        proceeds=Decimal("-1000") if quantity > 0 else Decimal("1000"),
+        comm_fee=Decimal("-1"),
+        code="O",
+    )
+
+
+def _transfer_row(symbol, currency, date, direction="In"):
+    return TransferRow(
+        section="Transfers",
+        asset_category="Stocks",
+        currency=currency,
+        symbol=symbol,
+        date=dt.date.fromisoformat(date),
+        direction=direction,
+        quantity=Decimal("10"),
+        market_value=Decimal("1000"),
+        code="",
+    )
+
+
+def test_report_transfer_ordering_collisions_silent_without_collision(caplog):
+    # A transfer on a different day from the trade (same symbol), and a transfer sharing
+    # the trade's day but in a different symbol, are both independent for FIFO: no halt,
+    # no output. The guard is scoped to (symbol, currency, date).
+    logger = logging.getLogger("xfer_none")
+    trades = [_trade_row("AAPL", "USD", "2024-06-10")]
+    transfers = [
+        _transfer_row("AAPL", "USD", "2024-03-15"),
+        _transfer_row("MSFT", "USD", "2024-06-10"),
+    ]
+    with caplog.at_level(logging.ERROR):
+        _report_transfer_ordering_collisions(trades, transfers, logger)
+    assert caplog.records == []
+
+
+def test_report_transfer_ordering_collisions_two_same_day_transfers_is_fatal(caplog):
+    # Two transfers of the same symbol on the same day are equally unorderable -- IBKR
+    # timestamps neither -- even with no trade that day.
+    logger = logging.getLogger("xfer_pair")
+    transfers = [
+        _transfer_row("AAPL", "USD", "2024-06-10", "In"),
+        _transfer_row("AAPL", "USD", "2024-06-10", "Out"),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_transfer_ordering_collisions([], transfers, logger)
+
+    assert exc.value.code == 2
+    assert any(
+        "Unorderable same-day events" in r.getMessage() and "AAPL" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_report_transfer_ordering_collisions_lists_every_collision(caplog):
+    # Accumulate, do not fail fast: two distinct symbol-days each collide, and both are
+    # named before the single exit, so every one is visible in one pass.
+    logger = logging.getLogger("xfer_accum")
+    trades = [
+        _trade_row("AAPL", "USD", "2024-06-10"),
+        _trade_row("VOD", "GBP", "2024-07-01"),
+    ]
+    transfers = [
+        _transfer_row("AAPL", "USD", "2024-06-10"),
+        _transfer_row("VOD", "GBP", "2024-07-01"),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_transfer_ordering_collisions(trades, transfers, logger)
+
+    assert exc.value.code == 2
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("AAPL" in m for m in messages)
+    assert any("VOD" in m for m in messages)
+    assert any("2 symbol-day(s)" in m for m in messages)
+
+
 # --- process_files integration --------------------------------------------------------
 
 
@@ -164,6 +255,34 @@ _TRADES_HEADER = [
     "Basis",
     "Realized P/L",
 ]
+
+_TRANSFERS_HEADER = [
+    "Transfers",
+    "Header",
+    "Asset Category",
+    "Currency",
+    "Symbol",
+    "Date",
+    "Direction",
+    "Qty",
+    "Market Value",
+    "Code",
+]
+
+
+def _transfer_data(symbol, currency, date, *, direction="In", qty="10"):
+    return [
+        "Transfers",
+        "Data",
+        "Stocks",
+        currency,
+        symbol,
+        date,
+        direction,
+        qty,
+        "1000",
+        "",
+    ]
 
 
 def _trade(symbol, currency, *, date="2024-01-10, 10:00:00", qty="10"):
@@ -332,6 +451,72 @@ def test_process_files_exits_2_on_symbol_currency_violation(tmp_path, caplog):
     assert exc.value.code == 2
     assert not out.exists()
     assert any("symbol-currency uniqueness" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_exits_2_on_same_day_transfer_trade_collision(tmp_path, caplog):
+    # IBKR gives transfers no intraday time, so a transfer landing on the same day as a
+    # trade in the SAME symbol cannot be ordered for FIFO. The tool refuses to guess and
+    # aborts with exit 2 -- naming the symbol/day -- rather than fabricate an order.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    rows = [
+        _TRADES_HEADER,
+        _trade("AAPL", "USD", date="2024-06-10, 10:00:00"),
+        _TRANSFERS_HEADER,
+        _transfer_data("AAPL", "USD", "2024-06-10"),
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any(
+        "Unorderable same-day events" in r.getMessage() and "AAPL" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_process_files_allows_same_day_transfer_in_a_different_symbol(tmp_path, caplog):
+    # The guard is scoped to (symbol, currency): a transfer sharing a day with trades in
+    # an UNRELATED symbol is independent for FIFO and must not halt. EUR converts by
+    # identity, so the run completes and writes the workbook.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    rows = [
+        _TRADES_HEADER,
+        _trade("AAPL", "EUR", date="2024-01-10, 10:00:00"),
+        [
+            "Trades",
+            "Data",
+            "Order",
+            "Stocks",
+            "EUR",
+            "AAPL",
+            "2024-06-10, 10:00:00",
+            "-10",
+            "110",
+            "1100",
+            "-1",
+            "C",
+            "-1001",
+            "99",
+        ],
+        _TRANSFERS_HEADER,
+        _transfer_data("MSFT", "EUR", "2024-06-10"),
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    with caplog.at_level(logging.ERROR):
+        process_files(_args(stmt, out))
+
+    assert out.exists()
+    assert not any(
+        "Unorderable same-day events" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):

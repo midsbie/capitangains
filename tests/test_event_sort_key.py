@@ -57,13 +57,20 @@ def test_same_timestamp_buy_before_sell():
     assert events == [buy, sell]
 
 
-def test_transfer_in_before_trades_transfer_out_after():
-    """Transfer-in < trades < transfer-out on the same date."""
-    xfer_in = _transfer(dt.date(2024, 6, 15), "In")
-    trade = _trade("2024-06-15, 12:00:00", "100")
-    xfer_out = _transfer(dt.date(2024, 6, 15), "Out")
+def test_transfers_order_by_date_relative_to_trades():
+    """A transfer carries no intraday time, so it sorts on date alone.
 
-    events: list[TradeRow | TransferRow] = [xfer_out, trade, xfer_in]
+    A same-day, same-symbol transfer/trade collision can no longer reach this sort: it
+    is rejected upstream by _report_transfer_ordering_collisions, since IBKR provides no
+    transfer timestamp to order it. The only same-day pairings that survive to the sort
+    are in independent symbols (immaterial to FIFO), so the key needs no fabricated
+    transfer-vs-trade tie-break -- date ordering is sufficient.
+    """
+    prior_xfer = _transfer(dt.date(2024, 6, 14), "In")
+    day_trade = _trade("2024-06-15, 12:00:00", "100")
+    later_xfer = _transfer(dt.date(2024, 6, 16), "Out")
+
+    events: list[TradeRow | TransferRow] = [later_xfer, day_trade, prior_xfer]
     events.sort(key=_event_sort_key)
 
-    assert events == [xfer_in, trade, xfer_out]
+    assert events == [prior_xfer, day_trade, later_xfer]

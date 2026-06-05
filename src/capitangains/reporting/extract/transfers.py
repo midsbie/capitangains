@@ -43,7 +43,8 @@ def parse_transfers(
       errors.
     - For 'In' transfers, Market Value / Cost Basis must be present and parseable;
       missing or placeholder basis is treated as an error.
-    - Transfers are applied as pre-period position seeding before processing trades.
+    - Transfers feed FIFO interleaved with trades by date (not strictly before them):
+      an 'In' seeds a lot and an 'Out' consumes lots.
     - Until Open Positions support is implemented, Market Value at transfer date is used
       as a proxy for cost basis, which may differ from IBKR's internal basis.
     """

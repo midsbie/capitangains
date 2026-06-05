@@ -104,15 +104,22 @@ def validate_symbol_currency_uniqueness(
 
 def _event_sort_key(
     event: TradeRow | TransferRow,
-) -> tuple[dt.date, int, str, int]:
+) -> tuple[dt.date, str, int]:
+    """Order the merged trade/transfer stream for FIFO ingestion.
+
+    Trades sort by their real intraday timestamp (IBKR's Date/Time), with buys before
+    sells only as a tie-break for an identical timestamp. Transfers carry no intraday
+    time, so they sort by date alone. That is sufficient because
+    _report_transfer_ordering_collisions has already aborted the run if any transfer
+    shared a (symbol, currency) day with other order-sensitive activity. The only
+    same-day pairings that can still reach this sort are in independent symbols, whose
+    relative order does not affect FIFO (consumption is keyed per symbol).
+    """
     if isinstance(event, TransferRow):
-        direction = event.direction.strip().lower()
-        priority = 0 if direction == "in" else 2
-        return (event.date, priority, "", 0)
+        return (event.date, "", 0)
     elif isinstance(event, TradeRow):
-        # Buys before sells only as tie-break for identical timestamps.
         sub = 0 if event.quantity > 0 else 1
-        return (event.date, 1, event.datetime_str, sub)
+        return (event.date, event.datetime_str, sub)
     raise ValueError(f"unexpected event type: {type(event)}")
 
 
@@ -298,6 +305,88 @@ def _report_missing_fx(
     raise SystemExit(2)
 
 
+def _report_transfer_ordering_collisions(
+    trades: Sequence[TradeRow],
+    transfers: Sequence[TransferRow],
+    logger: logging.Logger,
+) -> None:
+    """Abort if a transfer shares a symbol's calendar day with other activity.
+
+    Why this is fatal rather than resolved. FIFO lot creation and consumption are
+    order-sensitive and keyed by (symbol, currency): the sequence in which buys, sells,
+    transfer-ins (which seed a lot) and transfer-outs (which consume lots) are ingested
+    decides which lots a disposal matches, and therefore its cost basis and realized
+    P/L. IBKR's Trades section carries a full intraday timestamp (Date/Time), but its
+    Transfers section carries only a Date -- no time, and the Code does not encode one
+    -- so when a transfer lands on the same day as other order-sensitive activity in the
+    same symbol, their true intraday order is simply not in the data. There is no honest
+    way to deduce it.
+
+    The earlier implementation papered over this with a fabricated convention
+    (transfer-in before all same-day trades, transfer-out after) encoded as priority
+    constants in the sort key. That silently risked a wrong cost basis on exactly the
+    figures this tool exists to get right, with no signal to the operator. Because a tax
+    figure must be correct rather than plausibly guessed (the stance already taken for a
+    missing FX rate or an unmatched sell) we refuse to assume an order IBKR did not
+    provide, and halt so the operator can resolve the affected symbol against their own
+    records.
+
+    Why halting (and building no mitigation) is acceptable. The collision is rare to the
+    point of being an edge case: a transfer is a position migration, whose normal
+    lifecycle is migrate-then-hold (or migrate-then-trade-on-a-later-day), and
+    receiving-broker settlement windows push a transfer and same-symbol trading apart.
+    No convention or override mechanism is therefore built; this guard only states the
+    cause when the rare case occurs, preserving today's findings for future readers.
+
+    Scope. Only same (symbol, currency) matters, since consumption is keyed that way; a
+    transfer sharing a day with unrelated symbols is independent and stays silent. A
+    transfer colliding with another transfer of the same symbol on the same day is
+    equally unorderable and is caught here too. Every collision is listed, then a single
+    SystemExit(2), and a workbook is not written.
+    """
+    trades_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
+    for t in trades:
+        trades_by_key[(t.symbol, t.currency, t.date)] += 1
+
+    transfers_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
+    for tr in transfers:
+        transfers_by_key[(tr.symbol, tr.currency, tr.date)] += 1
+
+    # A transfer collides when its (symbol, currency, date) also holds a trade, or a
+    # second transfer of the same symbol that day -- either way the intraday order is
+    # undetermined.
+    collisions = [
+        (key, n_xfer, trades_by_key.get(key, 0))
+        for key, n_xfer in transfers_by_key.items()
+        if trades_by_key.get(key, 0) > 0 or n_xfer > 1
+    ]
+    if not collisions:
+        return
+
+    for (symbol, currency, date), n_xfer, n_trade in sorted(collisions):
+        logger.error(
+            "Unorderable same-day events for %s (%s) on %s: %d transfer(s) and %d "
+            "trade(s) share the date, but IBKR gives transfers no intraday time, so "
+            "their FIFO order cannot be determined.",
+            symbol,
+            currency,
+            date,
+            n_xfer,
+            n_trade,
+        )
+
+    logger.error(
+        "Transfer ordering is ambiguous for %d symbol-day(s); no workbook written. "
+        "IBKR does not timestamp transfers, so a transfer landing on the same day as "
+        "other activity in the same symbol cannot be ordered against it, and the cost "
+        "basis would depend on an assumption the data does not support. Resolve the "
+        "affected symbol(s) by hand, or adjust the inputs so the transfer and the "
+        "same-day activity do not coincide.",
+        len(collisions),
+    )
+    raise SystemExit(2)
+
+
 def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
     logger = logging.getLogger(__name__)
@@ -377,13 +466,19 @@ def process_files(args: argparse.Namespace) -> None:
         logger.error("%s", e)
         raise SystemExit(2) from e
 
+    # A transfer carries only a date (IBKR gives transfers no intraday time), so a
+    # transfer sharing a symbol's day with other order-sensitive activity cannot be
+    # ordered for FIFO. Halt rather than guess -- see the helper's rationale.
+    _report_transfer_ordering_collisions(trades, transfers, logger)
+
     # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
     # itself stays agnostic of how gaps are resolved.
     matcher = FifoMatcher(gap_policy=build_gap_policy(acknowledged))
 
     # Merge trades and transfers into a single chronological stream so that FIFO lot
-    # creation/consumption respects actual event ordering.
-    # Same-date tie-break: transfer-in(0) < trades by datetime(1) < transfer-out(2).
+    # creation/consumption respects actual event ordering. Same-day same-symbol transfer
+    # collisions were already rejected above, so the sort key needs no fabricated
+    # transfer-vs-trade tie-break (see _event_sort_key).
     events: list[TradeRow | TransferRow] = [*trades, *transfers]
     events.sort(key=_event_sort_key)
 
