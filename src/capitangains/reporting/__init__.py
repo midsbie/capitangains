@@ -20,7 +20,7 @@ from .reconcile import (
     reconcile_realized_against_ibkr,
 )
 from .report_builder import ReportBuilder
-from .report_sink import ExcelReportSink, OdsReportSink, ReportSink
+from .report_sink import ExcelReportSink, ReportSink
 
 __all__ = [
     "ExtractionDefect",
@@ -45,5 +45,4 @@ __all__ = [
     "ReportBuilder",
     "ReportSink",
     "ExcelReportSink",
-    "OdsReportSink",
 ]

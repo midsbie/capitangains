@@ -784,14 +784,3 @@ class ExcelReportSink:
             if header and "JSON" in str(header):
                 width = min(width, 50)
             sheet.column_dimensions[get_column_letter(col)].width = width
-
-
-@dataclass
-class OdsReportSink:
-    out_path: Path
-
-    def write(self, report: ReportBuilder) -> Path:  # pragma: no cover - placeholder
-        raise NotImplementedError(
-            "ODS output not implemented yet. "
-            "Consider using XLSX or extending ReportSink."
-        )
