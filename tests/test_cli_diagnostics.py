@@ -290,8 +290,9 @@ def test_statement_conflicts_overlapping_periods_fatal(caplog):
 
     assert exc.value.code == 2
     messages = [r.getMessage() for r in caplog.records]
-    assert any("overlapping periods" in m and "a.csv" in m and "b.csv" in m
-               for m in messages)
+    assert any(
+        "overlapping periods" in m and "a.csv" in m and "b.csv" in m for m in messages
+    )
 
 
 def test_statement_conflicts_same_period_twice_fatal(caplog):
@@ -316,8 +317,12 @@ def test_statement_conflicts_multiple_accounts_fatal(caplog):
         _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
     assert exc.value.code == 2
-    assert any("multiple accounts" in r.getMessage() and "U1" in r.getMessage()
-               and "U2" in r.getMessage() for r in caplog.records)
+    assert any(
+        "multiple accounts" in r.getMessage()
+        and "U1" in r.getMessage()
+        and "U2" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 def test_statement_conflicts_missing_period_fatal(caplog):

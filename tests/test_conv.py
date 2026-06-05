@@ -1,10 +1,9 @@
-import datetime as dt
 import logging
 from decimal import Decimal
 
 import pytest
 
-from capitangains.conv import parse_statement_period, to_dec, to_dec_strict
+from capitangains.conv import to_dec, to_dec_strict
 
 
 def test_to_dec_standard():
@@ -104,39 +103,3 @@ def test_to_dec_strict_scientific_notation():
     # Decimal supports scientific notation, verify it passes
     assert to_dec_strict("1.5E2") == Decimal("150")
     assert to_dec_strict("1E-2") == Decimal("0.01")
-
-
-def test_parse_statement_period_full_year():
-    assert parse_statement_period("January 1, 2024 - December 31, 2024") == (
-        dt.date(2024, 1, 1),
-        dt.date(2024, 12, 31),
-    )
-
-
-def test_parse_statement_period_single_day_has_no_separator():
-    # A one-day statement carries just the date; start == end.
-    assert parse_statement_period("March 15, 2023") == (
-        dt.date(2023, 3, 15),
-        dt.date(2023, 3, 15),
-    )
-
-
-def test_parse_statement_period_rejects_unparseable_side():
-    with pytest.raises(ValueError, match="Unparseable statement period"):
-        parse_statement_period("January 1, 2024 - 2024-12-31")
-
-
-def test_parse_statement_period_rejects_iso_format():
-    # The Period field is month-name, never ISO; an ISO value is a wrong-field defect.
-    with pytest.raises(ValueError, match="Unparseable statement period"):
-        parse_statement_period("2024-01-01")
-
-
-def test_parse_statement_period_rejects_extra_separator():
-    with pytest.raises(ValueError, match="Ambiguous statement period"):
-        parse_statement_period("January 1, 2024 - June 1, 2024 - December 31, 2024")
-
-
-def test_parse_statement_period_rejects_reversed_range():
-    with pytest.raises(ValueError, match="ends before it starts"):
-        parse_statement_period("December 31, 2024 - January 1, 2024")

@@ -48,7 +48,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
-from capitangains.conv import parse_date, parse_statement_period
+from capitangains.conv import parse_date
 from capitangains.errors import DataQualityError
 from capitangains.logging import configure_logging
 from capitangains.model import (
@@ -62,10 +62,12 @@ from capitangains.reporting import (
     FifoMatcher,
     FxTable,
     ReportBuilder,
+    StatementPeriod,
     TradeRow,
     TransferRow,
     parse_dividends,
     parse_interest,
+    parse_statement_metadata,
     parse_syep_interest_details,
     parse_trades_stocklike,
     parse_transfers,
@@ -424,25 +426,20 @@ def _report_statement_input_conflicts(
 
     problems: list[str] = []
     accounts: set[str] = set()
-    periods: list[tuple[str, dt.date, dt.date]] = []  # only the cleanly-parsed ones
+    periods: list[tuple[str, StatementPeriod]] = []  # only the cleanly-extracted ones
 
     for path, model in zip(inputs, models, strict=True):
-        account = (model.account_id() or "").strip()
-        if account:
-            accounts.add(account)
-        else:
-            problems.append(f"{path}: missing account number (Account Information).")
-
-        period_text = model.period_text()
-        if not period_text or not period_text.strip():
-            problems.append(f"{path}: missing reporting period (Statement).")
-            continue
         try:
-            start, end = parse_statement_period(period_text)
-        except ValueError as e:
+            metadata = parse_statement_metadata(model)
+        except DataQualityError as e:
+            # Missing/malformed account or period: disjointness is unprovable for this
+            # file. parse_statement_metadata names the first defect; the rest surface on
+            # rerun once it is fixed.
             problems.append(f"{path}: {e}")
             continue
-        periods.append((path, start, end))
+
+        accounts.add(metadata.account)
+        periods.append((path, metadata.period))
 
     if len(accounts) > 1:
         problems.append(
@@ -450,12 +447,13 @@ def _report_statement_input_conflicts(
             "reports one account at a time."
         )
 
-    # Closed intervals overlap when each begins on or before the other ends. O(n^2) over
-    # the handful of statements a run ever takes.
-    for i, (p_path, p_start, p_end) in enumerate(periods):
-        for q_path, q_start, q_end in periods[i + 1 :]:
-            if p_start <= q_end and q_start <= p_end:
-                lo, hi = max(p_start, q_start), min(p_end, q_end)
+    # O(n^2) over the handful of statements a run ever takes; StatementPeriod owns the
+    # closed-interval overlap test.
+    for i, (p_path, p_period) in enumerate(periods):
+        for q_path, q_period in periods[i + 1 :]:
+            if p_period.overlaps(q_period):
+                lo = max(p_period.start, q_period.start)
+                hi = min(p_period.end, q_period.end)
                 problems.append(
                     f"overlapping periods: {p_path} and {q_path} both cover "
                     f"{lo} to {hi}."
