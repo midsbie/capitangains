@@ -111,14 +111,36 @@ def test_fx_date_past_table_end_returns_none(tmp_path):
     assert table.get_rate(dt.date(2024, 12, 15), "USD") is None
 
 
-def test_fx_unparseable_fallback_key_returns_none(tmp_path, caplog):
-    # An unvalidated, malformed date key (finding #12) makes staleness unprovable, so
-    # get_rate fails closed rather than returning an unverifiable rate.
-    path = _write_csv(tmp_path, [["2024-13-01", "USD", "1.20"]])  # month 13: invalid
+def test_fx_from_csv_rejects_unpadded_date(tmp_path):
+    # A non-canonical (unpadded) ISO date sorts lexically out of chronological order and
+    # never matches a zero-padded lookup key. Finding #12 rejects it loudly at ingest
+    # rather than store it as an untrusted string and silently misprice (or, post-#10,
+    # spuriously report missing) every conversion that touches it.
+    path = _write_csv(tmp_path, [["2024-1-5", "USD", "1.20"]])
+    with pytest.raises(ValueError, match="unparseable date"):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_rejects_invalid_calendar_date(tmp_path):
+    # A structurally-malformed date (month 13) is likewise rejected at ingest, not
+    # stored as a key that lookup would have to defend against (finding #12).
+    path = _write_csv(tmp_path, [["2024-13-01", "USD", "1.20"]])
+    with pytest.raises(ValueError, match="unparseable date"):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_keys_on_real_dates(tmp_path):
+    # Canonical dates are kept as dt.date keys: exact match and in-window fallback
+    # resolve to the right rows. (The lexical-vs-chronological hazard is precluded
+    # upstream by rejecting non-canonical dates at ingest, covered above.)
+    path = _write_csv(
+        tmp_path,
+        [
+            ["2024-01-05", "USD", "1.20"],
+            ["2024-01-10", "USD", "1.10"],
+        ],
+    )
     table = FxTable.from_csv(path)
-
-    with caplog.at_level(logging.WARNING, logger="capitangains.reporting.fx"):
-        rate = table.get_rate(dt.date(2025, 1, 1), "USD")
-
-    assert rate is None
-    assert any("unparseable" in r.getMessage() for r in caplog.records)
+    assert table.get_rate(dt.date(2024, 1, 10), "USD") == Decimal("1") / Decimal("1.10")
+    # 2024-01-07 falls back to the nearest prior observation, 2024-01-05.
+    assert table.get_rate(dt.date(2024, 1, 7), "USD") == Decimal("1") / Decimal("1.20")

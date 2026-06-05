@@ -1,3 +1,3 @@
-from .conv import date_key, parse_date, to_dec, to_dec_strict
+from .conv import parse_date, to_dec, to_dec_strict
 
-__all__ = ["to_dec", "to_dec_strict", "parse_date", "date_key"]
+__all__ = ["to_dec", "to_dec_strict", "parse_date"]

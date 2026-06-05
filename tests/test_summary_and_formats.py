@@ -13,8 +13,8 @@ from capitangains.reporting.report_sink import ExcelReportSink
 def make_fx() -> FxTable:
     ft = FxTable()
     # EUR identity is handled internally; add USD for a couple dates
-    ft.data["USD"]["2024-01-10"] = Decimal("0.9")
-    ft.data["USD"]["2024-01-05"] = Decimal("0.9")
+    ft.data["USD"][dt.date(2024, 1, 10)] = Decimal("0.9")
+    ft.data["USD"][dt.date(2024, 1, 5)] = Decimal("0.9")
     ft.date_index["USD"] = sorted(ft.data["USD"].keys())
     return ft
 

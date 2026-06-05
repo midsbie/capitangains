@@ -15,7 +15,7 @@ def _make_fx(rates: dict[tuple[str, str], Decimal]) -> FxTable:
     ft = FxTable()
     for (ccy, d), v in rates.items():
         c = ccy.upper()
-        ft.data[c][d] = v
+        ft.data[c][dt.date.fromisoformat(d)] = v
     for c, m in ft.data.items():
         ft.date_index[c] = sorted(m.keys())
     return ft

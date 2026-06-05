@@ -8,7 +8,7 @@ from collections import defaultdict
 from decimal import Decimal, DivisionByZero
 from pathlib import Path
 
-from capitangains.conv import date_key, to_dec_strict
+from capitangains.conv import parse_date, to_dec_strict
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,12 @@ class FxTable:
     """
 
     def __init__(self) -> None:
-        # Map: currency -> { date -> Decimal(eur_per_unit) }, plus sorted date list
-        self.data: dict[str, dict[str, Decimal]] = defaultdict(dict)
-        self.date_index: dict[str, list[str]] = {}
+        # Map: currency -> { date -> Decimal(eur_per_unit) }, plus sorted date list.
+        # Dates are real `d.date keys, not strings: comparison and bisect are then
+        # chronological by construction, immune to the lexical-vs-chronological hazard a
+        # non-canonical string key would introduce.
+        self.data: dict[str, dict[dt.date, Decimal]] = defaultdict(dict)
+        self.date_index: dict[str, list[dt.date]] = {}
 
     @classmethod
     def from_csv(cls, path: str | Path) -> FxTable:
@@ -46,7 +49,16 @@ class FxTable:
                 raise ValueError("FX table must contain 'rate' (units per EUR) column")
 
             for row in reader:
-                d = date_key(row["date"])
+                raw_date = row["date"]
+                try:
+                    d = parse_date(raw_date)
+                except (ValueError, TypeError) as exc:
+                    # Reject a non-canonical or malformed date loudly here rather than
+                    # store it as an untrusted string and mis-sort/mis-match it later.
+                    # A valid ISO date is a precondition for the table.
+                    raise ValueError(
+                        f"FX table has an unparseable date {raw_date!r}"
+                    ) from exc
                 ccy = row["currency"].strip().upper()
                 if not ccy:
                     raise ValueError(f"FX row missing currency for date {d}")
@@ -90,18 +102,17 @@ class FxTable:
         c = currency.upper()
         if c == "EUR":
             return True
-        d = date.isoformat()
-        return c in self.data and d in self.data[c]
+        return c in self.data and date in self.data[c]
 
     def get_rate(self, date: dt.date, currency: str) -> Decimal | None:
         """Return EUR per 1 unit of currency, or None if no fresh rate is available.
 
         Falls back to the nearest *previous* observation to absorb weekends/holidays,
-        but only within ``_MAX_FX_LOOKBACK_DAYS``. A gap wider than that window returns
-        None rather than an over-stale rate -- the usual cause being a lookup that runs
-        more than that many days past the table's last entry -- and the caller then
-        reports it missing (the same fatal path as an absent rate). Never forward-fills:
-        a past event is not priced at a future rate (cf. finding #2).
+        but only within _MAX_FX_LOOKBACK_DAYS. A gap wider than that window returns None
+        rather than an over-stale rate -- the usual cause being a lookup that runs more
+        than that many days past the table's last entry -- and the caller then reports
+        it missing (the same fatal path as an absent rate). Never forward-fills: a past
+        event is not priced at a future rate.
         """
         c = currency.upper()
         if c == "EUR":
@@ -112,17 +123,16 @@ class FxTable:
             )
             return None
 
-        d = date.isoformat()
-        if d in self.data[c]:
-            rate = self.data[c][d]
+        if date in self.data[c]:
+            rate = self.data[c][date]
             logger.debug("FX rate lookup: %s on %s = %s (exact match)", c, date, rate)
             return rate
 
         # Fall back to the nearest previous observation, but only within the staleness
-        # cap (see _MAX_FX_LOOKBACK_DAYS). Find the latest date <= d in the sorted list.
+        # cap (see _MAX_FX_LOOKBACK_DAYS). Find the latest date <= the requested one.
         dates = self.date_index[c]
 
-        pos = bisect.bisect_right(dates, d)
+        pos = bisect.bisect_right(dates, date)
         if pos == 0:
             logger.debug(
                 "FX rate lookup: %s on %s: NOT FOUND (no earlier date available)",
@@ -131,23 +141,7 @@ class FxTable:
             )
             return None
 
-        fallback_date_str = dates[pos - 1]
-
-        # Freshness must be provable. An unparseable key means we cannot bound the
-        # staleness, so fail closed (report missing) rather than return an unverifiable
-        # rate. Such keys only arise from a malformed FX CSV (see finding #12).
-        try:
-            fallback_date = dt.date.fromisoformat(fallback_date_str)
-        except ValueError:
-            logger.warning(
-                "FX rate for %s on %s: nearest key %r is unparseable; treating as "
-                "missing.",
-                c,
-                date,
-                fallback_date_str,
-            )
-            return None
-
+        fallback_date = dates[pos - 1]
         days_back = (date - fallback_date).days
         if days_back > _MAX_FX_LOOKBACK_DAYS:
             # Past the cap the rate is too stale to trust; report it missing so the
@@ -163,7 +157,7 @@ class FxTable:
             )
             return None
 
-        rate = self.data[c][fallback_date_str]
+        rate = self.data[c][fallback_date]
         logger.info(
             "FX rate for %s on %s: using rate from %s (%d days earlier) = %s",
             c,

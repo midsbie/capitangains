@@ -89,13 +89,3 @@ def parse_date(d: str) -> dt.date:
     if "," in d:
         d = d.split(",")[0].strip()
     return dt.date.fromisoformat(d)
-
-
-def date_key(d: str | dt.date) -> str:
-    """Return YYYY-MM-DD string for a date."""
-    if isinstance(d, dt.date):
-        return d.isoformat()
-    # If it's 'YYYY-MM-DD, 09:30:00', strip time
-    if "," in d:
-        d = d.split(",")[0].strip()
-    return d

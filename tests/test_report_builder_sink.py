@@ -22,7 +22,7 @@ from capitangains.reporting.report_sink import ExcelReportSink, _gap_status
 def _make_fx(rates):
     table = FxTable()
     for (ccy, date), value in rates.items():
-        table.data[ccy][date] = value
+        table.data[ccy][dt.date.fromisoformat(date)] = value
     for ccy, m in table.data.items():
         table.date_index[ccy] = sorted(m.keys())
     return table
