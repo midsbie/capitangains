@@ -205,10 +205,10 @@ def parse_trades_stocklike(
             else:
                 skipped_rows += 1
 
-    # Sort by actual execution date/time for deterministic FIFO (buys before sells if
-    # same timestamp use quantity sign)
-    trades.sort(key=lambda tr: (tr.date, tr.datetime_str, tr.quantity <= 0))
-
+    # Intentionally unsorted: ordering is the pipeline's responsibility, not the
+    # extractor's. The CLI merges trades with transfers and sorts that combined stream
+    # by cli._event_sort_key -- the single source of ordering truth for FIFO -- with a
+    # key equivalent to the one this layer used to apply, so pre-sorting here was moot.
     if skipped_rows:
         logger.info(
             "Trades (scope=%r): skipped %d row(s) -- out-of-scope asset category "

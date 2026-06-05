@@ -74,3 +74,20 @@ def test_transfers_order_by_date_relative_to_trades():
     events.sort(key=_event_sort_key)
 
     assert events == [prior_xfer, day_trade, later_xfer]
+
+
+def test_trades_sort_by_date_across_days():
+    """Trades on different days sort ascending by date regardless of input order.
+
+    Migrated from the trades extractor, which no longer pre-sorts; _event_sort_key is
+    the single source of ordering truth. The same-date buy-before-sell tie-break and
+    intraday time ordering are covered by the two tests above.
+    """
+    jan = _trade("2024-01-10, 09:00:00", "50")
+    feb = _trade("2024-02-20, 12:00:00", "75")
+    mar = _trade("2024-03-15, 10:00:00", "100")
+
+    events = [mar, jan, feb]
+    events.sort(key=_event_sort_key)
+
+    assert events == [jan, feb, mar]

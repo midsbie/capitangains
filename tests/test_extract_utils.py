@@ -17,7 +17,7 @@ def _parse_rows(rows):
     return model
 
 
-def test_parse_trades_scope_and_ordering():
+def test_parse_trades_scope_and_field_parsing():
     rows = [
         [
             "Trades",
@@ -98,9 +98,13 @@ def test_parse_trades_scope_and_ordering():
     model = _parse_rows(rows)
 
     trades, _ = parse_trades_stocklike(model, asset_scope="stocks_etfs")
-    assert [t.symbol for t in trades] == ["BBB", "AAA", "CCC"]
-    assert trades[0].basis_ccy == Decimal("-1000")
-    assert trades[0].realized_pl_ccy == Decimal("5")
+    # Order-independent: the extractor no longer sorts (ordering is asserted at the
+    # event layer, in test_event_sort_key.py). Check membership, and locate BBB
+    # explicitly to verify its Basis / Realized P/L parsing rather than by position.
+    assert {t.symbol for t in trades} == {"AAA", "BBB", "CCC"}
+    bbb = next(t for t in trades if t.symbol == "BBB")
+    assert bbb.basis_ccy == Decimal("-1000")
+    assert bbb.realized_pl_ccy == Decimal("5")
 
     etf_only, _ = parse_trades_stocklike(model, asset_scope="etfs")
     assert [t.symbol for t in etf_only] == ["BBB"]
