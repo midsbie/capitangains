@@ -21,6 +21,162 @@ from .report_builder import ReportBuilder
 _REALIZED_TCY_MONEY_COLS = range(5, 10)  # Trade currency columns (gross..pl)
 _REALIZED_EUR_MONEY_COLS = range(10, 15)  # EUR columns (gross..pl)
 
+# Single canonical label table: one key set, with both locale strings co-located per
+# field, so a locale cannot silently diverge (a field cannot exist in one language
+# alone). _labels() projects the active locale; anything other than "EN" falls to "PT".
+_LABELS: dict[str, dict[str, dict[str, str]]] = {
+    "sheet": {
+        "summary": {"EN": "Trading Totals", "PT": "Totais de Operações"},
+        "realized": {"EN": "Realized Trades", "PT": "Operações Realizadas"},
+        "per_symbol": {"EN": "Per Symbol Summary", "PT": "Resumo por Símbolo"},
+        "dividends": {"EN": "Dividends", "PT": "Dividendos"},
+        "interest": {"EN": "Account Interest", "PT": "Juros da Conta"},
+        "withholding": {"EN": "Withholding Tax", "PT": "Retenção na Fonte"},
+        "transfers": {"EN": "Stock Transfers", "PT": "Transferências de Ações"},
+        "anexo_j": {
+            "EN": "Lot-Level EUR Breakdown",
+            "PT": "Operações por Lote (Anexo J)",
+        },
+        "syep_interest": {"EN": "SYEP Interest", "PT": "Juros SYEP"},
+    },
+    "summary": {
+        "metric": {"EN": "Metric", "PT": "Métrica"},
+        "amount": {"EN": "Amount", "PT": "Montante"},
+        "total_eur": {"EN": "Total Realized P/L (EUR)", "PT": "Total Realizado (EUR)"},
+        "proceeds_eur": {
+            "EN": "Total Net Proceeds (EUR)",
+            "PT": "Total Proveitos Líquidos (EUR)",
+        },
+        "alloc_eur": {
+            "EN": "Total Allocated Cost (EUR)",
+            "PT": "Total Custo Alocado (EUR)",
+        },
+        "total_cur_tpl": {
+            "EN": "Total Realized P/L ({cur})",
+            "PT": "Total Realizado ({cur})",
+        },
+    },
+    "realized": {
+        "ticker": {"EN": "Ticker", "PT": "Símbolo"},
+        "trade_currency": {"EN": "Trade Currency", "PT": "Moeda da Operação"},
+        "sell_date": {"EN": "Sell Date", "PT": "Data de Venda"},
+        "qty_sold": {"EN": "Quantity Sold", "PT": "Quantidade Vendida"},
+        "gross_tcy": {
+            "EN": "Gross Proceeds (Trade Currency)",
+            "PT": "Proveitos Brutos (Moeda)",
+        },
+        "fees_tcy": {
+            "EN": "Commissions/Fees (Trade Currency)",
+            "PT": "Comissões/Taxas (Moeda)",
+        },
+        "net_tcy": {
+            "EN": "Net Proceeds (Trade Currency)",
+            "PT": "Proveitos Líquidos (Moeda)",
+        },
+        "alloc_tcy": {
+            "EN": "Allocated Cost Basis (Trade Currency)",
+            "PT": "Custo Alocado (Moeda)",
+        },
+        "pl_tcy": {
+            "EN": "Realized P/L (Trade Currency)",
+            "PT": "Resultado Realizado (Moeda)",
+        },
+        "gross_eur": {"EN": "Gross Proceeds (EUR)", "PT": "Proveitos Brutos (EUR)"},
+        "fees_eur": {"EN": "Commissions/Fees (EUR)", "PT": "Comissões/Taxas (EUR)"},
+        "net_eur": {"EN": "Net Proceeds (EUR)", "PT": "Proveitos Líquidos (EUR)"},
+        "alloc_eur": {"EN": "Allocated Cost Basis (EUR)", "PT": "Custo Alocado (EUR)"},
+        "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Resultado Realizado (EUR)"},
+        "legs_json": {"EN": "Matched Buy Lots (JSON)", "PT": "Lotes de Compra (JSON)"},
+        "gap_status": {"EN": "Basis Status", "PT": "Estado do Custo"},
+    },
+    "anexo_j": {
+        "ticker": {"EN": "Ticker", "PT": "Símbolo"},
+        "trade_currency": {"EN": "Trade Currency", "PT": "Moeda da Operação"},
+        "buy_date": {"EN": "Acquisition Date", "PT": "Data de Aquisição"},
+        "sell_date": {"EN": "Disposal Date", "PT": "Data de Venda"},
+        "qty": {"EN": "Quantity", "PT": "Quantidade"},
+        "alloc_eur": {
+            "EN": "Acquisition Value (EUR)",
+            "PT": "Valor de Aquisição (EUR)",
+        },
+        "proceeds_eur": {
+            "EN": "Disposal Value (EUR)",
+            "PT": "Valor de Realização (EUR)",
+        },
+        "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Mais/menos\u2011valia (EUR)"},
+        "transferred": {"EN": "Transferred", "PT": "Transferido"},
+        "synthetic": {"EN": "Synthetic", "PT": "Sintético"},
+    },
+    "per_symbol": {
+        "ticker": {"EN": "Ticker", "PT": "Símbolo"},
+        "trade_currency": {"EN": "Trade Currency", "PT": "Moeda da Operação"},
+        "pl_tcy": {
+            "EN": "Realized P/L (Trade Currency)",
+            "PT": "Resultado Realizado (Moeda)",
+        },
+        "net_tcy": {
+            "EN": "Net Proceeds (Trade Currency)",
+            "PT": "Proveitos Líquidos (Moeda)",
+        },
+        "alloc_tcy": {
+            "EN": "Allocated Cost Basis (Trade Currency)",
+            "PT": "Custo Alocado (Moeda)",
+        },
+        "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Resultado Realizado (EUR)"},
+        "net_eur": {"EN": "Net Proceeds (EUR)", "PT": "Proveitos Líquidos (EUR)"},
+        "alloc_eur": {"EN": "Allocated Cost Basis (EUR)", "PT": "Custo Alocado (EUR)"},
+        "has_gap": {"EN": "Gap / Synthetic", "PT": "Lacuna / Sintético"},
+    },
+    "dividends": {
+        "date": {"EN": "Date", "PT": "Data"},
+        "currency": {"EN": "Currency", "PT": "Moeda"},
+        "desc": {"EN": "Description", "PT": "Descrição"},
+        "amount": {"EN": "Amount (Currency)", "PT": "Montante (Moeda)"},
+        "amount_eur": {"EN": "Amount (EUR)", "PT": "Montante (EUR)"},
+    },
+    "interest": {
+        "date": {"EN": "Date", "PT": "Data"},
+        "currency": {"EN": "Currency", "PT": "Moeda"},
+        "desc": {"EN": "Description", "PT": "Descrição"},
+        "amount": {"EN": "Amount (Currency)", "PT": "Montante (Moeda)"},
+        "amount_eur": {"EN": "Amount (EUR)", "PT": "Montante (EUR)"},
+    },
+    "withholding": {
+        "date": {"EN": "Date", "PT": "Data"},
+        "currency": {"EN": "Currency", "PT": "Moeda"},
+        "desc": {"EN": "Description", "PT": "Descrição"},
+        "type": {"EN": "Type", "PT": "Tipo"},
+        "country": {"EN": "Country", "PT": "País"},
+        "amount": {"EN": "Amount (Currency)", "PT": "Montante (Moeda)"},
+        "amount_eur": {"EN": "Amount (EUR)", "PT": "Montante (EUR)"},
+    },
+    "syep": {
+        "date": {"EN": "Value Date", "PT": "Data"},
+        "currency": {"EN": "Currency", "PT": "Moeda"},
+        "symbol": {"EN": "Symbol", "PT": "Símbolo"},
+        "start_date": {"EN": "Start Date", "PT": "Data de Início"},
+        "quantity": {"EN": "Quantity", "PT": "Quantidade"},
+        "collateral": {"EN": "Collateral Amount", "PT": "Valor de Colateral"},
+        "market_rate": {"EN": "Market Rate (%)", "PT": "Taxa de Mercado (%)"},
+        "customer_rate": {"EN": "Customer Rate (%)", "PT": "Taxa ao Cliente (%)"},
+        "interest_paid": {
+            "EN": "Interest Paid (Currency)",
+            "PT": "Juros Pagos (Moeda)",
+        },
+        "interest_paid_eur": {"EN": "Interest Paid (EUR)", "PT": "Juros Pagos (EUR)"},
+        "code": {"EN": "Code", "PT": "Código"},
+    },
+    "transfers": {
+        "date": {"EN": "Date", "PT": "Data"},
+        "symbol": {"EN": "Symbol", "PT": "Símbolo"},
+        "direction": {"EN": "Direction", "PT": "Direção"},
+        "quantity": {"EN": "Quantity", "PT": "Quantidade"},
+        "currency": {"EN": "Currency", "PT": "Moeda"},
+        "market_value": {"EN": "Market Value", "PT": "Valor de Mercado"},
+        "code": {"EN": "Code", "PT": "Código"},
+    },
+}
+
 
 def _gap_status(rl: RealizedLine) -> str:
     """Human-readable basis provenance for a realized line's status column.
@@ -52,222 +208,15 @@ class ExcelReportSink:
         return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
 
     def _labels(self) -> dict[str, dict[str, str]]:
-        loc = (self.locale or "PT").upper()
-        if loc == "EN":
-            return {
-                "sheet": {
-                    "summary": "Trading Totals",
-                    "realized": "Realized Trades",
-                    "per_symbol": "Per Symbol Summary",
-                    "dividends": "Dividends",
-                    "interest": "Account Interest",
-                    "withholding": "Withholding Tax",
-                    "transfers": "Stock Transfers",
-                    "anexo_j": "Lot-Level EUR Breakdown",
-                    "syep_interest": "SYEP Interest",
-                },
-                "summary": {
-                    "metric": "Metric",
-                    "amount": "Amount",
-                    "total_eur": "Total Realized P/L (EUR)",
-                    "proceeds_eur": "Total Net Proceeds (EUR)",
-                    "alloc_eur": "Total Allocated Cost (EUR)",
-                    "total_cur_tpl": "Total Realized P/L ({cur})",
-                },
-                "realized": {
-                    "ticker": "Ticker",
-                    "trade_currency": "Trade Currency",
-                    "sell_date": "Sell Date",
-                    "qty_sold": "Quantity Sold",
-                    "gross_tcy": "Gross Proceeds (Trade Currency)",
-                    "fees_tcy": "Commissions/Fees (Trade Currency)",
-                    "net_tcy": "Net Proceeds (Trade Currency)",
-                    "alloc_tcy": "Allocated Cost Basis (Trade Currency)",
-                    "pl_tcy": "Realized P/L (Trade Currency)",
-                    "gross_eur": "Gross Proceeds (EUR)",
-                    "fees_eur": "Commissions/Fees (EUR)",
-                    "net_eur": "Net Proceeds (EUR)",
-                    "alloc_eur": "Allocated Cost Basis (EUR)",
-                    "pl_eur": "Realized P/L (EUR)",
-                    "legs_json": "Matched Buy Lots (JSON)",
-                    "gap_status": "Basis Status",
-                },
-                "anexo_j": {
-                    "ticker": "Ticker",
-                    "trade_currency": "Trade Currency",
-                    "buy_date": "Acquisition Date",
-                    "sell_date": "Disposal Date",
-                    "qty": "Quantity",
-                    "alloc_eur": "Acquisition Value (EUR)",
-                    "proceeds_eur": "Disposal Value (EUR)",
-                    "pl_eur": "Realized P/L (EUR)",
-                    "transferred": "Transferred",
-                    "synthetic": "Synthetic",
-                },
-                "per_symbol": {
-                    "ticker": "Ticker",
-                    "trade_currency": "Trade Currency",
-                    "pl_tcy": "Realized P/L (Trade Currency)",
-                    "net_tcy": "Net Proceeds (Trade Currency)",
-                    "alloc_tcy": "Allocated Cost Basis (Trade Currency)",
-                    "pl_eur": "Realized P/L (EUR)",
-                    "net_eur": "Net Proceeds (EUR)",
-                    "alloc_eur": "Allocated Cost Basis (EUR)",
-                    "has_gap": "Gap / Synthetic",
-                },
-                "dividends": {
-                    "date": "Date",
-                    "currency": "Currency",
-                    "desc": "Description",
-                    "amount": "Amount (Currency)",
-                    "amount_eur": "Amount (EUR)",
-                },
-                "interest": {
-                    "date": "Date",
-                    "currency": "Currency",
-                    "desc": "Description",
-                    "amount": "Amount (Currency)",
-                    "amount_eur": "Amount (EUR)",
-                },
-                "withholding": {
-                    "date": "Date",
-                    "currency": "Currency",
-                    "desc": "Description",
-                    "type": "Type",
-                    "country": "Country",
-                    "amount": "Amount (Currency)",
-                    "amount_eur": "Amount (EUR)",
-                },
-                "syep": {
-                    "date": "Value Date",
-                    "currency": "Currency",
-                    "symbol": "Symbol",
-                    "start_date": "Start Date",
-                    "quantity": "Quantity",
-                    "collateral": "Collateral Amount",
-                    "market_rate": "Market Rate (%)",
-                    "customer_rate": "Customer Rate (%)",
-                    "interest_paid": "Interest Paid (Currency)",
-                    "interest_paid_eur": "Interest Paid (EUR)",
-                    "code": "Code",
-                },
-                "transfers": {
-                    "date": "Date",
-                    "symbol": "Symbol",
-                    "direction": "Direction",
-                    "quantity": "Quantity",
-                    "currency": "Currency",
-                    "market_value": "Market Value",
-                    "code": "Code",
-                },
-            }
-        # Default: Portuguese (Portugal)
+        """Project the canonical label table onto the active locale.
+
+        Returns a ``{section: {field: text}}`` view for the selected locale; any locale
+        other than "EN" falls back to "PT" (the report's default).
+        """
+        loc = "EN" if (self.locale or "PT").upper() == "EN" else "PT"
         return {
-            "sheet": {
-                "summary": "Totais de Operações",
-                "realized": "Operações Realizadas",
-                "per_symbol": "Resumo por Símbolo",
-                "dividends": "Dividendos",
-                "interest": "Juros da Conta",
-                "withholding": "Retenção na Fonte",
-                "transfers": "Transferências de Ações",
-                "anexo_j": "Operações por Lote (Anexo J)",
-                "syep_interest": "Juros SYEP",
-            },
-            "summary": {
-                "metric": "Métrica",
-                "amount": "Montante",
-                "total_eur": "Total Realizado (EUR)",
-                "proceeds_eur": "Total Proveitos Líquidos (EUR)",
-                "alloc_eur": "Total Custo Alocado (EUR)",
-                "total_cur_tpl": "Total Realizado ({cur})",
-            },
-            "realized": {
-                "ticker": "Símbolo",
-                "trade_currency": "Moeda da Operação",
-                "sell_date": "Data de Venda",
-                "qty_sold": "Quantidade Vendida",
-                "gross_tcy": "Proveitos Brutos (Moeda)",
-                "fees_tcy": "Comissões/Taxas (Moeda)",
-                "net_tcy": "Proveitos Líquidos (Moeda)",
-                "alloc_tcy": "Custo Alocado (Moeda)",
-                "pl_tcy": "Resultado Realizado (Moeda)",
-                "gross_eur": "Proveitos Brutos (EUR)",
-                "fees_eur": "Comissões/Taxas (EUR)",
-                "net_eur": "Proveitos Líquidos (EUR)",
-                "alloc_eur": "Custo Alocado (EUR)",
-                "pl_eur": "Resultado Realizado (EUR)",
-                "legs_json": "Lotes de Compra (JSON)",
-                "gap_status": "Estado do Custo",
-            },
-            "anexo_j": {
-                "ticker": "Símbolo",
-                "trade_currency": "Moeda da Operação",
-                "buy_date": "Data de Aquisição",
-                "sell_date": "Data de Venda",
-                "qty": "Quantidade",
-                "alloc_eur": "Valor de Aquisição (EUR)",
-                "proceeds_eur": "Valor de Realização (EUR)",
-                "pl_eur": "Mais/menos‑valia (EUR)",
-                "transferred": "Transferido",
-                "synthetic": "Sintético",
-            },
-            "per_symbol": {
-                "ticker": "Símbolo",
-                "trade_currency": "Moeda da Operação",
-                "pl_tcy": "Resultado Realizado (Moeda)",
-                "net_tcy": "Proveitos Líquidos (Moeda)",
-                "alloc_tcy": "Custo Alocado (Moeda)",
-                "pl_eur": "Resultado Realizado (EUR)",
-                "net_eur": "Proveitos Líquidos (EUR)",
-                "alloc_eur": "Custo Alocado (EUR)",
-                "has_gap": "Lacuna / Sintético",
-            },
-            "dividends": {
-                "date": "Data",
-                "currency": "Moeda",
-                "desc": "Descrição",
-                "amount": "Montante (Moeda)",
-                "amount_eur": "Montante (EUR)",
-            },
-            "interest": {
-                "date": "Data",
-                "currency": "Moeda",
-                "desc": "Descrição",
-                "amount": "Montante (Moeda)",
-                "amount_eur": "Montante (EUR)",
-            },
-            "withholding": {
-                "date": "Data",
-                "currency": "Moeda",
-                "desc": "Descrição",
-                "type": "Tipo",
-                "country": "País",
-                "amount": "Montante (Moeda)",
-                "amount_eur": "Montante (EUR)",
-            },
-            "syep": {
-                "date": "Data",
-                "currency": "Moeda",
-                "symbol": "Símbolo",
-                "start_date": "Data de Início",
-                "quantity": "Quantidade",
-                "collateral": "Valor de Colateral",
-                "market_rate": "Taxa de Mercado (%)",
-                "customer_rate": "Taxa ao Cliente (%)",
-                "interest_paid": "Juros Pagos (Moeda)",
-                "interest_paid_eur": "Juros Pagos (EUR)",
-                "code": "Código",
-            },
-            "transfers": {
-                "date": "Data",
-                "symbol": "Símbolo",
-                "direction": "Direção",
-                "quantity": "Quantidade",
-                "currency": "Moeda",
-                "market_value": "Valor de Mercado",
-                "code": "Código",
-            },
+            section: {field: trans[loc] for field, trans in fields.items()}
+            for section, fields in _LABELS.items()
         }
 
     def write(self, report: ReportBuilder) -> Path:
