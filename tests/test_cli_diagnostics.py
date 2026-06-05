@@ -263,6 +263,26 @@ def test_process_files_exits_2_when_fx_table_incomplete(tmp_path, caplog):
     assert any("Missing FX rate" in r.getMessage() for r in caplog.records)
 
 
+def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, caplog):
+    # A missing or unparseable --fx-table file is a setup failure, not a statement-data
+    # defect, so it halts with exit 1 -- a class apart from the curated gates' exit 2 --
+    # surfaced as one clean ERROR (explicit, not an emergent raw crash) and no workbook.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    _write_statement(stmt)  # USD: needs the FX table to convert
+    args = _args(stmt, out)
+    args.fx_table = str(tmp_path / "does_not_exist.csv")
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(args)
+
+    assert exc.value.code == 1
+    assert not out.exists()
+    assert any(
+        "Failed to prepare FX conversion" in r.getMessage() for r in caplog.records
+    )
+
+
 def test_process_files_exits_2_on_malformed_acknowledgment_spec(tmp_path, caplog):
     # A malformed spec must abort before any file is read (fail fast), with exit 2, no
     # workbook, and an ERROR naming the bad token.

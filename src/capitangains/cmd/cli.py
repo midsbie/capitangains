@@ -435,8 +435,13 @@ def process_files(args: argparse.Namespace) -> None:
         try:
             fx = FxTable.from_csv(args.fx_table)
         except Exception as e:
-            logger.exception("Failed to prepare FX conversion: %s", e)
-            raise
+            # A missing or unparseable FX table is a setup failure, not a defect in the
+            # statement data. It exits 1, a class apart from the curated gates' exit 2,
+            # and is surfaced as one clean ERROR rather than a raw crash.
+            logger.error(
+                "Failed to prepare FX conversion from %s: %s", args.fx_table, e
+            )
+            raise SystemExit(1) from e
 
     rb.convert_eur(fx)
     _report_missing_fx(rb.fx_missing, logger)
