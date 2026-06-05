@@ -7,8 +7,6 @@ and parse_trades_stocklike_row
 import datetime as dt
 from decimal import Decimal
 
-import pytest
-
 from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_trades_stocklike
 
@@ -57,7 +55,7 @@ def test_parse_basic_buy_trade():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     t = trades[0]
@@ -108,7 +106,7 @@ def test_parse_basic_sell_trade():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     t = trades[0]
@@ -153,7 +151,7 @@ def test_parse_trade_with_optional_basis_and_realized_pl():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     t = trades[0]
@@ -193,7 +191,7 @@ def test_parse_trade_without_optional_fields():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     assert trades[0].basis_ccy is None
@@ -261,7 +259,7 @@ def test_parse_multiple_trades_sorted_by_date():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 3
     # Should be sorted by date
@@ -320,7 +318,7 @@ def test_parse_same_date_buys_before_sells():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 2
     # Buy (positive qty) should come first
@@ -363,7 +361,7 @@ def test_parse_commission_from_comm_fee_column():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     assert trades[0].comm_fee == Decimal("-5.50")
@@ -401,7 +399,7 @@ def test_parse_commission_from_comm_in_eur_column():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     assert trades[0].comm_fee == Decimal("-3.25")
@@ -465,7 +463,7 @@ def test_parse_different_asset_categories_stocks():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     # Only "Stocks" and "Stock" should be included
     assert len(trades) == 2
@@ -544,7 +542,7 @@ def test_parse_scope_filtering_etfs():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="etfs")
+    trades, _ = parse_trades_stocklike(model, asset_scope="etfs")
 
     # Only ETF, ETFs, ETP should be included
     assert len(trades) == 3
@@ -588,8 +586,10 @@ def test_error_empty_t_price():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="empty string"):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert "empty string" in defects[0].reason
+    assert not trades  # the corrupt row is rejected, not extracted
 
 
 def test_parse_zero_quantity_filtered():
@@ -637,7 +637,7 @@ def test_parse_zero_quantity_filtered():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     # Zero quantity trade should be filtered
     assert len(trades) == 1
@@ -676,7 +676,7 @@ def test_parse_quantities_with_thousand_separators():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     assert trades[0].quantity == Decimal("1500")
@@ -715,7 +715,7 @@ def test_parse_proceeds_with_thousand_separators():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     assert trades[0].proceeds == Decimal("-50000.00")
@@ -768,7 +768,7 @@ def test_parse_datetime_with_different_formats():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 2
     assert trades[0].date == dt.date(2024, 1, 15)
@@ -837,14 +837,18 @@ def test_parse_multiple_subtables():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     # Should parse from both subtables
     assert len(trades) == 2
 
 
-def test_parse_empty_commission_defaults_to_zero():
-    """Test that empty commission field defaults to 0."""
+def test_parse_empty_commission_is_rejected():
+    """Empty Comm/Fee is now a data defect, not a silent zero (strict parse).
+
+    Commission feeds basis on buys and net proceeds on sells, so an elided value can no
+    longer default to 0 -- the row is rejected and surfaced as an ExtractionDefect.
+    """
     rows = [
         [
             "Trades",
@@ -875,10 +879,119 @@ def test_parse_empty_commission_defaults_to_zero():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
 
+    assert not trades  # the row with an elided commission is rejected
+    assert defects
+    assert "Comm/Fee" in defects[0].reason
+
+
+def test_parse_zero_commission_is_accepted():
+    """A commission-free trade reports '0', which the strict parse accepts with no
+    defect."""
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "USD",
+            "AAPL",
+            "2024-01-15, 10:00:00",
+            "100",
+            "150.00",
+            "-15000.00",
+            "0",  # Commission-free trade
+            "P",
+        ],
+    ]
+
+    model = _parse_rows(rows)
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert not defects
     assert len(trades) == 1
     assert trades[0].comm_fee == Decimal("0")
+
+
+def test_accumulates_multiple_defects_without_failing_fast():
+    """Two malformed rows yield two defects in one call -- no fail-fast on the first.
+
+    The valid row is still extracted; each bad row is rejected independently so the
+    operator sees every defect in a single run.
+    """
+    header = [
+        "Trades",
+        "Header",
+        "Asset Category",
+        "Currency",
+        "Symbol",
+        "Date/Time",
+        "Quantity",
+        "T. Price",
+        "Proceeds",
+        "Comm/Fee",
+        "Code",
+    ]
+    good = [
+        "Trades",
+        "Data",
+        "Stocks",
+        "USD",
+        "AAPL",
+        "2024-01-15, 10:00:00",
+        "100",
+        "150.00",
+        "-15000.00",
+        "-1.00",
+        "P",
+    ]
+    bad_qty = [
+        "Trades",
+        "Data",
+        "Stocks",
+        "USD",
+        "MSFT",
+        "2024-02-15, 10:00:00",
+        "",  # missing quantity
+        "150.00",
+        "-15000.00",
+        "-1.00",
+        "P",
+    ]
+    bad_proceeds = [
+        "Trades",
+        "Data",
+        "Stocks",
+        "USD",
+        "GOOGL",
+        "2024-03-15, 10:00:00",
+        "100",
+        "150.00",
+        "",  # missing proceeds
+        "-1.00",
+        "P",
+    ]
+
+    model = _parse_rows([header, good, bad_qty, bad_proceeds])
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert [t.symbol for t in trades] == ["AAPL"]  # only the valid row survives
+    assert len(defects) == 2  # both bad rows are reported, not just the first
+    assert {d.symbol for d in defects} == {"MSFT", "GOOGL"}
+    assert all(d.section == "Trades" for d in defects)
 
 
 def test_parse_trade_with_all_optional_fields():
@@ -917,7 +1030,7 @@ def test_parse_trade_with_all_optional_fields():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     t = trades[0]
@@ -965,8 +1078,10 @@ def test_error_missing_symbol():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing symbol"):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert "missing symbol" in defects[0].reason
+    assert not trades
 
 
 def test_error_missing_currency():
@@ -1001,8 +1116,10 @@ def test_error_missing_currency():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing currency"):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert "missing currency" in defects[0].reason
+    assert not trades
 
 
 def test_error_missing_datetime():
@@ -1037,9 +1154,10 @@ def test_error_missing_datetime():
     ]
 
     model = _parse_rows(rows)
-    # parse_date on empty string should raise
-    with pytest.raises(ValueError):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    # parse_date on an empty string makes the row a defect, not a fatal traceback
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert not trades
 
 
 def test_error_missing_quantity():
@@ -1074,9 +1192,10 @@ def test_error_missing_quantity():
     ]
 
     model = _parse_rows(rows)
-    # to_dec_strict on empty string should raise
-    with pytest.raises(ValueError):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    # to_dec_strict on an empty string makes the row a defect, not a fatal traceback
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert not trades
 
 
 def test_error_missing_proceeds():
@@ -1111,9 +1230,10 @@ def test_error_missing_proceeds():
     ]
 
     model = _parse_rows(rows)
-    # to_dec_strict on empty string should raise
-    with pytest.raises(ValueError):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    # to_dec_strict on an empty string makes the row a defect, not a fatal traceback
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert not trades
 
 
 def test_error_invalid_quantity_format():
@@ -1148,8 +1268,9 @@ def test_error_invalid_quantity_format():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError):
-        parse_trades_stocklike(model, asset_scope="stocks")
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+    assert defects
+    assert not trades
 
 
 def test_skip_subtable_missing_required_columns():
@@ -1210,7 +1331,7 @@ def test_skip_subtable_missing_required_columns():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     # Should only parse from valid subtable
     assert len(trades) == 1
@@ -1253,7 +1374,7 @@ def test_parse_elided_basis_and_realized_pl_treated_as_none():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     assert len(trades) == 1
     assert trades[0].basis_ccy is None
@@ -1318,7 +1439,7 @@ def test_filter_non_stock_asset_by_scope():
     ]
 
     model = _parse_rows(rows)
-    trades = parse_trades_stocklike(model, asset_scope="stocks")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks")
 
     # Only Stocks should be included
     assert len(trades) == 1

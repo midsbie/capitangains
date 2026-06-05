@@ -46,6 +46,7 @@ from capitangains.errors import DataQualityError
 from capitangains.logging import configure_logging
 from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
 from capitangains.reporting import (
+    ExtractionDefect,
     FifoMatcher,
     FxTable,
     ReportBuilder,
@@ -235,6 +236,36 @@ def _report_gap_acknowledgments(
             )
 
 
+def _report_extraction_defects(
+    defects: Sequence[ExtractionDefect], logger: logging.Logger
+) -> None:
+    """Abort if any extraction row was rejected, listing every defect first.
+
+    Each extractor accumulates its row-level data-quality defects instead of raising on
+    the first bad row, so the operator sees every problem in one pass (mirroring the FX
+    and gap-acknowledgment reports above). One ERROR per defect, a summary ERROR, then a
+    single SystemExit(2) -- no workbook written.
+    """
+    if not defects:
+        return
+
+    for d in defects:
+        logger.error(
+            "Row rejected in %s (symbol=%s, date=%s): %s",
+            d.section,
+            d.symbol or "n/a",
+            d.date or "n/a",
+            d.reason,
+        )
+
+    logger.error(
+        "Extraction rejected %d row(s); no workbook written. Correct the offending "
+        "row(s) above and rerun.",
+        len(defects),
+    )
+    raise SystemExit(2)
+
+
 def _report_missing_fx(
     missing: set[tuple[dt.date, str]], logger: logging.Logger
 ) -> None:
@@ -298,27 +329,42 @@ def process_files(args: argparse.Namespace) -> None:
     if parse_report.has_errors:
         raise SystemExit(2)
 
-    # Extraction and validation surface predictable input defects as DataQualityError;
-    # translate them to a clean exit-2 here rather than letting them escape as a raw
-    # traceback (exit 1). Consistent with the parse-error abort above.
+    # Each extractor accumulates its row-level data-quality defects rather than failing
+    # on the first bad row, so a single run surfaces every rejected row. Concatenate the
+    # six defect lists and halt once at the boundary (exit 2, no workbook) if any are
+    # present -- consistent with the parse-error abort above.
+    trades, trade_defects = parse_trades_stocklike(model, asset_scope="stocks_etfs")
+    transfers, transfer_defects = parse_transfers(model)
+    dividends, dividend_defects = parse_dividends(model)
+    withholding, withholding_defects = parse_withholding_tax(model)
+    syep_interest, syep_defects = parse_syep_interest_details(model)
+    interest, interest_defects = parse_interest(model)
+
+    _report_extraction_defects(
+        [
+            *trade_defects,
+            *transfer_defects,
+            *dividend_defects,
+            *withholding_defects,
+            *syep_defects,
+            *interest_defects,
+        ],
+        logger,
+    )
+
+    logger.info(
+        "Extracted: %d trades, %d dividends, %d withholding, %d interest, %d transfers",
+        len(trades),
+        len(dividends),
+        len(withholding),
+        len(interest),
+        len(transfers),
+    )
+
+    # Cross-row invariant (not per-row): raises one aggregated DataQualityError,
+    # translated to a clean exit 2 here. The per-row extraction defects above are
+    # already handled.
     try:
-        trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
-        transfers = parse_transfers(model)
-        dividends = parse_dividends(model)
-        withholding = parse_withholding_tax(model)
-        syep_interest = parse_syep_interest_details(model)
-        interest = parse_interest(model)
-
-        logger.info(
-            "Extracted: %d trades, %d dividends, %d withholding, %d interest, "
-            "%d transfers",
-            len(trades),
-            len(dividends),
-            len(withholding),
-            len(interest),
-            len(transfers),
-        )
-
         validate_symbol_currency_uniqueness(trades, transfers)
     except DataQualityError as e:
         logger.error("%s", e)
@@ -384,6 +430,7 @@ def process_files(args: argparse.Namespace) -> None:
         except Exception as e:
             logger.exception("Failed to prepare FX conversion: %s", e)
             raise
+
     rb.convert_eur(fx)
     _report_missing_fx(rb.fx_missing, logger)
 

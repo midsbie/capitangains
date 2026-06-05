@@ -97,15 +97,15 @@ def test_parse_trades_scope_and_ordering():
     ]
     model = _parse_rows(rows)
 
-    trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
+    trades, _ = parse_trades_stocklike(model, asset_scope="stocks_etfs")
     assert [t.symbol for t in trades] == ["BBB", "AAA", "CCC"]
     assert trades[0].basis_ccy == Decimal("-1000")
     assert trades[0].realized_pl_ccy == Decimal("5")
 
-    etf_only = parse_trades_stocklike(model, asset_scope="etfs")
+    etf_only, _ = parse_trades_stocklike(model, asset_scope="etfs")
     assert [t.symbol for t in etf_only] == ["BBB"]
 
-    all_assets = parse_trades_stocklike(model, asset_scope="all")
+    all_assets, _ = parse_trades_stocklike(model, asset_scope="all")
     assert len(all_assets) == 3
 
 
@@ -144,7 +144,7 @@ def test_parse_dividends_and_withholding_classification():
     ]
     model = _parse_rows(rows)
 
-    dividends = parse_dividends(model)
+    dividends, _ = parse_dividends(model)
     assert len(dividends) == 1
     drow = dividends[0]
     assert drow.currency == "USD"
@@ -152,7 +152,7 @@ def test_parse_dividends_and_withholding_classification():
     assert drow.description == "Test Div"
     assert drow.amount == Decimal("10.00")
 
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
     assert withholding[0].type == "Dividend"
     assert withholding[0].country == "US"
     assert withholding[1].type == "Interest"
@@ -205,7 +205,7 @@ def test_parse_syep_interest_skips_totals_and_coerces_numbers():
     ]
     model = _parse_rows(rows)
 
-    result = parse_syep_interest_details(model)
+    result, _ = parse_syep_interest_details(model)
     assert len(result) == 1
     row = result[0]
     assert row.quantity == Decimal("-100")
@@ -221,6 +221,6 @@ def test_parse_interest_skips_totals():
     ]
     model = _parse_rows(rows)
 
-    interest = parse_interest(model)
+    interest, _ = parse_interest(model)
     assert len(interest) == 1
     assert interest[0].amount == Decimal("1.23")

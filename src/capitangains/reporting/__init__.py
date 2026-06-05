@@ -1,4 +1,5 @@
 from .extract import (
+    ExtractionDefect,
     TradeRow,
     TransferRow,
     parse_dividends,
@@ -19,6 +20,7 @@ from .report_builder import ReportBuilder
 from .report_sink import ExcelReportSink, OdsReportSink, ReportSink
 
 __all__ = [
+    "ExtractionDefect",
     "TradeRow",
     "TransferRow",
     "parse_trades_stocklike",

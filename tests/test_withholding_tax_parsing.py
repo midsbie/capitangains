@@ -6,8 +6,6 @@ Test coverage for src/capitangains/reporting/extract.py::parse_withholding_tax
 import datetime as dt
 from decimal import Decimal
 
-import pytest
-
 from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_withholding_tax
 
@@ -48,7 +46,7 @@ def test_parse_dividend_withholding_with_country():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     w = withholding[0]
@@ -85,7 +83,7 @@ def test_parse_interest_withholding_with_country():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     w = withholding[0]
@@ -117,7 +115,7 @@ def test_parse_generic_dividend_withholding():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     w = withholding[0]
@@ -149,7 +147,7 @@ def test_parse_with_code_field_present():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].code == "W"
@@ -182,7 +180,7 @@ def test_type_classification_credit_interest():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].type == "Interest"
@@ -210,7 +208,7 @@ def test_type_classification_interest_without_dividend():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].type == "Interest"
@@ -238,7 +236,7 @@ def test_type_classification_cash_dividend():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].type == "Dividend"
@@ -266,7 +264,7 @@ def test_type_classification_payment_in_lieu():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].type == "Dividend"
@@ -294,7 +292,7 @@ def test_type_classification_empty_for_unrecognized():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].type == "Unknown"  # No recognized keywords
@@ -342,7 +340,7 @@ def test_type_classification_compound_terms():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 3
     # Both compound terms should be classified as Dividend
@@ -379,7 +377,7 @@ def test_country_extraction_us():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].country == "US"
@@ -407,7 +405,7 @@ def test_country_extraction_nl():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].country == "NL"
@@ -435,7 +433,7 @@ def test_country_extraction_no_match():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].country == ""
@@ -476,7 +474,7 @@ def test_skip_rows_with_empty_currency():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     # Only the first row should be parsed
     assert len(withholding) == 1
@@ -513,7 +511,7 @@ def test_skip_rows_with_empty_date():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].date == dt.date(2024, 1, 15)
@@ -549,7 +547,7 @@ def test_skip_rows_with_empty_description():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].description != ""
@@ -577,7 +575,7 @@ def test_parse_without_code_column():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].code == ""  # Defaults to empty string
@@ -605,7 +603,7 @@ def test_parse_amounts_with_thousand_separators():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
     assert withholding[0].amount == Decimal("-1250.50")
@@ -653,7 +651,7 @@ def test_parse_multiple_withholding_entries():
     ]
 
     model = _parse_rows(rows)
-    withholding = parse_withholding_tax(model)
+    withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 3
     assert withholding[0].currency == "USD"
@@ -688,8 +686,9 @@ def test_error_invalid_amount():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError):
-        parse_withholding_tax(model)
+    withholding, defects = parse_withholding_tax(model)
+    assert defects
+    assert not withholding
 
 
 def test_error_empty_amount():
@@ -714,5 +713,7 @@ def test_error_empty_amount():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="empty string"):
-        parse_withholding_tax(model)
+    withholding, defects = parse_withholding_tax(model)
+    assert defects
+    assert "empty string" in defects[0].reason
+    assert not withholding

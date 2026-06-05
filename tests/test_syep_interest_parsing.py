@@ -6,8 +6,6 @@ Test coverage for src/capitangains/reporting/extract.py::parse_syep_interest_det
 import datetime as dt
 from decimal import Decimal
 
-import pytest
-
 from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_syep_interest_details
 
@@ -58,7 +56,7 @@ def test_parse_complete_syep_row():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 1
     s = syep[0]
@@ -122,7 +120,7 @@ def test_parse_multiple_syep_rows():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 2
     assert syep[0].symbol == "AAPL"
@@ -163,7 +161,7 @@ def test_parse_optional_value_date_empty():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 1
     assert syep[0].value_date is None
@@ -203,7 +201,7 @@ def test_parse_optional_start_date_empty():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 1
     assert syep[0].start_date is None
@@ -243,7 +241,7 @@ def test_parse_percentage_fields_as_decimal():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 1
     # Percentages stored as-is (not divided by 100)
@@ -304,7 +302,7 @@ def test_skip_total_rows_no_currency():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     # Total row should be skipped
     assert len(syep) == 1
@@ -359,7 +357,7 @@ def test_skip_total_in_eur_rows():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     # Total in EUR row should be skipped
     assert len(syep) == 1
@@ -404,8 +402,10 @@ def test_error_missing_quantity():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing numeric fields"):
-        parse_syep_interest_details(model)
+    syep, defects = parse_syep_interest_details(model)
+    assert defects
+    assert "missing numeric fields" in defects[0].reason
+    assert not syep
 
 
 def test_error_missing_collateral_amount():
@@ -442,8 +442,10 @@ def test_error_missing_collateral_amount():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing numeric fields"):
-        parse_syep_interest_details(model)
+    syep, defects = parse_syep_interest_details(model)
+    assert defects
+    assert "missing numeric fields" in defects[0].reason
+    assert not syep
 
 
 def test_error_missing_market_rate():
@@ -480,8 +482,10 @@ def test_error_missing_market_rate():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing numeric fields"):
-        parse_syep_interest_details(model)
+    syep, defects = parse_syep_interest_details(model)
+    assert defects
+    assert "missing numeric fields" in defects[0].reason
+    assert not syep
 
 
 def test_error_missing_customer_rate():
@@ -518,8 +522,10 @@ def test_error_missing_customer_rate():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing numeric fields"):
-        parse_syep_interest_details(model)
+    syep, defects = parse_syep_interest_details(model)
+    assert defects
+    assert "missing numeric fields" in defects[0].reason
+    assert not syep
 
 
 def test_error_missing_interest_paid():
@@ -556,8 +562,10 @@ def test_error_missing_interest_paid():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="missing numeric fields"):
-        parse_syep_interest_details(model)
+    syep, defects = parse_syep_interest_details(model)
+    assert defects
+    assert "missing numeric fields" in defects[0].reason
+    assert not syep
 
 
 def test_parse_numeric_fields_with_thousand_separators():
@@ -594,7 +602,7 @@ def test_parse_numeric_fields_with_thousand_separators():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 1
     assert syep[0].quantity == Decimal("10000")
@@ -636,7 +644,7 @@ def test_parse_decimal_percentages():
     ]
 
     model = _parse_rows(rows)
-    syep = parse_syep_interest_details(model)
+    syep, _ = parse_syep_interest_details(model)
 
     assert len(syep) == 1
     assert syep[0].market_rate_pct == Decimal("5.123456")

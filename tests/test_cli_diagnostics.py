@@ -330,6 +330,32 @@ def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
     assert any("Amount" in r.getMessage() for r in caplog.records)
 
 
+def test_process_files_lists_every_extraction_defect(tmp_path, caplog):
+    # Accumulate, do not fail fast: a malformed trade row AND a malformed dividend row
+    # in the same statement are BOTH reported in one run, then a single exit 2 with no
+    # workbook -- so the operator fixes every defect in one pass, not one-per-rerun.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    rows = [
+        _TRADES_HEADER,
+        _trade("AAPL", "USD", date=""),  # bad trade: blank Date/Time
+        ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
+        ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("Trades" in m and "Date/Time" in m for m in messages)
+    assert any("Dividends" in m and "Amount" in m for m in messages)
+    assert any("rejected 2 row(s)" in m for m in messages)
+
+
 def test_process_files_exits_2_on_unacknowledged_gap(tmp_path, caplog):
     # A real SELL gap left unacknowledged (no spec) is fatal: a known taxable disposal
     # must never be silently valued at zero cost.

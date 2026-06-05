@@ -75,7 +75,7 @@ def test_syep_interest_parsing_excludes_totals():
     ]
     parser = IbkrStatementCsvParser()
     model, _ = parser.parse_rows(rows)
-    parsed = parse_syep_interest_details(model)
+    parsed, _ = parse_syep_interest_details(model)
     assert len(parsed) == 1
     r = parsed[0]
     assert r.currency == "USD"
@@ -99,7 +99,7 @@ def test_interest_parsing_excludes_totals():
         ["Interest", "Data", "Total in EUR", "", "", "1479.06"],
     ]
     model, _ = IbkrStatementCsvParser().parse_rows(rows)
-    parsed = parse_interest(model)
+    parsed, _ = parse_interest(model)
     assert len(parsed) == 1
     assert parsed[0].currency == "EUR"
     assert parsed[0].amount == Decimal("139.06")

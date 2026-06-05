@@ -6,8 +6,6 @@ Test coverage for src/capitangains/reporting/extract.py::parse_transfers
 import datetime as dt
 from decimal import Decimal
 
-import pytest
-
 from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_transfers
 
@@ -66,7 +64,7 @@ def test_parse_basic_incoming_transfer():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
     t = transfers[0]
@@ -111,7 +109,7 @@ def test_parse_outgoing_transfer():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
     t = transfers[0]
@@ -151,7 +149,7 @@ def test_parse_outgoing_transfer_without_market_value():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
     t = transfers[0]
@@ -216,7 +214,7 @@ def test_parse_multiple_transfers_sorted_by_date():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 3
     # Should be sorted by date
@@ -258,7 +256,7 @@ def test_parse_quantity_with_commas():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
     assert transfers[0].quantity == Decimal("2500")
@@ -343,7 +341,7 @@ def test_parse_different_asset_categories():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 5
     assert transfers[0].asset_category == "Stocks"
@@ -419,7 +417,7 @@ def test_parse_case_insensitive_direction():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 4
     assert all(t.direction in ["IN", "in", "OUT", "out"] for t in transfers)
@@ -455,7 +453,7 @@ def test_parse_with_quantity_column_alternative():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
     assert transfers[0].quantity == Decimal("100")
@@ -491,7 +489,7 @@ def test_parse_with_cost_basis_column():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
     assert transfers[0].market_value == Decimal("7500.00")
@@ -568,7 +566,7 @@ def test_skip_non_stock_asset_categories():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     # Only the Stocks transfer should be included
     assert len(transfers) == 1
@@ -608,7 +606,7 @@ def test_skip_total_rows():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     # Total rows should be skipped
     assert len(transfers) == 1
@@ -650,8 +648,10 @@ def test_error_missing_symbol():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Invalid transfer row: missing" in defects[0].reason
+    assert not transfers
 
 
 def test_error_missing_currency():
@@ -684,8 +684,10 @@ def test_error_missing_currency():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Invalid transfer row: missing" in defects[0].reason
+    assert not transfers
 
 
 def test_error_missing_date():
@@ -718,8 +720,10 @@ def test_error_missing_date():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Invalid transfer row: missing" in defects[0].reason
+    assert not transfers
 
 
 def test_error_missing_direction():
@@ -752,8 +756,10 @@ def test_error_missing_direction():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Invalid transfer row: missing" in defects[0].reason
+    assert not transfers
 
 
 def test_error_missing_quantity():
@@ -786,8 +792,10 @@ def test_error_missing_quantity():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Invalid transfer row: missing"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Invalid transfer row: missing" in defects[0].reason
+    assert not transfers
 
 
 def test_error_invalid_direction():
@@ -820,8 +828,10 @@ def test_error_invalid_direction():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Unsupported transfer direction"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Unsupported transfer direction" in defects[0].reason
+    assert not transfers
 
 
 def test_error_zero_quantity():
@@ -854,8 +864,10 @@ def test_error_zero_quantity():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Transfer quantity must be positive"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Transfer quantity must be positive" in defects[0].reason
+    assert not transfers
 
 
 def test_error_negative_quantity():
@@ -888,8 +900,10 @@ def test_error_negative_quantity():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Transfer quantity must be positive"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "Transfer quantity must be positive" in defects[0].reason
+    assert not transfers
 
 
 def test_error_incoming_transfer_missing_market_value():
@@ -922,8 +936,10 @@ def test_error_incoming_transfer_missing_market_value():
     ]
 
     model = _parse_rows(rows)
-    with pytest.raises(ValueError, match="Transfer IN.*is missing Market Value"):
-        parse_transfers(model)
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert "is missing Market Value" in defects[0].reason
+    assert not transfers
 
 
 def test_error_incoming_transfer_invalid_market_value():
@@ -956,9 +972,10 @@ def test_error_incoming_transfer_invalid_market_value():
     ]
 
     model = _parse_rows(rows)
-    # Should raise ValueError when trying to parse "--" as decimal
-    with pytest.raises(ValueError):
-        parse_transfers(model)
+    # "--" market value on an IN transfer is rejected as a defect, not silently zeroed
+    transfers, defects = parse_transfers(model)
+    assert defects
+    assert not transfers
 
 
 # =============================================================================
@@ -1152,7 +1169,7 @@ def test_parse_real_world_data():
     ]
 
     model = _parse_rows(rows)
-    transfers = parse_transfers(model)
+    transfers, _ = parse_transfers(model)
 
     # Should parse 5 stock transfers and skip 4 "Total" rows
     assert len(transfers) == 5

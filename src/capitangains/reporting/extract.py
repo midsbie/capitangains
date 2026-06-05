@@ -69,6 +69,25 @@ def _require_date(label: str, field: str, value: str) -> dt.date:
         raise DataQualityError(f"Invalid {label}: bad {field} {value!r} ({e})") from e
 
 
+@dataclass(frozen=True)
+class ExtractionDefect:
+    """One rejected extraction row, accumulated for a single boundary report.
+
+    The extractors collect these instead of raising on the first bad row, so the
+    operator sees every defect in one pass (the CLI logs each, then exits 2 -- mirroring
+    the FX and gap-acknowledgment reports). Identity is the semantic locator (section,
+    symbol, date), read from the row dict at the catch site so it survives even when one
+    of those fields is itself the malformed value. ``reason`` is the DataQualityError
+    text, which already names the first offending field and its bad value; the catch is
+    per-row, so no separate field locator is needed.
+    """
+
+    section: str
+    symbol: str | None
+    date: str | None
+    reason: str
+
+
 TRADE_COLS = [
     "DataDiscriminator",
     "Asset Category",
@@ -191,15 +210,16 @@ def parse_trades_stocklike_row(
 
     t_price_s = r.get("T. Price", "").strip()
 
-    # Commission column can be 'Comm/Fee' in stock trades; 'Comm in EUR' appears in some
-    # Forex tables.
-    comm_s = ""
-    if "Comm/Fee" in r:
-        comm_s = r.get("Comm/Fee", "").strip()
-    elif "Comm in EUR" in r:
-        # Some subtables only have Comm in EUR (e.g., Forex); we don't use them here,
-        # but keep consistent type.
-        comm_s = r.get("Comm in EUR", "").strip()
+    # Commission is 'Comm/Fee' in stock trades; 'Comm in EUR' appears in some Forex
+    # tables. Track which label was resolved so a strict-parse failure names it. It is
+    # parsed strictly below (like Basis/Realized, which map elision to None): commission
+    # feeds basis on buys and net proceeds on sells, so a silently-zeroed placeholder
+    # ('...', '--', '') would bias the filed gain. A commission-free trade reports '0',
+    # which to_dec_strict parses fine.
+    comm_col = (
+        "Comm in EUR" if ("Comm in EUR" in r and "Comm/Fee" not in r) else "Comm/Fee"
+    )
+    comm_s = r.get(comm_col, "").strip()
 
     # Placeholders like "..." must map to None (missing), not Decimal("0"), because
     # downstream gap synthesis treats 0 as a real value and would falsely mark gaps
@@ -224,7 +244,7 @@ def parse_trades_stocklike_row(
         quantity=_require_decimal("trade row", "Quantity", qty_s),
         t_price=_require_decimal("trade row", "T. Price", t_price_s),
         proceeds=_require_decimal("trade row", "Proceeds", proceeds_s),
-        comm_fee=to_dec(comm_s),
+        comm_fee=_require_decimal("trade row", comm_col, comm_s),
         code=code,
         basis_ccy=basis_opt,
         realized_pl_ccy=realized_opt,
@@ -236,12 +256,16 @@ def parse_trades_stocklike_row(
 
 def parse_trades_stocklike(
     model: IbkrModel, asset_scope: str = "stocks"
-) -> list[TradeRow]:
+) -> tuple[list[TradeRow], list[ExtractionDefect]]:
     """Extract stock-like trades from 'Trades' section across header variants.
     asset_scope: 'stocks', 'etfs', 'stocks_etfs', 'all'
+
+    Returns the extracted rows and a list of row-level defects (empty on clean input);
+    the caller halts at the boundary if any defect is present.
     """
     scope_set = ALL_SCOPES_SET[asset_scope]
     trades: list[TradeRow] = []
+    defects: list[ExtractionDefect] = []
     skipped_rows = 0
 
     for sub in model.get_subtables("Trades"):
@@ -282,7 +306,22 @@ def parse_trades_stocklike(
             )
 
         for r in rows:
-            trade = parse_trades_stocklike_row(scope_set, r, col)
+            # Per-row granularity: the _require_* helpers raise on the first bad field,
+            # so a defect names that field; multi-defect rows are rare. The benign None
+            # return (out-of-scope / zero-qty) is unchanged -- only a defect is caught.
+            try:
+                trade = parse_trades_stocklike_row(scope_set, r, col)
+            except DataQualityError as e:
+                defects.append(
+                    ExtractionDefect(
+                        "Trades",
+                        r.get("Symbol", "").strip() or None,
+                        r.get("Date/Time", "").strip() or None,
+                        str(e),
+                    )
+                )
+                continue
+
             if trade is not None:
                 trades.append(trade)
             else:
@@ -320,11 +359,14 @@ def parse_trades_stocklike(
             sells,
         )
 
-    return trades
+    return trades, defects
 
 
-def parse_dividends(model: IbkrModel) -> list[DividendRow]:
+def parse_dividends(
+    model: IbkrModel,
+) -> tuple[list[DividendRow], list[ExtractionDefect]]:
     out: list[DividendRow] = []
+    defects: list[ExtractionDefect] = []
     skipped_incomplete = 0
     for r in model.iter_rows("Dividends"):
         # Header: Currency,Date,Description,Amount
@@ -336,15 +378,18 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
             skipped_incomplete += 1
             continue
 
-        amt = _require_decimal("dividend row", "Amount", amount_s)
-        out.append(
-            DividendRow(
-                currency=cur,
-                date=_require_date("dividend row", "Date", date_s),
-                description=desc,
-                amount=amt,
+        try:
+            amt = _require_decimal("dividend row", "Amount", amount_s)
+            out.append(
+                DividendRow(
+                    currency=cur,
+                    date=_require_date("dividend row", "Date", date_s),
+                    description=desc,
+                    amount=amt,
+                )
             )
-        )
+        except DataQualityError as e:
+            defects.append(ExtractionDefect("Dividends", None, date_s or None, str(e)))
 
     if skipped_incomplete:
         logger.info(
@@ -354,11 +399,14 @@ def parse_dividends(model: IbkrModel) -> list[DividendRow]:
         )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d dividend entries", len(out))
-    return out
+    return out, defects
 
 
-def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
+def parse_withholding_tax(
+    model: IbkrModel,
+) -> tuple[list[WithholdingRow], list[ExtractionDefect]]:
     out: list[WithholdingRow] = []
+    defects: list[ExtractionDefect] = []
     skipped_incomplete = 0
     for r in model.iter_rows("Withholding Tax"):
         cur = r.get("Currency", "").strip()
@@ -371,45 +419,50 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
             skipped_incomplete += 1
             continue
 
-        amt = _require_decimal("withholding tax row", "Amount", amount_s)
-        dlow = desc.lower()
-        # Classify withholding tax type with explicit precedence
-        # Most specific patterns first, then generic fallbacks
-        if "credit interest" in dlow:
-            wtype = "Interest"
-        elif "dividend" in dlow:
-            # Catches "cash dividend", "payment in lieu of dividend", "interest
-            # dividend", etc.; dividend takes precedence
-            wtype = "Dividend"
-        elif "interest" in dlow:
-            # Generic interest (not dividend-related, already caught above)
-            wtype = "Interest"
-        else:
-            # Unknown/other
-            logger.warning(
-                "Unrecognized withholding tax description: %r. "
-                "Classifying as 'Unknown'. Please verify data integrity.",
-                desc,
-            )
-            wtype = "Unknown"
+        try:
+            amt = _require_decimal("withholding tax row", "Amount", amount_s)
+            dlow = desc.lower()
+            # Classify withholding tax type with explicit precedence
+            # Most specific patterns first, then generic fallbacks
+            if "credit interest" in dlow:
+                wtype = "Interest"
+            elif "dividend" in dlow:
+                # Catches "cash dividend", "payment in lieu of dividend", "interest
+                # dividend", etc.; dividend takes precedence
+                wtype = "Dividend"
+            elif "interest" in dlow:
+                # Generic interest (not dividend-related, already caught above)
+                wtype = "Interest"
+            else:
+                # Unknown/other
+                logger.warning(
+                    "Unrecognized withholding tax description: %r. "
+                    "Classifying as 'Unknown'. Please verify data integrity.",
+                    desc,
+                )
+                wtype = "Unknown"
 
-        # Extract country from suffix like " - US Tax" or " - NL Tax"
-        country = ""
-        m = re.search(r"-\s+([A-Z]{2})\s+Tax\b", desc)
-        if m:
-            country = m.group(1)
+            # Extract country from suffix like " - US Tax" or " - NL Tax"
+            country = ""
+            m = re.search(r"-\s+([A-Z]{2})\s+Tax\b", desc)
+            if m:
+                country = m.group(1)
 
-        out.append(
-            WithholdingRow(
-                currency=cur,
-                date=_require_date("withholding tax row", "Date", date_s),
-                description=desc,
-                amount=amt,
-                code=code,
-                type=wtype,
-                country=country,
+            out.append(
+                WithholdingRow(
+                    currency=cur,
+                    date=_require_date("withholding tax row", "Date", date_s),
+                    description=desc,
+                    amount=amt,
+                    code=code,
+                    type=wtype,
+                    country=country,
+                )
             )
-        )
+        except DataQualityError as e:
+            defects.append(
+                ExtractionDefect("Withholding Tax", None, date_s or None, str(e))
+            )
 
     if skipped_incomplete:
         logger.info(
@@ -425,10 +478,12 @@ def parse_withholding_tax(model: IbkrModel) -> list[WithholdingRow]:
             len(out),
             summary or "none",
         )
-    return out
+    return out, defects
 
 
-def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
+def parse_syep_interest_details(
+    model: IbkrModel,
+) -> tuple[list[SyepInterestRow], list[ExtractionDefect]]:
     """Parse 'Stock Yield Enhancement Program Securities Lent Interest Details'.
 
     Expected header:
@@ -437,6 +492,7 @@ def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
       Interest Paid to Customer, Code
     """
     out: list[SyepInterestRow] = []
+    defects: list[ExtractionDefect] = []
     section = "Stock Yield Enhancement Program Securities Lent Interest Details"
     for r in model.iter_rows(section):
         cur = r.get("Currency", "").strip()
@@ -454,54 +510,65 @@ def parse_syep_interest_details(model: IbkrModel) -> list[SyepInterestRow]:
         if _is_total_or_empty(cur):
             continue
 
-        if not (qty_s and collat_s and mkt_rate_s and cust_rate_s and paid_s):
-            raise DataQualityError(
-                f"Invalid SYEP interest row (missing numeric fields): {r}"
+        try:
+            if not (qty_s and collat_s and mkt_rate_s and cust_rate_s and paid_s):
+                raise DataQualityError(
+                    f"Invalid SYEP interest row (missing numeric fields): {r}"
+                )
+
+            quantity = _require_decimal("SYEP interest row", "Quantity", qty_s)
+            collateral_amount = _require_decimal(
+                "SYEP interest row", "Collateral Amount", collat_s
+            )
+            market_rate_pct = _require_decimal(
+                "SYEP interest row", "Market-based Rate (%)", mkt_rate_s
+            )
+            customer_rate_pct = _require_decimal(
+                "SYEP interest row",
+                "Interest Rate on Customer Collateral (%)",
+                cust_rate_s,
+            )
+            interest_paid = _require_decimal(
+                "SYEP interest row", "Interest Paid to Customer", paid_s
             )
 
-        quantity = _require_decimal("SYEP interest row", "Quantity", qty_s)
-        collateral_amount = _require_decimal(
-            "SYEP interest row", "Collateral Amount", collat_s
-        )
-        market_rate_pct = _require_decimal(
-            "SYEP interest row", "Market-based Rate (%)", mkt_rate_s
-        )
-        customer_rate_pct = _require_decimal(
-            "SYEP interest row", "Interest Rate on Customer Collateral (%)", cust_rate_s
-        )
-        interest_paid = _require_decimal(
-            "SYEP interest row", "Interest Paid to Customer", paid_s
-        )
-
-        out.append(
-            SyepInterestRow(
-                currency=cur,
-                value_date=(
-                    _require_date("SYEP interest row", "Value Date", value_date_s)
-                    if value_date_s
-                    else None
-                ),
-                symbol=sym,
-                start_date=(
-                    _require_date("SYEP interest row", "Start Date", start_date_s)
-                    if start_date_s
-                    else None
-                ),
-                quantity=quantity,
-                collateral_amount=collateral_amount,
-                market_rate_pct=market_rate_pct,
-                customer_rate_pct=customer_rate_pct,
-                interest_paid=interest_paid,
-                code=code,
+            out.append(
+                SyepInterestRow(
+                    currency=cur,
+                    value_date=(
+                        _require_date("SYEP interest row", "Value Date", value_date_s)
+                        if value_date_s
+                        else None
+                    ),
+                    symbol=sym,
+                    start_date=(
+                        _require_date("SYEP interest row", "Start Date", start_date_s)
+                        if start_date_s
+                        else None
+                    ),
+                    quantity=quantity,
+                    collateral_amount=collateral_amount,
+                    market_rate_pct=market_rate_pct,
+                    customer_rate_pct=customer_rate_pct,
+                    interest_paid=interest_paid,
+                    code=code,
+                )
             )
-        )
+        except DataQualityError as e:
+            defects.append(
+                ExtractionDefect(
+                    "SYEP Interest", sym or None, value_date_s or None, str(e)
+                )
+            )
 
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d SYEP interest entries", len(out))
-    return out
+    return out, defects
 
 
-def parse_interest(model: IbkrModel) -> list[InterestRow]:
+def parse_interest(
+    model: IbkrModel,
+) -> tuple[list[InterestRow], list[ExtractionDefect]]:
     """Parse 'Interest' section: credit/debit interest and monthly SYEP interest
     summaries.
 
@@ -511,6 +578,7 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
 
     """
     out: list[InterestRow] = []
+    defects: list[ExtractionDefect] = []
     skipped_incomplete = 0
     for r in model.iter_rows("Interest"):
         cur = r.get("Currency", "").strip()
@@ -522,15 +590,20 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
         # If we ever decide a partial interest row is an invariant violation, the
         # correct response would be to raise here, not to skip-and-count.
         if _is_data_row(cur, date_s, desc):
-            amt = _require_decimal("interest row", "Amount", amount_s)
-            out.append(
-                InterestRow(
-                    currency=cur,
-                    date=_require_date("interest row", "Date", date_s),
-                    description=desc,
-                    amount=amt,
+            try:
+                amt = _require_decimal("interest row", "Amount", amount_s)
+                out.append(
+                    InterestRow(
+                        currency=cur,
+                        date=_require_date("interest row", "Date", date_s),
+                        description=desc,
+                        amount=amt,
+                    )
                 )
-            )
+            except DataQualityError as e:
+                defects.append(
+                    ExtractionDefect("Interest", None, date_s or None, str(e))
+                )
         else:
             skipped_incomplete += 1
 
@@ -541,10 +614,12 @@ def parse_interest(model: IbkrModel) -> list[InterestRow]:
         )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d interest entries", len(out))
-    return out
+    return out, defects
 
 
-def parse_transfers(model: IbkrModel) -> list[TransferRow]:
+def parse_transfers(
+    model: IbkrModel,
+) -> tuple[list[TransferRow], list[ExtractionDefect]]:
     """Extract stock transfers from IBKR 'Transfers' section.
 
     Assumptions / invariants:
@@ -559,6 +634,7 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
       as a proxy for cost basis, which may differ from IBKR's internal basis.
     """
     out: list[TransferRow] = []
+    defects: list[ExtractionDefect] = []
     skipped_non_stock = 0
 
     for sub in model.get_subtables("Transfers"):
@@ -608,57 +684,72 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
             code = r.get("Code", "").strip()
             currency = r.get("Currency", "").strip()
 
-            _require_fields(
-                "transfer row",
-                symbol=symbol,
-                date=date_s,
-                direction=direction,
-                quantity=qty_s,
-                currency=currency,
-            )
-
-            direction_norm = direction.lower()
-            if direction_norm not in {"in", "out"}:
-                raise DataQualityError(
-                    f"Unsupported transfer direction {direction!r} for row: {r}"
-                )
-
-            quantity = _require_decimal("transfer row", "Quantity", qty_s)
-            if quantity <= 0:
-                raise DataQualityError(
-                    f"Transfer quantity must be positive for {symbol!r} on {date_s!r}: "
-                    f"{quantity}"
-                )
-
-            # For incoming transfers, a valid basis is mandatory; treat missing/
-            # placeholder Market Value / Cost Basis as a hard error.
-            if direction_norm == "in":
-                if not val_s:
-                    raise DataQualityError(
-                        f"Transfer IN for {symbol!r} on {date_s!r} is missing "
-                        "Market Value/Cost Basis."
-                    )
-                market_value = _require_decimal(
-                    "transfer row", "Market Value/Cost Basis", val_s
-                )
-            else:
-                # For OUT (or other) transfers, the market value is not used in FIFO
-                # matching.
-                market_value = to_dec(val_s)
-
-            out.append(
-                TransferRow(
-                    section="Transfers",
-                    asset_category=asset_cat,
-                    currency=currency,
+            try:
+                _require_fields(
+                    "transfer row",
                     symbol=symbol,
-                    date=_require_date("transfer row", "Date", date_s),
+                    date=date_s,
                     direction=direction,
-                    quantity=quantity,
-                    market_value=market_value,
-                    code=code,
+                    quantity=qty_s,
+                    currency=currency,
                 )
-            )
+
+                direction_norm = direction.lower()
+                if direction_norm not in {"in", "out"}:
+                    raise DataQualityError(
+                        f"Unsupported transfer direction {direction!r} for row: {r}"
+                    )
+
+                quantity = _require_decimal("transfer row", "Quantity", qty_s)
+                if quantity <= 0:
+                    raise DataQualityError(
+                        f"Transfer quantity must be positive for {symbol!r} on "
+                        f"{date_s!r}: {quantity}"
+                    )
+
+                # For incoming transfers, a valid basis is mandatory; treat missing/
+                # placeholder Market Value / Cost Basis as a hard error.
+                if direction_norm == "in":
+                    if not val_s:
+                        raise DataQualityError(
+                            f"Transfer IN for {symbol!r} on {date_s!r} is missing "
+                            "Market Value/Cost Basis."
+                        )
+                    market_value = _require_decimal(
+                        "transfer row", "Market Value/Cost Basis", val_s
+                    )
+                else:
+                    # OUT (or other) transfers: market_value is parsed but never
+                    # consumed downstream -- fifo.ingest_transfer's OUT branch only
+                    # consumes lots by quantity and returns no RealizedLine, so a
+                    # lenient parse here cannot bias any tax figure, and IBKR
+                    # legitimately emits "--" for this cell. If OUT ever consumes basis,
+                    # make this strict.
+                    market_value = to_dec(val_s)
+
+                out.append(
+                    TransferRow(
+                        section="Transfers",
+                        asset_category=asset_cat,
+                        currency=currency,
+                        symbol=symbol,
+                        date=_require_date("transfer row", "Date", date_s),
+                        direction=direction,
+                        quantity=quantity,
+                        market_value=market_value,
+                        code=code,
+                    )
+                )
+            except DataQualityError as e:
+                defects.append(
+                    ExtractionDefect(
+                        "Transfers",
+                        r.get("Symbol", "").strip() or None,
+                        r.get("Date", "").strip() or None,
+                        str(e),
+                    )
+                )
+                continue
 
     # Sort by date
     out.sort(key=lambda x: x.date)
@@ -676,4 +767,4 @@ def parse_transfers(model: IbkrModel) -> list[TransferRow]:
             outs,
         )
 
-    return out
+    return out, defects

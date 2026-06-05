@@ -63,7 +63,7 @@ def test_trades_out_of_scope_rows_counted_as_info(caplog):
         [_TRADE_HEADER, _trade_data("Stocks", "AAPL"), _trade_data("Bonds", "BND")]
     )
     with caplog.at_level(logging.INFO, logger=_EXTRACT_LOGGER):
-        trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
+        trades, _ = parse_trades_stocklike(model, asset_scope="stocks_etfs")
 
     assert [t.symbol for t in trades] == ["AAPL"]  # bond filtered out
     msgs = [r.getMessage() for r in caplog.records]
@@ -111,7 +111,7 @@ def test_trades_subtable_missing_required_column_warns(caplog):
     ]
     model = _model(rows)
     with caplog.at_level(logging.WARNING, logger=_EXTRACT_LOGGER):
-        trades = parse_trades_stocklike(model, asset_scope="stocks_etfs")
+        trades, _ = parse_trades_stocklike(model, asset_scope="stocks_etfs")
 
     assert trades == []
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -127,7 +127,7 @@ def test_dividends_incomplete_rows_counted_as_info(caplog):
     ]
     model = _model(rows)
     with caplog.at_level(logging.INFO, logger=_EXTRACT_LOGGER):
-        out = parse_dividends(model)
+        out, _ = parse_dividends(model)
 
     assert len(out) == 1
     assert any(
@@ -160,7 +160,7 @@ def test_withholding_incomplete_rows_counted_as_info(caplog):
     ]
     model = _model(rows)
     with caplog.at_level(logging.INFO, logger=_EXTRACT_LOGGER):
-        out = parse_withholding_tax(model)
+        out, _ = parse_withholding_tax(model)
 
     assert len(out) == 1
     assert any(
@@ -185,7 +185,7 @@ def test_interest_incomplete_rows_counted_as_info(caplog):
     ]
     model = _model(rows)
     with caplog.at_level(logging.INFO, logger=_EXTRACT_LOGGER):
-        out = parse_interest(model)
+        out, _ = parse_interest(model)
 
     assert len(out) == 1
     assert any(
@@ -223,7 +223,7 @@ def test_transfers_non_stock_rows_counted_as_info(caplog):
     ]
     model = _model(rows)
     with caplog.at_level(logging.INFO, logger=_EXTRACT_LOGGER):
-        out = parse_transfers(model)
+        out, _ = parse_transfers(model)
 
     assert out == []
     assert any(
