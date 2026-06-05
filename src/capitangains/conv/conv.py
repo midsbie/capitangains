@@ -89,3 +89,36 @@ def parse_date(d: str) -> dt.date:
     if "," in d:
         d = d.split(",")[0].strip()
     return dt.date.fromisoformat(d)
+
+
+# IBKR renders the Statement 'Period' field with a full month name, e.g.
+# "January 1, 2024" -- distinct from the ISO Date/Time of trade rows.
+_PERIOD_DATE_FORMAT = "%B %d, %Y"
+_PERIOD_SEPARATOR = " - "
+
+
+def parse_statement_period(text: str) -> tuple[dt.date, dt.date]:
+    """Parse an IBKR Statement 'Period' field into a closed [start, end] date interval.
+
+    'January 1, 2024 - December 31, 2024' -> (date(2024, 1, 1), date(2024, 12, 31)).
+    A single-day statement carries no separator, so start == end. Raises ValueError on
+    an unparseable value (missing/extra separator, or a side that is not a month-name
+    date), so a caller can treat an unverifiable period as a hard failure.
+    """
+    parts = text.split(_PERIOD_SEPARATOR)
+    if len(parts) == 1:
+        start_str = end_str = parts[0].strip()
+    elif len(parts) == 2:
+        start_str, end_str = parts[0].strip(), parts[1].strip()
+    else:
+        raise ValueError(f"Ambiguous statement period (multiple separators): {text!r}")
+
+    try:
+        start = dt.datetime.strptime(start_str, _PERIOD_DATE_FORMAT).date()
+        end = dt.datetime.strptime(end_str, _PERIOD_DATE_FORMAT).date()
+    except ValueError as e:
+        raise ValueError(f"Unparseable statement period: {text!r}") from e
+
+    if end < start:
+        raise ValueError(f"Statement period ends before it starts: {text!r}")
+    return start, end

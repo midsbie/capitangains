@@ -48,10 +48,15 @@ from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 
-from capitangains.conv import parse_date
+from capitangains.conv import parse_date, parse_statement_period
 from capitangains.errors import DataQualityError
 from capitangains.logging import configure_logging
-from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
+from capitangains.model import (
+    IbkrModel,
+    IbkrStatementCsvParser,
+    merge_models,
+    merge_reports,
+)
 from capitangains.reporting import (
     ExtractionDefect,
     FifoMatcher,
@@ -387,6 +392,89 @@ def _report_transfer_ordering_collisions(
     raise SystemExit(2)
 
 
+def _report_statement_input_conflicts(
+    inputs: Sequence[str],
+    models: Sequence[IbkrModel],
+    logger: logging.Logger,
+) -> None:
+    """Abort unless the inputs are a single-account, non-overlapping set of statements.
+
+    Multi-file mode exists to supply prior-year statements so FIFO has the buy lots for
+    shares sold in the reporting year (see the module docstring). That is only coherent
+    when the inputs are distinct, non-overlapping slices of one account's history:
+
+    - Overlapping periods double-count. The same statement passed twice, or a combined
+      multi-year export alongside a standalone year, feeds duplicate trades into FIFO --
+      inflating proceeds and corrupting realized P/L on exactly the lots a filing
+      depends on. There is no safe row-level de-duplication (IBKR can legitimately emit
+      two distinct fills with identical symbol, time, quantity and price), so the only
+      honest response is to reject the overlap rather than silently merge it.
+    - Mixing accounts co-mingles unrelated positions into one report. The tool assumes a
+      single account; statements from two accounts are out of scope, not a merge.
+    - A missing or unparseable Account/Period makes disjointness unprovable. Consistent
+      with the rest of the pipeline's fail-closed stance (a missing FX rate, an
+      unmatched sell), an unverifiable precondition is a failure, not an assumption.
+
+    Single-file runs have nothing to overlap and skip the check. Every conflict is
+    listed, then a single SystemExit(2) -- no workbook written. Runs before merge_models
+    so the duplicate data never reaches FIFO and the merged diagnostics are not doubled.
+    """
+    if len(inputs) <= 1:
+        return
+
+    problems: list[str] = []
+    accounts: set[str] = set()
+    periods: list[tuple[str, dt.date, dt.date]] = []  # only the cleanly-parsed ones
+
+    for path, model in zip(inputs, models, strict=True):
+        account = (model.account_id() or "").strip()
+        if account:
+            accounts.add(account)
+        else:
+            problems.append(f"{path}: missing account number (Account Information).")
+
+        period_text = model.period_text()
+        if not period_text or not period_text.strip():
+            problems.append(f"{path}: missing reporting period (Statement).")
+            continue
+        try:
+            start, end = parse_statement_period(period_text)
+        except ValueError as e:
+            problems.append(f"{path}: {e}")
+            continue
+        periods.append((path, start, end))
+
+    if len(accounts) > 1:
+        problems.append(
+            f"inputs span multiple accounts ({', '.join(sorted(accounts))}); this tool "
+            "reports one account at a time."
+        )
+
+    # Closed intervals overlap when each begins on or before the other ends. O(n^2) over
+    # the handful of statements a run ever takes.
+    for i, (p_path, p_start, p_end) in enumerate(periods):
+        for q_path, q_start, q_end in periods[i + 1 :]:
+            if p_start <= q_end and q_start <= p_end:
+                lo, hi = max(p_start, q_start), min(p_end, q_end)
+                problems.append(
+                    f"overlapping periods: {p_path} and {q_path} both cover "
+                    f"{lo} to {hi}."
+                )
+
+    if not problems:
+        return
+
+    for problem in problems:
+        logger.error("%s", problem)
+
+    logger.error(
+        "Input statements do not form a single-account, non-overlapping set; no "
+        "workbook written. Pass one account's statements, one period per year with no "
+        "overlap to prevent double-counting trades."
+    )
+    raise SystemExit(2)
+
+
 def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
     logger = logging.getLogger(__name__)
@@ -418,6 +506,10 @@ def process_files(args: argparse.Namespace) -> None:
         )
         models.append(m)
         reports.append(rep)
+
+    # A multi-file run must be a single-account, non-overlapping set of statements;
+    # overlapping inputs would double-count trades into FIFO. Reject before merging.
+    _report_statement_input_conflicts(inputs, models, logger)
 
     model = merge_models(models)
     parse_report = merge_reports(reports)

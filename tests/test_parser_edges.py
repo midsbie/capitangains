@@ -133,3 +133,27 @@ def test_long_data_rows_are_trimmed_and_aggregated_as_warning():
     assert list(model.iter_rows("Trades")) == [
         {"Currency": "EUR", "Symbol": "ASML", "Quantity": "10"},
     ]
+
+
+def test_account_id_and_period_text_projections():
+    rows = [
+        ["Statement", "Header", "Field Name", "Field Value"],
+        ["Statement", "Data", "Title", "Activity Statement"],
+        ["Statement", "Data", "Period", "January 1, 2024 - December 31, 2024"],
+        ["Account Information", "Header", "Field Name", "Field Value"],
+        ["Account Information", "Data", "Name", "Jane Doe"],
+        ["Account Information", "Data", "Account", "U1234567"],
+    ]
+    model, _ = IbkrStatementCsvParser().parse_rows(rows)
+    assert model.account_id() == "U1234567"
+    assert model.period_text() == "January 1, 2024 - December 31, 2024"
+
+
+def test_account_id_and_period_text_absent_return_none():
+    rows = [
+        ["Trades", "Header", "Currency", "Symbol", "Quantity"],
+        ["Trades", "Data", "EUR", "ASML", "10"],
+    ]
+    model, _ = IbkrStatementCsvParser().parse_rows(rows)
+    assert model.account_id() is None
+    assert model.period_text() is None

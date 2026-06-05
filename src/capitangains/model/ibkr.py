@@ -40,6 +40,29 @@ class IbkrModel:
         for sub in self.get_subtables(section_name):
             yield from sub.rows
 
+    def account_id(self) -> str | None:
+        """Return the IBKR account number from 'Account Information', or None.
+
+        The section is a flat Field Name/Field Value table; the 'Account' field carries
+        the account number (e.g. 'U6994737'). None means the field is absent.
+        """
+        return self._field_value("Account Information", "Account")
+
+    def period_text(self) -> str | None:
+        """Return the raw 'Period' field from the 'Statement' section, or None.
+
+        The value is left unparsed (e.g. 'January 1, 2024 - December 31, 2024'); the
+        caller interprets it via conv.parse_statement_period. None means it is absent.
+        """
+        return self._field_value("Statement", "Period")
+
+    def _field_value(self, section_name: str, field_name: str) -> str | None:
+        """First 'Field Value' whose 'Field Name' matches in a metadata section."""
+        for row in self.iter_rows(section_name):
+            if row.get("Field Name") == field_name:
+                return row.get("Field Value")
+        return None
+
 
 Severity = Literal["info", "warning", "error"]
 

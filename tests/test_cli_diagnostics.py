@@ -24,11 +24,13 @@ import pytest
 from capitangains.cmd.cli import (
     _parse_acknowledged_gaps,
     _report_gap_acknowledgments,
+    _report_statement_input_conflicts,
     _report_transfer_ordering_collisions,
     build_argparser,
     process_files,
 )
 from capitangains.errors import DataQualityError
+from capitangains.model import IbkrStatementCsvParser
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo_domain import GapEvent, GapResolution
 
@@ -234,6 +236,139 @@ def test_report_transfer_ordering_collisions_lists_every_collision(caplog):
     assert any("AAPL" in m for m in messages)
     assert any("VOD" in m for m in messages)
     assert any("2 symbol-day(s)" in m for m in messages)
+
+
+# --- _report_statement_input_conflicts ------------------------------------------------
+
+
+def _meta_model(*, account=None, period=None):
+    """Build an IbkrModel carrying just the Account/Statement metadata under test."""
+    rows = []
+    if period is not None:
+        rows += [
+            ["Statement", "Header", "Field Name", "Field Value"],
+            ["Statement", "Data", "Period", period],
+        ]
+    if account is not None:
+        rows += [
+            ["Account Information", "Header", "Field Name", "Field Value"],
+            ["Account Information", "Data", "Account", account],
+        ]
+    model, _ = IbkrStatementCsvParser().parse_rows(rows)
+    return model
+
+
+_Y2023 = "January 1, 2023 - December 31, 2023"
+_Y2024 = "January 1, 2024 - December 31, 2024"
+
+
+def test_statement_conflicts_single_file_is_skipped():
+    # A lone statement has nothing to overlap; the check never inspects its metadata.
+    logger = logging.getLogger("conflicts_single")
+    _report_statement_input_conflicts(
+        ["a.csv"], [_meta_model(account="U1", period=_Y2024)], logger
+    )
+
+
+def test_statement_conflicts_disjoint_periods_ok():
+    logger = logging.getLogger("conflicts_disjoint")
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period=_Y2024),
+    ]
+    _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+
+
+def test_statement_conflicts_overlapping_periods_fatal(caplog):
+    logger = logging.getLogger("conflicts_overlap")
+    models = [
+        _meta_model(account="U1", period=_Y2024),
+        _meta_model(account="U1", period="June 1, 2024 - December 31, 2024"),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+
+    assert exc.value.code == 2
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("overlapping periods" in m and "a.csv" in m and "b.csv" in m
+               for m in messages)
+
+
+def test_statement_conflicts_same_period_twice_fatal(caplog):
+    # The same file passed twice is the degenerate identical-interval overlap.
+    logger = logging.getLogger("conflicts_dup")
+    model = _meta_model(account="U1", period=_Y2024)
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "a.csv"], [model, model], logger)
+
+    assert exc.value.code == 2
+    assert any("overlapping periods" in r.getMessage() for r in caplog.records)
+
+
+def test_statement_conflicts_multiple_accounts_fatal(caplog):
+    # Different accounts, even with disjoint periods, are out of scope (co-mingling).
+    logger = logging.getLogger("conflicts_accounts")
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U2", period=_Y2024),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+
+    assert exc.value.code == 2
+    assert any("multiple accounts" in r.getMessage() and "U1" in r.getMessage()
+               and "U2" in r.getMessage() for r in caplog.records)
+
+
+def test_statement_conflicts_missing_period_fatal(caplog):
+    logger = logging.getLogger("conflicts_no_period")
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period=None),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+
+    assert exc.value.code == 2
+    assert any("missing reporting period" in r.getMessage() for r in caplog.records)
+
+
+def test_statement_conflicts_missing_account_fatal(caplog):
+    logger = logging.getLogger("conflicts_no_account")
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account=None, period=_Y2024),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+
+    assert exc.value.code == 2
+    assert any("missing account number" in r.getMessage() for r in caplog.records)
+
+
+def test_statement_conflicts_unparseable_period_fatal(caplog):
+    logger = logging.getLogger("conflicts_bad_period")
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period="2024-01-01 to 2024-12-31"),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+
+    assert exc.value.code == 2
+    assert any("statement period" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_statement_conflicts_accumulates_every_problem(caplog):
+    # Three statements, three overlapping pairs: all are listed before the single exit.
+    logger = logging.getLogger("conflicts_accum")
+    models = [_meta_model(account="U1", period=_Y2024) for _ in range(3)]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        _report_statement_input_conflicts(["a.csv", "b.csv", "c.csv"], models, logger)
+
+    assert exc.value.code == 2
+    overlaps = [r for r in caplog.records if "overlapping periods" in r.getMessage()]
+    assert len(overlaps) == 3  # (a,b), (a,c), (b,c)
 
 
 # --- process_files integration --------------------------------------------------------
@@ -726,3 +861,85 @@ def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
     assert exc.value.code == 2
     assert not out.exists()
     assert any("Date/Time" in r.getMessage() for r in caplog.records)
+
+
+# --- process_files multi-file overlap gate --------------------------------------------
+
+
+def _statement_meta_rows(account, period):
+    return [
+        ["Statement", "Header", "Field Name", "Field Value"],
+        ["Statement", "Data", "Title", "Activity Statement"],
+        ["Statement", "Data", "Period", period],
+        ["Account Information", "Header", "Field Name", "Field Value"],
+        ["Account Information", "Data", "Account", account],
+    ]
+
+
+def _write_full_statement(path, *, account, period, year, currency="EUR"):
+    # A matched BUY(10)/SELL(10) in `year` plus the Account/Statement metadata the
+    # multi-file overlap gate reads. EUR converts by identity, so no FX table is needed.
+    buy = _trade("AAPL", currency, date=f"{year}-02-10, 10:00:00")
+    sell = [
+        "Trades",
+        "Data",
+        "Order",
+        "Stocks",
+        currency,
+        "AAPL",
+        f"{year}-06-10, 10:00:00",
+        "-10",
+        "110",
+        "1100",
+        "-1",
+        "C",
+        "-1001",
+        "99",
+    ]
+    rows = _statement_meta_rows(account, period) + [_TRADES_HEADER, buy, sell]
+    with open(path, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+
+def _args_multi(stmts, out, *, year=2024):
+    return argparse.Namespace(
+        input=[str(s) for s in stmts],
+        year=year,
+        fx_table=None,
+        locale="EN",
+        output=str(out),
+        auto_fix_sell_gaps=None,
+        dry_run=False,
+        verbose=0,
+    )
+
+
+def test_process_files_disjoint_statements_write_workbook(tmp_path):
+    # Two single-account statements for adjacent, non-overlapping years merge cleanly
+    # and produce a workbook: the gate must not flag a legitimate multi-file run.
+    a = tmp_path / "2023.csv"
+    b = tmp_path / "2024.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(a, account="U1", period=_Y2023, year=2023)
+    _write_full_statement(b, account="U1", period=_Y2024, year=2024)
+
+    process_files(_args_multi([a, b], out))
+
+    assert out.exists()
+
+
+def test_process_files_exits_2_on_overlapping_statements(tmp_path, caplog):
+    # The same period supplied twice would double-count trades into FIFO; the run aborts
+    # before merging and writes no workbook.
+    a = tmp_path / "2024_a.csv"
+    b = tmp_path / "2024_b.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(a, account="U1", period=_Y2024, year=2024)
+    _write_full_statement(b, account="U1", period=_Y2024, year=2024)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(_args_multi([a, b], out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any("overlapping periods" in r.getMessage() for r in caplog.records)
