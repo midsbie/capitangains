@@ -20,6 +20,7 @@ import logging
 from decimal import Decimal
 
 import pytest
+from openpyxl import load_workbook
 
 from capitangains.cmd.cli import (
     _parse_acknowledged_gaps,
@@ -657,6 +658,30 @@ def test_process_files_allows_same_day_transfer_in_a_different_symbol(tmp_path, 
     assert not any(
         "Unorderable same-day events" in r.getMessage() for r in caplog.records
     )
+
+
+def test_process_files_transfers_sheet_shows_only_reporting_year(tmp_path):
+    # The report is a single-year document, so the Stock Transfers sheet -- like every
+    # other category -- shows only args.year. A prior-year transfer is supplied solely
+    # to seed FIFO (here SEEDLOT, 2023); it must not surface on the 2024 sheet as if it
+    # were a current-year event, while a genuine 2024 transfer (CURRENTXFER) must. Both
+    # are IN transfers seeding open lots; all EUR, so the run converts by identity.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    rows = [
+        _TRANSFERS_HEADER,
+        _transfer_data("SEEDLOT", "EUR", "2023-11-01"),
+        _transfer_data("CURRENTXFER", "EUR", "2024-03-01"),
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    process_files(_args(stmt, out))
+
+    assert out.exists()
+    ws = load_workbook(out)["Stock Transfers"]
+    symbols = {row[1] for row in ws.iter_rows(min_row=2, values_only=True)}
+    assert symbols == {"CURRENTXFER"}
 
 
 def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):

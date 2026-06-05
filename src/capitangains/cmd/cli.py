@@ -605,7 +605,13 @@ def process_files(args: argparse.Namespace) -> None:
         [r for r in syep_interest if r.value_date and r.value_date.year == args.year]
     )
     rb.set_interest([i for i in interest if i.date.year == args.year])
-    rb.set_transfers(transfers)  # Include all transfers, not filtered by year
+    # Display only this year's transfers, like every other category above. The full
+    # multi-file set (prior years included) was needed to seed FIFO, but that ingestion
+    # is already complete (the matching loop above); ReportBuilder.transfers feeds only
+    # the Stock Transfers sheet, never any computed figure. So scoping it to args.year
+    # is display-only -- it cannot move a tax number -- and keeps a prior-year seeding
+    # transfer from masquerading as a current-year event on a single-year report.
+    rb.set_transfers([t for t in transfers if t.date.year == args.year])
 
     logger.info(
         "Report built: %d realized lines, %d dividend lines, %d withholding lines",
