@@ -7,13 +7,12 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 from ._common import (
+    CashFlowFields,
     ExtractionDefect,
-    _is_data_row,
-    _is_total_or_empty,
+    _extract_cashflow_section,
     _require_date,
     _require_decimal,
 )
@@ -30,6 +29,16 @@ class InterestRow:
     amount_eur: Decimal | None = None
 
 
+def _build_interest_row(f: CashFlowFields) -> InterestRow:
+    amt = _require_decimal("interest row", "Amount", f.amount_s)
+    return InterestRow(
+        currency=f.currency,
+        date=_require_date("interest row", "Date", f.date_s),
+        description=f.description,
+        amount=amt,
+    )
+
+
 def parse_interest(
     model: IbkrModel,
 ) -> tuple[list[InterestRow], list[ExtractionDefect]]:
@@ -39,43 +48,16 @@ def parse_interest(
     Header: Currency, Date, Description, Amount
 
     Excludes CSV total rows (e.g., 'Total', 'Total in EUR').
-
     """
-    out: list[InterestRow] = []
-    defects: list[ExtractionDefect] = []
-    skipped_incomplete = 0
-    for r in model.iter_rows("Interest"):
-        cur = r.get("Currency", "").strip()
-        if _is_total_or_empty(cur):
-            continue
-        date_s = r.get("Date", "").strip()
-        desc = r.get("Description", "").strip()
-        amount_s = r.get("Amount", "").strip()
-        # If we ever decide a partial interest row is an invariant violation, the
-        # correct response would be to raise here, not to skip-and-count.
-        if _is_data_row(cur, date_s, desc):
-            try:
-                amt = _require_decimal("interest row", "Amount", amount_s)
-                out.append(
-                    InterestRow(
-                        currency=cur,
-                        date=_require_date("interest row", "Date", date_s),
-                        description=desc,
-                        amount=amt,
-                    )
-                )
-            except DataQualityError as e:
-                defects.append(
-                    ExtractionDefect("Interest", None, date_s or None, str(e))
-                )
-        else:
-            skipped_incomplete += 1
-
-    if skipped_incomplete:
-        logger.info(
-            "Interest: skipped %d incomplete row(s) (missing date/description)",
-            skipped_incomplete,
-        )
+    out, defects = _extract_cashflow_section(
+        model,
+        section="Interest",
+        logger=logger,
+        build=_build_interest_row,
+        incomplete_label="Interest",
+        incomplete_detail="missing date/description",
+        skip_totals=True,
+    )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d interest entries", len(out))
     return out, defects

@@ -7,10 +7,15 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
-from ._common import ExtractionDefect, _is_data_row, _require_date, _require_decimal
+from ._common import (
+    CashFlowFields,
+    ExtractionDefect,
+    _extract_cashflow_section,
+    _require_date,
+    _require_decimal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,41 +29,27 @@ class DividendRow:
     amount_eur: Decimal | None = None
 
 
+def _build_dividend_row(f: CashFlowFields) -> DividendRow:
+    amt = _require_decimal("dividend row", "Amount", f.amount_s)
+    return DividendRow(
+        currency=f.currency,
+        date=_require_date("dividend row", "Date", f.date_s),
+        description=f.description,
+        amount=amt,
+    )
+
+
 def parse_dividends(
     model: IbkrModel,
 ) -> tuple[list[DividendRow], list[ExtractionDefect]]:
-    out: list[DividendRow] = []
-    defects: list[ExtractionDefect] = []
-    skipped_incomplete = 0
-    for r in model.iter_rows("Dividends"):
-        # Header: Currency,Date,Description,Amount
-        cur = r.get("Currency", "").strip()
-        date_s = r.get("Date", "").strip()
-        desc = r.get("Description", "").strip()
-        amount_s = r.get("Amount", "").strip()
-        if not _is_data_row(cur, date_s, desc):
-            skipped_incomplete += 1
-            continue
-
-        try:
-            amt = _require_decimal("dividend row", "Amount", amount_s)
-            out.append(
-                DividendRow(
-                    currency=cur,
-                    date=_require_date("dividend row", "Date", date_s),
-                    description=desc,
-                    amount=amt,
-                )
-            )
-        except DataQualityError as e:
-            defects.append(ExtractionDefect("Dividends", None, date_s or None, str(e)))
-
-    if skipped_incomplete:
-        logger.info(
-            "Dividends: skipped %d incomplete row(s) "
-            "(missing currency/date/description)",
-            skipped_incomplete,
-        )
+    out, defects = _extract_cashflow_section(
+        model,
+        section="Dividends",
+        logger=logger,
+        build=_build_dividend_row,
+        incomplete_label="Dividends",
+        incomplete_detail="missing currency/date/description",
+    )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d dividend entries", len(out))
     return out, defects
