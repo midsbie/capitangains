@@ -7,7 +7,10 @@
   or orphan acknowledgment is fatal (exit 2); a clean run emits one audit warning per
   synthesized lot, so synthetic cost basis is never silent.
 - ``process_files``: aborts (exit 2, no workbook) on a malformed spec, a failed gap
-  tie-out, or an FX table that cannot supply every rate the EUR report needs.
+  tie-out, or an FX table that cannot supply every rate the EUR report needs; exits 1
+  on an unreadable or unparseable FX table (a setup failure, not a data defect). Under
+  ``--dry-run`` it runs the full preflight and stops before the write, leaving any
+  existing output untouched.
 """
 
 import argparse
@@ -21,6 +24,7 @@ import pytest
 from capitangains.cmd.cli import (
     _parse_acknowledged_gaps,
     _report_gap_acknowledgments,
+    build_argparser,
     process_files,
 )
 from capitangains.errors import DataQualityError
@@ -181,17 +185,18 @@ def _trade(symbol, currency, *, date="2024-01-10, 10:00:00", qty="10"):
     ]
 
 
-def _write_statement(path):
-    # A matched BUY(10) then SELL(10): no gap, so the gap tie-out is a no-op.
+def _write_statement(path, *, currency="USD"):
+    # A matched BUY(10) then SELL(10): no gap, so the gap tie-out is a no-op. USD needs
+    # an FX table to convert; EUR converts by identity and runs clean to the write step.
     rows = [
         _TRADES_HEADER,
-        _trade("AAPL", "USD"),
+        _trade("AAPL", currency),
         [
             "Trades",
             "Data",
             "Order",
             "Stocks",
-            "USD",
+            currency,
             "AAPL",
             "2024-06-10, 10:00:00",
             "-10",
@@ -237,6 +242,7 @@ def _args(stmt, out):
         locale="EN",
         output=str(out),
         auto_fix_sell_gaps=None,
+        dry_run=False,
         verbose=0,
     )
 
@@ -454,3 +460,64 @@ def test_process_files_synthesizes_acknowledged_gap_and_writes_workbook(
 
     assert out.exists()
     assert any("Synthesized residual lot" in r.getMessage() for r in caplog.records)
+
+
+# --- --dry-run / -n -------------------------------------------------------------------
+
+
+def test_argparser_accepts_dry_run_short_and_long_flags():
+    parser = build_argparser()
+    for flag in ("-n", "--dry-run"):
+        args = parser.parse_args(["--year", "2024", "stmt.csv", flag])
+        assert args.dry_run is True
+    # Absent by default: a normal run still writes.
+    assert parser.parse_args(["--year", "2024", "stmt.csv"]).dry_run is False
+
+
+def test_process_files_dry_run_writes_no_workbook_on_clean_input(tmp_path, caplog):
+    # A run that would otherwise succeed writes nothing under --dry-run: it returns
+    # normally (exit 0), leaves no file at out_path, and announces the preflight.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    _write_statement(stmt, currency="EUR")  # matched, EUR: clean through to the write
+    args = _args(stmt, out)
+    args.dry_run = True
+
+    with caplog.at_level(logging.INFO):
+        process_files(args)  # no SystemExit
+
+    assert not out.exists()
+    assert any("Dry run" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_dry_run_does_not_overwrite_existing_output(tmp_path):
+    # The existing report at out_path is left byte-for-byte untouched: --dry-run never
+    # clobbers a prior good workbook.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    _write_statement(stmt, currency="EUR")
+    out.write_bytes(b"prior report")
+    args = _args(stmt, out)
+    args.dry_run = True
+
+    process_files(args)
+
+    assert out.read_bytes() == b"prior report"
+
+
+def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
+    # --dry-run validates; it does not suppress failures. A row-level defect still
+    # aborts with exit 2 and writes no workbook, exactly as a real run would.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows([_TRADES_HEADER, _trade("AAPL", "EUR", date="")])
+    args = _args(stmt, out)
+    args.dry_run = True
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        process_files(args)
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any("Date/Time" in r.getMessage() for r in caplog.records)

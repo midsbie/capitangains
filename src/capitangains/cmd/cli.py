@@ -26,6 +26,13 @@ Usage
         --fx-table ./fx_rates.csv \
         /path/ActivityStatement_2023.csv /path/ActivityStatement_2024.csv
 
+    # Dry run: validate everything, write nothing (leaves any existing report intact)
+    python -m capitangains.cmd.generate_ibkr_report \
+        --year 2024 \
+        --dry-run \
+        --fx-table ./fx_rates.csv \
+        /path/to/ActivityStatement_2024.csv
+
 Forex CSV schema (base EUR):
     date,currency,rate
     1999-01-04,AUD,1.91
@@ -491,6 +498,18 @@ def process_files(args: argparse.Namespace) -> None:
     # Determine output path
     out_path = Path(args.output) if args.output else Path(f"report_{args.year}.xlsx")
 
+    # The workbook write is this program's only side effect; everything above is pure
+    # validation and computation, and every abort path precedes it. A dry run performs
+    # that full preflight and stops here, so an existing report at out_path is left
+    # untouched. (It cannot exercise the write stage itself -- serialization, path
+    # permissions, disk.)
+    if args.dry_run:
+        logger.info(
+            "Dry run: all checks passed; no workbook written (would write to %s).",
+            out_path,
+        )
+        return
+
     # Write outputs via sink
     sink = ExcelReportSink(out_path=out_path, locale=args.locale)
     out_path = sink.write(rb)
@@ -531,6 +550,17 @@ def build_argparser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="Output filename (e.g., report.xlsx). If omitted, uses report_<year>.xlsx",
+    )
+    p.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Run the full pipeline -- parse, extract, FIFO-match, convert, reconcile "
+            "-- and report any defect, but stop before writing the workbook, leaving "
+            "any existing output untouched. Exit 0 if the run would succeed; any "
+            "defect is reported and exits non-zero, exactly as a normal run would."
+        ),
     )
     p.add_argument(
         "--auto-fix-sell-gaps",
