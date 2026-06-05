@@ -72,7 +72,7 @@ class TradeRow:
 
 
 def parse_trades_stocklike_row(
-    scope_set: set[str] | None, r: dict[str, str], col: dict[str, int | None]
+    scope_set: set[str] | None, r: dict[str, str]
 ) -> TradeRow | None:
     asset_category = r.get("Asset Category", "").strip()
     if scope_set is not None and asset_category not in scope_set:
@@ -188,7 +188,7 @@ def parse_trades_stocklike(
             # so a defect names that field; multi-defect rows are rare. The benign None
             # return (out-of-scope / zero-qty) is unchanged -- only a defect is caught.
             try:
-                trade = parse_trades_stocklike_row(scope_set, r, col)
+                trade = parse_trades_stocklike_row(scope_set, r)
             except DataQualityError as e:
                 defects.append(
                     ExtractionDefect(
