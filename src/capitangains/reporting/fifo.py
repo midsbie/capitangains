@@ -122,10 +122,9 @@ class FifoMatcher:
                     transfer.date,
                 )
 
-                # Do NOT silently swallow all errors during transfer OUT processing. If
-                # positions.consume_fifo() raises legitimate invariant violations,
-                # they're logged as warnings but execution continues—potentially
-                # corrupting position state.
+                # The warning above is informational. Re-raise so an invariant violation
+                # from consume_fifo is not swallowed, which would let execution continue
+                # on corrupted position state.
                 raise
         else:
             raise ValueError(f"Unknown transfer direction: {transfer.direction!r}")

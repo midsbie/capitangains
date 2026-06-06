@@ -486,11 +486,6 @@ _TRANSFERS_SPEC: _SheetSpec[TransferProtocol] = _SheetSpec(
 )
 
 
-class ReportSink(Protocol):
-    def write(self, report: ReportBuilder) -> Path:  # returns written file path
-        ...
-
-
 @dataclass(frozen=True)
 class _SheetWriter:
     """One workbook under construction in a single locale.

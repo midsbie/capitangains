@@ -91,7 +91,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
             "EN": "Disposal Value (EUR)",
             "PT": "Valor de Realização (EUR)",
         },
-        "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Mais/menos‑valia (EUR)"},
+        "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Mais/menos-valia (EUR)"},
         "transferred": {"EN": "Transferred", "PT": "Transferido"},
         "synthetic": {"EN": "Synthetic", "PT": "Sintético"},
     },

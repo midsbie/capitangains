@@ -80,18 +80,10 @@ def parse_transfers(
             if not qty_s and "Quantity" in r:
                 qty_s = r.get("Quantity", "").strip()
 
-            # For incoming transfers, we need the initial cost basis.
-            # Usually "Market Value" at transfer time is used if no other basis is
-            # provided, BUT legally, for internal transfers, the original cost basis
-            # should persist.
-            #
-            # IBKR CSV might show "Cost Basis" or "Market Value".
-            # The sample CSV shows "Market Value" populated, but "Xfer Price" is "--".
-            # It seems we must use Market Value as the best proxy for basis if it's an
-            # internal transfer where the user didn't provide cost basis data to IBKR.
-            # Or perhaps there is a "Cost Basis" column in other variants.
-
-            # Let's try to find a value field
+            # Incoming transfers need an opening cost basis. The original basis legally
+            # persists across an internal transfer, but IBKR does not reliably carry it,
+            # so use the populated "Market Value" at transfer time as a proxy and fall
+            # back to "Cost Basis" when a CSV variant exposes that column instead.
             val_s = r.get("Market Value", "").strip()
             if not val_s and "Cost Basis" in r:
                 val_s = r.get("Cost Basis", "").strip()

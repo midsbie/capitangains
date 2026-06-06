@@ -48,7 +48,7 @@ class ReportBuilder:
     transfers: list[TransferProtocol] = field(default_factory=list)
     # Every (date, currency) lookup no FX rate could satisfy. A complete table is a
     # precondition for the EUR report: the CLI aborts (exit 2) when this is non-empty
-    # rather than emit substituted or blank EUR figures (findings #2 and #3).
+    # rather than emit substituted or blank EUR figures.
     fx_missing: set[tuple[dt.date, str]] = field(default_factory=set)
 
     def add_realized(self, rl: RealizedLine) -> None:
@@ -145,7 +145,7 @@ class ReportBuilder:
 
         Returns None -- and accumulates (date, currency) in ``fx_missing`` -- when no
         table is given, the currency is absent, or no rate exists on/before the date.
-        Never substitutes another date's rate (finding #2).
+        Never substitutes another date's rate.
         """
         cur = currency.upper()
         if cur == "EUR":

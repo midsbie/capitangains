@@ -110,10 +110,10 @@ def test_multi_currency_same_symbol_rejected():
 
 
 def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
-    """A missing buy- or sell-date rate leaves the WHOLE line unconverted and records
-    every unresolved (date, currency) -- no substitution of another date's rate (#2)."""
+    """A missing buy- or sell-date rate leaves the entire line unconverted and records
+    every unresolved (date, currency); no substitution of another date's rate."""
     rb = ReportBuilder(year=2024)
-    # Sell-date rate present, but the first leg's buy date predates the table → missing.
+    # Sell-date rate present, but the first leg's buy date predates the table, missing.
     usd_legs: list[dict[str, Any]] = [
         {
             "buy_date": dt.date(2023, 6, 1),
@@ -127,7 +127,7 @@ def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
         },
     ]
     rl_usd = _realized("USD1", "USD", dt.date(2024, 3, 1), usd_legs)
-    # GBP entirely absent from the table → even the sell-date rate is missing.
+    # GBP entirely absent from the table, so even the sell-date rate is missing.
     gbp_legs = [
         {
             "buy_date": dt.date(2024, 2, 1),
@@ -463,7 +463,7 @@ def test_every_label_field_defines_both_locales():
     """Locale parity: each field must carry exactly the same set of locales.
 
     The canonical label table co-locates the translations per field precisely so a key
-    can never exist in one language alone (the pre-refactor mirror dicts could diverge,
+    can never exist in one language alone (separate per-locale dicts could diverge,
     surfacing only as a write-time KeyError in the affected locale). Deriving the locale
     set from the data keeps this honest if a third locale is ever added.
     """
@@ -502,6 +502,6 @@ def test_pt_projection_renders_portuguese_labels():
     pt = labels_for("PT")
     assert pt["sheet"]["summary"] == "Totais de Operações"
     assert pt["realized"]["ticker"] == "Símbolo"
-    assert pt["anexo_j"]["pl_eur"] == "Mais/menos\u2011valia (EUR)"
+    assert pt["anexo_j"]["pl_eur"] == "Mais/menos-valia (EUR)"
     # Any unrecognized locale falls back to PT (the report's default).
     assert labels_for("XX") == pt

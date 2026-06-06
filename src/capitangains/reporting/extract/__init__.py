@@ -12,11 +12,12 @@ from .dividends import DividendRow, parse_dividends
 from .interest import InterestRow, parse_interest
 from .statement import StatementMetadata, StatementPeriod, parse_statement_metadata
 from .syep import SyepInterestRow, parse_syep_interest_details
-from .trades import TradeRow, parse_trades_stocklike
+from .trades import AssetScope, TradeRow, parse_trades_stocklike
 from .transfers import TransferRow, parse_transfers
 from .withholding import WithholdingRow, parse_withholding_tax
 
 __all__ = [
+    "AssetScope",
     "ExtractionDefect",
     "TradeRow",
     "TransferRow",

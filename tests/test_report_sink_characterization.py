@@ -1,20 +1,20 @@
 """Per-cell characterization of the eight uniform table sheets in ExcelReportSink.
 
-The sink was refactored from eight near-identical _write_* methods into one data-driven
-engine plus a declarative spec per sheet. End-to-end equivalence rests on producing an
-identical workbook, and the repo has no golden-file infrastructure, so the safety net is
-this explicit (value, number_format) matrix: for every header and data cell of every
-table sheet, under both locales, both the loaded value and the applied number format are
-pinned against literals captured from the pre-refactor output.
+ExcelReportSink drives all eight table sheets through one data-driven engine plus a
+declarative spec per sheet. Correctness rests on producing an identical workbook, and
+the repo has no golden-file infrastructure, so the safety net is this explicit
+(value, number_format) matrix: for every header and data cell of every table sheet,
+under both locales, both the loaded value and the applied number format are pinned to
+literals.
 
 Cells whose expected format is "General" are the TEXT cells; pinning them locks the
 load-bearing guarantee that the engine never assigns a number format to a text cell
 (openpyxl's default "General" must survive untouched, a byte-preservation detail).
 
-The summary sheet is intentionally excluded: it is a metric/value table left as-is by
-the refactor, and its labels and values are covered by the test_summary_and_formats
-module (its money number formats reuse the same NumberFormats.money exercised
-here). Its presence and position are still locked via _SHEET_ORDER.
+The summary sheet is intentionally excluded: it is a metric/value table whose labels
+and values are covered by the test_summary_and_formats module (its money number formats
+reuse the same NumberFormats.money exercised here). Its presence and position are still
+locked via _SHEET_ORDER.
 """
 
 import datetime as dt
@@ -38,7 +38,7 @@ from capitangains.reporting.report_sink import ExcelReportSink
 
 def _build_report() -> ReportBuilder:
     """Build one report populating all eight table sheets with the edge cases the
-    refactor must preserve.
+    sink must preserve.
 
     Exercised: every per-sheet sort key (in deliberately non-sorted insertion order); a
     multi-leg realized line (two anexo_j rows + a proceeds split) with one transferred
@@ -213,7 +213,7 @@ def _build_report() -> ReportBuilder:
     return rb
 
 
-# Captured from the pre-refactor sink output; see module docstring. Non-ASCII label and
+# Expected sheet titles per locale; see module docstring. Non-ASCII label and
 # currency-symbol text is escaped so the matrix stays byte-exact and ASCII-only.
 _SHEET_ORDER: dict[str, list[str]] = {
     "EN": [
@@ -702,7 +702,7 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 ("Quantidade", "General"),
                 ("Valor de Aquisi\xe7\xe3o (EUR)", "General"),
                 ("Valor de Realiza\xe7\xe3o (EUR)", "General"),
-                ("Mais/menos\u2011valia (EUR)", "General"),
+                ("Mais/menos-valia (EUR)", "General"),
                 ("Transferido", "General"),
                 ("Sint\xe9tico", "General"),
             ],

@@ -63,7 +63,8 @@ def _sell(symbol, date, qty, proceeds, comm, *, realized, basis=None, ccy="USD")
 
 
 def _transfer_in(symbol, date, qty, market_value, ccy="USD"):
-    # market_value seeds the lot's cost basis (an approximation -- see fifo.py:84).
+    # market_value seeds the lot's cost basis as a proxy for the original basis (an
+    # approximation; see FifoMatcher.ingest_transfer).
     return TransferRow(
         section="Transfers",
         asset_category="Stocks",

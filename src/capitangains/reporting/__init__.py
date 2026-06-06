@@ -20,7 +20,8 @@ from .reconcile import (
     reconcile_realized_against_ibkr,
 )
 from .report_builder import ReportBuilder
-from .report_sink import ExcelReportSink, ReportSink
+from .report_sink import ExcelReportSink
+from .source import IbkrActivityStatementSource, ParsedStatement
 
 __all__ = [
     "ExtractionDefect",
@@ -43,6 +44,7 @@ __all__ = [
     "ReconciliationReport",
     "SymbolReconciliation",
     "ReportBuilder",
-    "ReportSink",
     "ExcelReportSink",
+    "IbkrActivityStatementSource",
+    "ParsedStatement",
 ]

@@ -64,7 +64,7 @@ def test_realized_matches_ibkr_in_trade_currency():
 
 
 def test_reconciles_realized_not_grand_total():
-    """Regression for finding #4: a partially-closed position must reconcile against
+    """Regression: a partially-closed position must reconcile against
     realized P/L, never IBKR's grand Total (= realized + unrealized).
 
     AMD-like: realized 1202.17, unrealized -56.08, grand Total 1146.09. The old code

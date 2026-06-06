@@ -1,8 +1,8 @@
 """ReportBuilder.convert_eur accumulates every unresolved (date, currency).
 
-A missing rate is never papered over with another date's rate; the affected
+A missing rate is never substituted with another date's rate; the affected
 line/amount is left unconverted and the gap is recorded in ``fx_missing`` for the CLI
-to abort on (findings #2/#3).
+to abort on.
 """
 
 import datetime as dt
@@ -103,7 +103,7 @@ def test_complete_table_records_no_gap_and_converts_each_leg_at_its_own_date():
     )
 
     assert not rb.fx_missing
-    # Cost basis at the buy-date rate (1.1 → 990), proceeds at the sell-date rate
-    # (0.9 → 90); the sell rate is NOT applied to the acquisition leg.
+    # Cost basis at the buy-date rate (1.1 gives 990), proceeds at the sell-date rate
+    # (0.9 gives 90); the sell rate is not applied to the acquisition leg.
     assert rl.legs[0].alloc_cost_eur == Decimal("990.00")
     assert rl.sell_net_eur == Decimal("90.00")

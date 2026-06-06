@@ -61,17 +61,12 @@ from capitangains.reporting import (
     ExtractionDefect,
     FifoMatcher,
     FxTable,
+    IbkrActivityStatementSource,
     ReportBuilder,
     StatementPeriod,
     TradeRow,
     TransferRow,
-    parse_dividends,
-    parse_interest,
     parse_statement_metadata,
-    parse_syep_interest_details,
-    parse_trades_stocklike,
-    parse_transfers,
-    parse_withholding_tax,
     reconcile_realized_against_ibkr,
 )
 from capitangains.reporting.fifo_domain import GapEvent, GapKey, GapResolution
@@ -329,14 +324,13 @@ def _report_transfer_ordering_collisions(
     same symbol, their true intraday order is simply not in the data. There is no honest
     way to deduce it.
 
-    The earlier implementation papered over this with a fabricated convention
-    (transfer-in before all same-day trades, transfer-out after) encoded as priority
-    constants in the sort key. That silently risked a wrong cost basis on exactly the
-    figures this tool exists to get right, with no signal to the operator. Because a tax
-    figure must be correct rather than plausibly guessed (the stance already taken for a
-    missing FX rate or an unmatched sell) we refuse to assume an order IBKR did not
-    provide, and halt so the operator can resolve the affected symbol against their own
-    records.
+    The alternative, fabricating a convention (transfer-in before all same-day trades,
+    transfer-out after) and encoding it as priority constants in the sort key, would
+    silently risk a wrong cost basis on exactly the figures this tool exists to get
+    right, with no signal to the operator. Because a tax figure must be correct rather
+    than plausibly guessed (the stance already taken for a missing FX rate or an
+    unmatched sell) we refuse to assume an order IBKR did not provide, and halt so the
+    operator can resolve the affected symbol against their own records.
 
     Why halting (and building no mitigation) is acceptable. The collision is rare to the
     point of being an edge case: a transfer is a position migration, whose normal
@@ -515,43 +509,28 @@ def process_files(args: argparse.Namespace) -> None:
     if parse_report.has_errors:
         raise SystemExit(2)
 
-    # Each extractor accumulates its row-level data-quality defects rather than failing
-    # on the first bad row, so a single run surfaces every rejected row. Concatenate the
-    # six defect lists and halt once at the boundary (exit 2, no workbook) if any are
-    # present -- consistent with the parse-error abort above.
-    trades, trade_defects = parse_trades_stocklike(model, asset_scope="stocks_etfs")
-    transfers, transfer_defects = parse_transfers(model)
-    dividends, dividend_defects = parse_dividends(model)
-    withholding, withholding_defects = parse_withholding_tax(model)
-    syep_interest, syep_defects = parse_syep_interest_details(model)
-    interest, interest_defects = parse_interest(model)
-
-    _report_extraction_defects(
-        [
-            *trade_defects,
-            *transfer_defects,
-            *dividend_defects,
-            *withholding_defects,
-            *syep_defects,
-            *interest_defects,
-        ],
-        logger,
-    )
+    # The source runs every section extractor, each of which accumulates its row-level
+    # data-quality defects rather than failing on the first bad row, so a single run
+    # surfaces every rejected row. The source unions those defects in extractor order;
+    # halt once at the boundary (exit 2, no workbook) if any are present -- consistent
+    # with the parse-error abort above.
+    parsed = IbkrActivityStatementSource(asset_scope="stocks_etfs").read(model)
+    _report_extraction_defects(parsed.defects, logger)
 
     logger.info(
         "Extracted: %d trades, %d dividends, %d withholding, %d interest, %d transfers",
-        len(trades),
-        len(dividends),
-        len(withholding),
-        len(interest),
-        len(transfers),
+        len(parsed.trades),
+        len(parsed.dividends),
+        len(parsed.withholding),
+        len(parsed.interest),
+        len(parsed.transfers),
     )
 
     # Cross-row invariant (not per-row): raises one aggregated DataQualityError,
     # translated to a clean exit 2 here. The per-row extraction defects above are
     # already handled.
     try:
-        validate_symbol_currency_uniqueness(trades, transfers)
+        validate_symbol_currency_uniqueness(parsed.trades, parsed.transfers)
     except DataQualityError as e:
         logger.error("%s", e)
         raise SystemExit(2) from e
@@ -559,7 +538,7 @@ def process_files(args: argparse.Namespace) -> None:
     # A transfer carries only a date (IBKR gives transfers no intraday time), so a
     # transfer sharing a symbol's day with other order-sensitive activity cannot be
     # ordered for FIFO. Halt rather than guess -- see the helper's rationale.
-    _report_transfer_ordering_collisions(trades, transfers, logger)
+    _report_transfer_ordering_collisions(parsed.trades, parsed.transfers, logger)
 
     # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
     # itself stays agnostic of how gaps are resolved.
@@ -569,7 +548,7 @@ def process_files(args: argparse.Namespace) -> None:
     # creation/consumption respects actual event ordering. Same-day same-symbol transfer
     # collisions were already rejected above, so the sort key needs no fabricated
     # transfer-vs-trade tie-break (see _event_sort_key).
-    events: list[TradeRow | TransferRow] = [*trades, *transfers]
+    events: list[TradeRow | TransferRow] = [*parsed.trades, *parsed.transfers]
     events.sort(key=_event_sort_key)
 
     realized = []
@@ -586,7 +565,7 @@ def process_files(args: argparse.Namespace) -> None:
 
     logger.info(
         "FIFO matching: %d trades processed, %d realized lines generated",
-        len(trades),
+        len(parsed.trades),
         len(realized),
     )
 
@@ -597,21 +576,25 @@ def process_files(args: argparse.Namespace) -> None:
     for rl in realized:
         if rl.sell_date.year == args.year:
             rb.add_realized(rl)
-    rb.set_dividends([d for d in dividends if d.date.year == args.year])
-    rb.set_withholding([w for w in withholding if w.date.year == args.year])
+    rb.set_dividends([d for d in parsed.dividends if d.date.year == args.year])
+    rb.set_withholding([w for w in parsed.withholding if w.date.year == args.year])
 
     # Keep only rows with a value date in the selected year (drop CSV 'Total' lines)
     rb.set_syep_interest(
-        [r for r in syep_interest if r.value_date and r.value_date.year == args.year]
+        [
+            r
+            for r in parsed.syep_interest
+            if r.value_date and r.value_date.year == args.year
+        ]
     )
-    rb.set_interest([i for i in interest if i.date.year == args.year])
+    rb.set_interest([i for i in parsed.interest if i.date.year == args.year])
     # Display only this year's transfers, like every other category above. The full
     # multi-file set (prior years included) was needed to seed FIFO, but that ingestion
     # is already complete (the matching loop above); ReportBuilder.transfers feeds only
     # the Stock Transfers sheet, never any computed figure. So scoping it to args.year
     # is display-only -- it cannot move a tax number -- and keeps a prior-year seeding
     # transfer from masquerading as a current-year event on a single-year report.
-    rb.set_transfers([t for t in transfers if t.date.year == args.year])
+    rb.set_transfers([t for t in parsed.transfers if t.date.year == args.year])
 
     logger.info(
         "Report built: %d realized lines, %d dividend lines, %d withholding lines",
@@ -645,7 +628,7 @@ def process_files(args: argparse.Namespace) -> None:
     if len(inputs) == 1:
         try:
             report = reconcile_realized_against_ibkr(
-                trades, rb.realized_lines, args.year
+                parsed.trades, rb.realized_lines, args.year
             )
             for r in report.reconciled:
                 logger.debug(

@@ -4,11 +4,10 @@ All figures derive from IBKR's signed Proceeds (the booked total consideration o
 fill) and Comm/Fee, which is deliberately never from unit price (T. Price, captured on
 TradeRow for audit but unused here). Tax basis and realization value are functions of
 total consideration, not unit price, and Proceeds is the authoritative booked total;
-reconstructing it as Quantity × T. Price would only reintroduce per-unit rounding scaled
-by quantity. Basis includes buy commission; net proceeds deduct sell commission, which
-matches PT treatment (acquisition/disposal value adjusted by the expenses inherent to
-each).
-
+reconstructing it as Quantity times T. Price would only reintroduce per-unit rounding
+scaled by quantity. Basis includes buy commission; net proceeds deduct sell commission,
+which matches PT treatment (acquisition/disposal value adjusted by the expenses inherent
+to each).
 """
 
 from __future__ import annotations

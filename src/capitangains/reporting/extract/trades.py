@@ -6,6 +6,7 @@ import datetime as dt
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal
 
 from capitangains.conv import to_dec_strict
 from capitangains.errors import DataQualityError
@@ -15,9 +16,13 @@ from ._common import ExtractionDefect, _require_date, _require_decimal, _require
 
 logger = logging.getLogger(__name__)
 
+# Accepted asset-category filters. Kept in lockstep with ALL_SCOPES_SET (its keys): a
+# new scope must be added to both, and mypy flags a key the Literal does not list.
+AssetScope = Literal["stocks", "etfs", "stocks_etfs", "all"]
+
 _STOCKS = {"Stocks", "Stock"}
 _ETFS = {"ETF", "ETFs", "ETCs", "ETP"}
-ALL_SCOPES_SET: dict[str, set[str] | None] = {
+ALL_SCOPES_SET: dict[AssetScope, set[str] | None] = {
     "stocks": _STOCKS,
     "etfs": _ETFS,
     "stocks_etfs": _STOCKS | _ETFS,
@@ -133,7 +138,7 @@ def parse_trades_stocklike_row(
 
 
 def parse_trades_stocklike(
-    model: IbkrModel, asset_scope: str = "stocks"
+    model: IbkrModel, asset_scope: AssetScope = "stocks"
 ) -> tuple[list[TradeRow], list[ExtractionDefect]]:
     """Extract stock-like trades from 'Trades' section across header variants.
     asset_scope: 'stocks', 'etfs', 'stocks_etfs', 'all'

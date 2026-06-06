@@ -104,8 +104,8 @@ def test_fx_stale_fallback_beyond_cap_returns_none(tmp_path, caplog):
 
 
 def test_fx_date_past_table_end_returns_none(tmp_path):
-    # The "FX table ends in October, sale settles in December" case (finding #10,
-    # defect B): a date far past the last entry must not silently reuse the last rate.
+    # The "FX table ends in October, sale settles in December" case: a date far past the
+    # last entry must not silently reuse the last rate.
     path = _write_csv(tmp_path, [["2024-10-31", "USD", "1.20"]])
     table = FxTable.from_csv(path)
     assert table.get_rate(dt.date(2024, 12, 15), "USD") is None
@@ -113,9 +113,10 @@ def test_fx_date_past_table_end_returns_none(tmp_path):
 
 def test_fx_from_csv_rejects_unpadded_date(tmp_path):
     # A non-canonical (unpadded) ISO date sorts lexically out of chronological order and
-    # never matches a zero-padded lookup key. Finding #12 rejects it loudly at ingest
-    # rather than store it as an untrusted string and silently misprice (or, post-#10,
-    # spuriously report missing) every conversion that touches it.
+    # never matches a zero-padded lookup key. It is rejected loudly at ingest rather
+    # than stored as an untrusted string that would silently misprice every conversion
+    # that touches it (or, given that dates past the table end now return missing, make
+    # them spuriously report missing instead).
     path = _write_csv(tmp_path, [["2024-1-5", "USD", "1.20"]])
     with pytest.raises(ValueError, match="unparseable date"):
         FxTable.from_csv(path)
@@ -123,7 +124,7 @@ def test_fx_from_csv_rejects_unpadded_date(tmp_path):
 
 def test_fx_from_csv_rejects_invalid_calendar_date(tmp_path):
     # A structurally-malformed date (month 13) is likewise rejected at ingest, not
-    # stored as a key that lookup would have to defend against (finding #12).
+    # stored as a key that lookup would have to defend against.
     path = _write_csv(tmp_path, [["2024-13-01", "USD", "1.20"]])
     with pytest.raises(ValueError, match="unparseable date"):
         FxTable.from_csv(path)
