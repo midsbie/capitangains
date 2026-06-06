@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from openpyxl import load_workbook
 
-from capitangains.reporting import validate_symbol_currency_uniqueness
+from capitangains.reporting import detect_symbol_currency_violations
 from capitangains.reporting.extract import (
     DividendRow,
     InterestRow,
@@ -102,11 +102,12 @@ def _trade_row(symbol: str, currency: str) -> TradeRow:
     )
 
 
-def test_multi_currency_same_symbol_rejected():
-    """Same symbol in multiple currencies must raise at validation time."""
+def test_multi_currency_same_symbol_detected():
+    """Same symbol in multiple currencies is a detected violation."""
     trades = [_trade_row("ABC", "USD"), _trade_row("ABC", "EUR")]
-    with pytest.raises(ValueError, match="symbol-currency uniqueness"):
-        validate_symbol_currency_uniqueness(trades, [])
+    assert detect_symbol_currency_violations(trades, []) == {
+        "ABC": frozenset({"USD", "EUR"})
+    }
 
 
 def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():

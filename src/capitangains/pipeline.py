@@ -14,6 +14,7 @@ live in capitangains.diagnostics; this module only sequences them.
 Delegation map:
 - Parsing/model:    capitangains.model
 - Data extraction:  capitangains.reporting.source / capitangains.reporting.extract
+- Validation:       capitangains.reporting.validation
 - FIFO matching:    capitangains.reporting.fifo
 - FX conversion:    capitangains.reporting.fx
 - Reconciliation:   capitangains.reporting.reconcile
@@ -35,6 +36,7 @@ from capitangains.diagnostics import (
     report_missing_fx,
     report_reconciliation,
     report_statement_input_conflicts,
+    report_symbol_currency_violations,
     report_transfer_ordering_collisions,
 )
 from capitangains.errors import DataQualityError
@@ -45,8 +47,10 @@ from capitangains.reporting import (
     FxTable,
     IbkrActivityStatementSource,
     ReportBuilder,
+    detect_statement_input_conflicts,
+    detect_symbol_currency_violations,
+    detect_transfer_ordering_collisions,
     reconcile_realized_against_ibkr,
-    validate_symbol_currency_uniqueness,
 )
 from capitangains.reporting.gap_policy import build_gap_policy
 from capitangains.reporting.report_sink import ExcelReportSink
@@ -100,8 +104,10 @@ def run(options: RunOptions) -> None:
         reports.append(rep)
 
     # A multi-file run must be a single-account, non-overlapping set of statements;
-    # overlapping inputs would double-count trades into FIFO. Reject before merging.
-    report_statement_input_conflicts(inputs, models, logger)
+    # overlapping inputs would double-count trades into FIFO. Detect before merging and
+    # halt at the boundary if the inputs conflict.
+    input_conflicts = detect_statement_input_conflicts(inputs, models)
+    report_statement_input_conflicts(input_conflicts, logger)
 
     model = merge_models(models)
     parse_report = merge_reports(reports)
@@ -126,19 +132,17 @@ def run(options: RunOptions) -> None:
         len(parsed.transfers),
     )
 
-    # Cross-row invariant (not per-row): raises one aggregated DataQualityError,
-    # translated to a clean exit 2 here. The per-row extraction defects above are
-    # already handled.
-    try:
-        validate_symbol_currency_uniqueness(parsed.trades, parsed.transfers)
-    except DataQualityError as e:
-        logger.error("%s", e)
-        raise SystemExit(2) from e
+    # Cross-row invariant (not per-row): one trade currency per symbol. The per-row
+    # extraction defects above are already handled.
+    violations = detect_symbol_currency_violations(parsed.trades, parsed.transfers)
+    report_symbol_currency_violations(violations, logger)
 
     # A transfer carries only a date (IBKR gives transfers no intraday time), so a
     # transfer sharing a symbol's day with other order-sensitive activity cannot be
-    # ordered for FIFO. Halt rather than guess -- see the helper's rationale.
-    report_transfer_ordering_collisions(parsed.trades, parsed.transfers, logger)
+    # ordered for FIFO. Detect and halt rather than guess -- see the detector's
+    # rationale.
+    collisions = detect_transfer_ordering_collisions(parsed.trades, parsed.transfers)
+    report_transfer_ordering_collisions(collisions, logger)
 
     # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
     # itself stays agnostic of how gaps are resolved.

@@ -1,19 +1,18 @@
 """Aggregate diagnostics and full-pipeline behavior.
 
-Exercises ``capitangains.diagnostics`` (the boundary report helpers) and
-``capitangains.pipeline.run`` (the orchestration) together:
+Exercises capitangains.diagnostics (the boundary report helpers) and
+capitangains.pipeline.run (the orchestration) together:
 
-- ``parse_acknowledged_gaps``: parse the itemized ``SYMBOL@YYYY-MM-DD`` acknowledgment
-  spec; every malformed token is collected and reported as one ``DataQualityError``.
-- ``report_gap_acknowledgments``: two-way tie-out of the gaps found against the
-  operator's acknowledgments. Any unacknowledged gap, acknowledged-but-defective Basis,
-  or orphan acknowledgment is fatal (exit 2); a clean run emits one audit warning per
-  synthesized lot, so synthetic cost basis is never silent.
-- ``run``: aborts (exit 2, no workbook) on a malformed spec, a failed gap tie-out, or an
-  FX table that cannot supply every rate the EUR report needs; exits 1 on an unreadable
-  or unparseable FX table (a setup failure, not a data defect). Under ``--dry-run`` it
-  runs the full preflight and stops before the write, leaving any existing output
-  untouched.
+- parse_acknowledged_gaps: parse the itemized SYMBOL@YYYY-MM-DD acknowledgment spec;
+  every malformed token is collected and reported as one DataQualityError.
+- report_gap_acknowledgments: two-way tie-out of the gaps found against the operator's
+  acknowledgments. Any unacknowledged gap, acknowledged-but-defective Basis, or orphan
+  acknowledgment is fatal (exit 2); a clean run emits one audit warning per synthesized
+  lot, so synthetic cost basis is never silent.
+- run: aborts (exit 2, no workbook) on a malformed spec, a failed gap tie-out, or an FX
+  table that cannot supply every rate the EUR report needs; exits 1 on an unreadable or
+  unparseable FX table (a setup failure, not a data defect). Under --dry-run it runs the
+  full preflight and stops before the write, leaving any existing output untouched.
 """
 
 import csv
@@ -31,12 +30,19 @@ from capitangains.diagnostics import (
     report_gap_acknowledgments,
     report_reconciliation,
     report_statement_input_conflicts,
+    report_symbol_currency_violations,
     report_transfer_ordering_collisions,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser
 from capitangains.pipeline import RunOptions, run
-from capitangains.reporting import ReconciliationReport, SymbolReconciliation
+from capitangains.reporting import (
+    ReconciliationReport,
+    SymbolReconciliation,
+    TransferOrderingCollision,
+    detect_statement_input_conflicts,
+    detect_transfer_ordering_collisions,
+)
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo_domain import GapEvent, GapResolution
 
@@ -155,7 +161,35 @@ def test_report_gap_acknowledgments_accumulates_every_fatal_category(caplog):
     assert any("tie-out failed" in m for m in messages)
 
 
-# --- report_transfer_ordering_collisions ---------------------------------------------
+# --- symbol-currency violations: reporter --------------------------------------------
+
+
+def test_report_symbol_currency_violations_silent_when_empty(caplog):
+    logger = logging.getLogger("symccy_report_none")
+    with caplog.at_level(logging.ERROR):
+        report_symbol_currency_violations({}, logger)
+    assert caplog.records == []
+
+
+def test_report_symbol_currency_violations_lists_and_exits(caplog):
+    # One ERROR per offending symbol, then a summary, then a single exit 2 -- no
+    # fail-fast, mirroring the other boundary reporters.
+    logger = logging.getLogger("symccy_report_fatal")
+    violations = {
+        "ABC": frozenset({"USD", "EUR"}),
+        "XYZ": frozenset({"GBP", "USD"}),
+    }
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        report_symbol_currency_violations(violations, logger)
+
+    assert exc.value.code == 2
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("ABC" in m and "EUR" in m and "USD" in m for m in messages)
+    assert any("XYZ" in m and "GBP" in m and "USD" in m for m in messages)
+    assert any("symbol-currency uniqueness" in m for m in messages)
+
+
+# --- transfer ordering: detector -----------------------------------------------------
 
 
 def _trade_row(symbol, currency, date, qty="10"):
@@ -189,43 +223,38 @@ def _transfer_row(symbol, currency, date, direction="In"):
     )
 
 
-def test_report_transfer_ordering_collisions_silent_without_collision(caplog):
+def test_detect_transfer_ordering_collisions_silent_without_collision():
     # A transfer on a different day from the trade (same symbol), and a transfer sharing
-    # the trade's day but in a different symbol, are both independent for FIFO: no halt,
-    # no output. The guard is scoped to (symbol, currency, date).
-    logger = logging.getLogger("xfer_none")
+    # the trade's day but in a different symbol, are both independent for FIFO. The
+    # check is scoped to (symbol, currency, date), so neither is a collision.
     trades = [_trade_row("AAPL", "USD", "2024-06-10")]
     transfers = [
         _transfer_row("AAPL", "USD", "2024-03-15"),
         _transfer_row("MSFT", "USD", "2024-06-10"),
     ]
-    with caplog.at_level(logging.ERROR):
-        report_transfer_ordering_collisions(trades, transfers, logger)
-    assert caplog.records == []
+    assert detect_transfer_ordering_collisions(trades, transfers) == []
 
 
-def test_report_transfer_ordering_collisions_two_same_day_transfers_is_fatal(caplog):
+def test_detect_transfer_ordering_collisions_two_same_day_transfers():
     # Two transfers of the same symbol on the same day are equally unorderable -- IBKR
     # timestamps neither -- even with no trade that day.
-    logger = logging.getLogger("xfer_pair")
     transfers = [
         _transfer_row("AAPL", "USD", "2024-06-10", "In"),
         _transfer_row("AAPL", "USD", "2024-06-10", "Out"),
     ]
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_transfer_ordering_collisions([], transfers, logger)
+    assert detect_transfer_ordering_collisions([], transfers) == [
+        TransferOrderingCollision(
+            symbol="AAPL",
+            currency="USD",
+            date=dt.date(2024, 6, 10),
+            n_transfers=2,
+            n_trades=0,
+        )
+    ]
 
-    assert exc.value.code == 2
-    assert any(
-        "Unorderable same-day events" in r.getMessage() and "AAPL" in r.getMessage()
-        for r in caplog.records
-    )
 
-
-def test_report_transfer_ordering_collisions_lists_every_collision(caplog):
-    # Accumulate, do not fail fast: two distinct symbol-days each collide, and both are
-    # named before the single exit, so every one is visible in one pass.
-    logger = logging.getLogger("xfer_accum")
+def test_detect_transfer_ordering_collisions_lists_every_collision():
+    # Two distinct symbol-days collide; both are returned, sorted deterministically.
     trades = [
         _trade_row("AAPL", "USD", "2024-06-10"),
         _trade_row("VOD", "GBP", "2024-07-01"),
@@ -234,17 +263,41 @@ def test_report_transfer_ordering_collisions_lists_every_collision(caplog):
         _transfer_row("AAPL", "USD", "2024-06-10"),
         _transfer_row("VOD", "GBP", "2024-07-01"),
     ]
+    collisions = detect_transfer_ordering_collisions(trades, transfers)
+    assert [(c.symbol, c.n_transfers, c.n_trades) for c in collisions] == [
+        ("AAPL", 1, 1),
+        ("VOD", 1, 1),
+    ]
+
+
+# --- transfer ordering: reporter -----------------------------------------------------
+
+
+def test_report_transfer_ordering_collisions_silent_when_empty(caplog):
+    logger = logging.getLogger("xfer_report_none")
+    with caplog.at_level(logging.ERROR):
+        report_transfer_ordering_collisions([], logger)
+    assert caplog.records == []
+
+
+def test_report_transfer_ordering_collisions_lists_and_exits(caplog):
+    # Every collision is named, then a single summary, and one exit 2 -- no fail-fast.
+    logger = logging.getLogger("xfer_report_fatal")
+    collisions = [
+        TransferOrderingCollision("AAPL", "USD", dt.date(2024, 6, 10), 1, 1),
+        TransferOrderingCollision("VOD", "GBP", dt.date(2024, 7, 1), 2, 0),
+    ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_transfer_ordering_collisions(trades, transfers, logger)
+        report_transfer_ordering_collisions(collisions, logger)
 
     assert exc.value.code == 2
     messages = [r.getMessage() for r in caplog.records]
-    assert any("AAPL" in m for m in messages)
+    assert any("Unorderable same-day events" in m and "AAPL" in m for m in messages)
     assert any("VOD" in m for m in messages)
     assert any("2 symbol-day(s)" in m for m in messages)
 
 
-# --- report_statement_input_conflicts ------------------------------------------------
+# --- statement input conflicts: detector --------------------------------------------
 
 
 def _meta_model(*, account=None, period=None):
@@ -268,118 +321,112 @@ _Y2023 = "January 1, 2023 - December 31, 2023"
 _Y2024 = "January 1, 2024 - December 31, 2024"
 
 
-def test_statement_conflicts_single_file_is_skipped():
+def test_detect_statement_conflicts_single_file_is_skipped():
     # A lone statement has nothing to overlap; the check never inspects its metadata.
-    logger = logging.getLogger("conflicts_single")
-    report_statement_input_conflicts(
-        ["a.csv"], [_meta_model(account="U1", period=_Y2024)], logger
+    assert (
+        detect_statement_input_conflicts(
+            ["a.csv"], [_meta_model(account="U1", period=_Y2024)]
+        )
+        == []
     )
 
 
-def test_statement_conflicts_disjoint_periods_ok():
-    logger = logging.getLogger("conflicts_disjoint")
+def test_detect_statement_conflicts_disjoint_periods_ok():
     models = [
         _meta_model(account="U1", period=_Y2023),
         _meta_model(account="U1", period=_Y2024),
     ]
-    report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+    assert detect_statement_input_conflicts(["a.csv", "b.csv"], models) == []
 
 
-def test_statement_conflicts_overlapping_periods_fatal(caplog):
-    logger = logging.getLogger("conflicts_overlap")
+def test_detect_statement_conflicts_overlapping_periods():
     models = [
         _meta_model(account="U1", period=_Y2024),
         _meta_model(account="U1", period="June 1, 2024 - December 31, 2024"),
     ]
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
-
-    assert exc.value.code == 2
-    messages = [r.getMessage() for r in caplog.records]
+    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
     assert any(
-        "overlapping periods" in m and "a.csv" in m and "b.csv" in m for m in messages
+        "overlapping periods" in p and "a.csv" in p and "b.csv" in p for p in problems
     )
 
 
-def test_statement_conflicts_same_period_twice_fatal(caplog):
+def test_detect_statement_conflicts_same_period_twice():
     # The same file passed twice is the degenerate identical-interval overlap.
-    logger = logging.getLogger("conflicts_dup")
     model = _meta_model(account="U1", period=_Y2024)
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "a.csv"], [model, model], logger)
-
-    assert exc.value.code == 2
-    assert any("overlapping periods" in r.getMessage() for r in caplog.records)
+    problems = detect_statement_input_conflicts(["a.csv", "a.csv"], [model, model])
+    assert any("overlapping periods" in p for p in problems)
 
 
-def test_statement_conflicts_multiple_accounts_fatal(caplog):
+def test_detect_statement_conflicts_multiple_accounts():
     # Different accounts, even with disjoint periods, are out of scope (co-mingling).
-    logger = logging.getLogger("conflicts_accounts")
     models = [
         _meta_model(account="U1", period=_Y2023),
         _meta_model(account="U2", period=_Y2024),
     ]
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
-
-    assert exc.value.code == 2
-    assert any(
-        "multiple accounts" in r.getMessage()
-        and "U1" in r.getMessage()
-        and "U2" in r.getMessage()
-        for r in caplog.records
-    )
+    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
+    assert any("multiple accounts" in p and "U1" in p and "U2" in p for p in problems)
 
 
-def test_statement_conflicts_missing_period_fatal(caplog):
-    logger = logging.getLogger("conflicts_no_period")
+def test_detect_statement_conflicts_missing_period():
     models = [
         _meta_model(account="U1", period=_Y2023),
         _meta_model(account="U1", period=None),
     ]
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
-
-    assert exc.value.code == 2
-    assert any("missing reporting period" in r.getMessage() for r in caplog.records)
+    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
+    assert any("missing reporting period" in p for p in problems)
 
 
-def test_statement_conflicts_missing_account_fatal(caplog):
-    logger = logging.getLogger("conflicts_no_account")
+def test_detect_statement_conflicts_missing_account():
     models = [
         _meta_model(account="U1", period=_Y2023),
         _meta_model(account=None, period=_Y2024),
     ]
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
-
-    assert exc.value.code == 2
-    assert any("missing account number" in r.getMessage() for r in caplog.records)
+    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
+    assert any("missing account number" in p for p in problems)
 
 
-def test_statement_conflicts_unparseable_period_fatal(caplog):
-    logger = logging.getLogger("conflicts_bad_period")
+def test_detect_statement_conflicts_unparseable_period():
     models = [
         _meta_model(account="U1", period=_Y2023),
         _meta_model(account="U1", period="2024-01-01 to 2024-12-31"),
     ]
-    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
-
-    assert exc.value.code == 2
-    assert any("statement period" in r.getMessage().lower() for r in caplog.records)
+    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
+    assert any("statement period" in p.lower() for p in problems)
 
 
-def test_statement_conflicts_accumulates_every_problem(caplog):
-    # Three statements, three overlapping pairs: all are listed before the single exit.
-    logger = logging.getLogger("conflicts_accum")
+def test_detect_statement_conflicts_accumulates_every_problem():
+    # Three statements, three overlapping pairs: all are returned.
     models = [_meta_model(account="U1", period=_Y2024) for _ in range(3)]
+    problems = detect_statement_input_conflicts(["a.csv", "b.csv", "c.csv"], models)
+    overlaps = [p for p in problems if "overlapping periods" in p]
+    assert len(overlaps) == 3  # (a,b), (a,c), (b,c)
+
+
+# --- statement input conflicts: reporter ---------------------------------------------
+
+
+def test_report_statement_input_conflicts_silent_when_empty(caplog):
+    logger = logging.getLogger("conflicts_report_none")
+    with caplog.at_level(logging.ERROR):
+        report_statement_input_conflicts([], logger)
+    assert caplog.records == []
+
+
+def test_report_statement_input_conflicts_lists_and_exits(caplog):
+    logger = logging.getLogger("conflicts_report_fatal")
+    problems = [
+        "overlapping periods: a.csv and b.csv both cover 2024-06-01 to 2024-12-31.",
+        "inputs span multiple accounts (U1, U2); this tool reports one account at a "
+        "time.",
+    ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_statement_input_conflicts(["a.csv", "b.csv", "c.csv"], models, logger)
+        report_statement_input_conflicts(problems, logger)
 
     assert exc.value.code == 2
-    overlaps = [r for r in caplog.records if "overlapping periods" in r.getMessage()]
-    assert len(overlaps) == 3  # (a,b), (a,c), (b,c)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("overlapping periods" in m for m in messages)
+    assert any("multiple accounts" in m for m in messages)
+    assert any("single-account, non-overlapping set" in m for m in messages)
 
 
 # --- run() integration --------------------------------------------------------

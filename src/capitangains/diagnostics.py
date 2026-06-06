@@ -5,29 +5,26 @@ where a precondition is violated, a process exit. They share one stance: accumul
 every problem of a kind, emit one ERROR per item plus a summary, then raise a single
 SystemExit -- never fail-fast -- so the operator sees every defect in one pass.
 
-The functions are pure with respect to the data they inspect (no file I/O, no argparse);
-they take already-extracted domain objects and a logger. capitangains.pipeline sequences
-them between the stages whose output they check.
+The report_* helpers take already-computed findings (and a logger), never raw files or
+argparse: pure detection lives in capitangains.reporting.validation and the per-stage
+producers, and this module only renders the result and sets the exit.
+capitangains.pipeline sequences detection and reporting between the stages whose output
+they check.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import logging
-from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from capitangains.conv import parse_date
 from capitangains.errors import DataQualityError
-from capitangains.model import IbkrModel
 from capitangains.reporting import (
     ExtractionDefect,
     ReconciliationReport,
-    StatementPeriod,
     SymbolReconciliation,
-    TradeRow,
-    TransferRow,
-    parse_statement_metadata,
+    TransferOrderingCollision,
 )
 from capitangains.reporting.fifo_domain import GapEvent, GapKey, GapResolution
 
@@ -214,73 +211,63 @@ def report_missing_fx(
     raise SystemExit(2)
 
 
-def report_transfer_ordering_collisions(
-    trades: Sequence[TradeRow],
-    transfers: Sequence[TransferRow],
-    logger: logging.Logger,
+def report_symbol_currency_violations(
+    violations: Mapping[str, frozenset[str]], logger: logging.Logger
 ) -> None:
-    """Abort if a transfer shares a symbol's calendar day with other activity.
+    """Abort if any symbol appears under more than one trade currency.
 
-    Why this is fatal rather than resolved. FIFO lot creation and consumption are
-    order-sensitive and keyed by (symbol, currency): the sequence in which buys, sells,
-    transfer-ins (which seed a lot) and transfer-outs (which consume lots) are ingested
-    decides which lots a disposal matches, and therefore its cost basis and realized
-    P/L. IBKR's Trades section carries a full intraday timestamp (Date/Time), but its
-    Transfers section carries only a Date -- no time, and the Code does not encode one
-    -- so when a transfer lands on the same day as other order-sensitive activity in the
-    same symbol, their true intraday order is simply not in the data. There is no honest
-    way to deduce it.
-
-    The alternative, fabricating a convention (transfer-in before all same-day trades,
-    transfer-out after) and encoding it as priority constants in the sort key, would
-    silently risk a wrong cost basis on exactly the figures this tool exists to get
-    right, with no signal to the operator. Because a tax figure must be correct rather
-    than plausibly guessed (the stance already taken for a missing FX rate or an
-    unmatched sell) we refuse to assume an order IBKR did not provide, and halt so the
-    operator can resolve the affected symbol against their own records.
-
-    Why halting (and building no mitigation) is acceptable. The collision is rare to the
-    point of being an edge case: a transfer is a position migration, whose normal
-    lifecycle is migrate-then-hold (or migrate-then-trade-on-a-later-day), and
-    receiving-broker settlement windows push a transfer and same-symbol trading apart.
-    No convention or override mechanism is therefore built; this guard only states the
-    cause when the rare case occurs, preserving today's findings for future readers.
-
-    Scope. Only same (symbol, currency) matters, since consumption is keyed that way; a
-    transfer sharing a day with unrelated symbols is independent and stays silent. A
-    transfer colliding with another transfer of the same symbol on the same day is
-    equally unorderable and is caught here too. Every collision is listed, then a single
-    SystemExit(2), and a workbook is not written.
+    The detector (reporting.validation.detect_symbol_currency_violations) owns the
+    rationale; here we emit one ERROR per offending symbol plus a summary, then exit 2.
+    An empty mapping means the invariant holds and nothing is logged.
     """
-    trades_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
-    for t in trades:
-        trades_by_key[(t.symbol, t.currency, t.date)] += 1
+    if not violations:
+        return
 
-    transfers_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
-    for tr in transfers:
-        transfers_by_key[(tr.symbol, tr.currency, tr.date)] += 1
+    for sym, ccys in sorted(violations.items()):
+        logger.error(
+            "Symbol %s maps to multiple trade currencies: %s",
+            sym,
+            ", ".join(sorted(ccys)),
+        )
 
-    # A transfer collides when its (symbol, currency, date) also holds a trade, or a
-    # second transfer of the same symbol that day -- either way the intraday order is
-    # undetermined.
-    collisions = [
-        (key, n_xfer, trades_by_key.get(key, 0))
-        for key, n_xfer in transfers_by_key.items()
-        if trades_by_key.get(key, 0) > 0 or n_xfer > 1
-    ]
+    logger.error(
+        "symbol-currency uniqueness violated -- %d symbol(s) map to more than one "
+        "trade currency (each must map to exactly one); no workbook written.",
+        len(violations),
+    )
+    raise SystemExit(2)
+
+
+def report_transfer_ordering_collisions(
+    collisions: Sequence[TransferOrderingCollision], logger: logging.Logger
+) -> None:
+    """Abort if any transfer's FIFO order against same-day activity is undetermined.
+
+    The detector (reporting.validation.detect_transfer_ordering_collisions) owns the
+    why-unorderable rationale and the scope. The boundary policy lives here: rather than
+    fabricate a convention (transfer-in before all same-day trades, transfer-out after)
+    and silently risk a wrong cost basis on exactly the figures this tool exists to get
+    right, we refuse to assume an order IBKR did not provide. A tax figure must be
+    correct rather than plausibly guessed (the stance already taken for a missing FX
+    rate or an unmatched sell), so every collision is listed, then a single
+    SystemExit(2), and no workbook is written. The collision is a rare edge case (a
+    position migration normally migrates-then-holds, and settlement windows push
+    transfer and same-symbol trading apart), so no override mechanism is built; an empty
+    list is silent.
+    """
     if not collisions:
         return
 
-    for (symbol, currency, date), n_xfer, n_trade in sorted(collisions):
+    for c in collisions:
         logger.error(
             "Unorderable same-day events for %s (%s) on %s: %d transfer(s) and %d "
             "trade(s) share the date, but IBKR gives transfers no intraday time, so "
             "their FIFO order cannot be determined.",
-            symbol,
-            currency,
-            date,
-            n_xfer,
-            n_trade,
+            c.symbol,
+            c.currency,
+            c.date,
+            c.n_transfers,
+            c.n_trades,
         )
 
     logger.error(
@@ -296,70 +283,17 @@ def report_transfer_ordering_collisions(
 
 
 def report_statement_input_conflicts(
-    inputs: Sequence[str],
-    models: Sequence[IbkrModel],
-    logger: logging.Logger,
+    problems: Sequence[str], logger: logging.Logger
 ) -> None:
     """Abort unless the inputs are a single-account, non-overlapping set of statements.
 
-    Multi-file mode exists to supply prior-year statements so FIFO has the buy lots for
-    shares sold in the reporting year (see the module docstring). That is only coherent
-    when the inputs are distinct, non-overlapping slices of one account's history:
-
-    - Overlapping periods double-count. The same statement passed twice, or a combined
-      multi-year export alongside a standalone year, feeds duplicate trades into FIFO --
-      inflating proceeds and corrupting realized P/L on exactly the lots a filing
-      depends on. There is no safe row-level de-duplication (IBKR can legitimately emit
-      two distinct fills with identical symbol, time, quantity and price), so the only
-      honest response is to reject the overlap rather than silently merge it.
-    - Mixing accounts co-mingles unrelated positions into one report. The tool assumes a
-      single account; statements from two accounts are out of scope, not a merge.
-    - A missing or unparseable Account/Period makes disjointness unprovable. Consistent
-      with the rest of the pipeline's fail-closed stance (a missing FX rate, an
-      unmatched sell), an unverifiable precondition is a failure, not an assumption.
-
-    Single-file runs have nothing to overlap and skip the check. Every conflict is
-    listed, then a single SystemExit(2) -- no workbook written. Runs before merge_models
-    so the duplicate data never reaches FIFO and the merged diagnostics are not doubled.
+    The detector (reporting.validation.detect_statement_input_conflicts) owns the
+    rationale and produces one human-readable problem string per conflict. The
+    boundary lists every one, then a single SystemExit(2) -- no workbook written. An
+    empty sequence means the input set is coherent and nothing is logged. Sequenced
+    before merge_models so duplicate data never reaches FIFO and the merged diagnostics
+    are not doubled.
     """
-    if len(inputs) <= 1:
-        return
-
-    problems: list[str] = []
-    accounts: set[str] = set()
-    periods: list[tuple[str, StatementPeriod]] = []  # only the cleanly-extracted ones
-
-    for path, model in zip(inputs, models, strict=True):
-        try:
-            metadata = parse_statement_metadata(model)
-        except DataQualityError as e:
-            # Missing/malformed account or period: disjointness is unprovable for this
-            # file. parse_statement_metadata names the first defect; the rest surface on
-            # rerun once it is fixed.
-            problems.append(f"{path}: {e}")
-            continue
-
-        accounts.add(metadata.account)
-        periods.append((path, metadata.period))
-
-    if len(accounts) > 1:
-        problems.append(
-            f"inputs span multiple accounts ({', '.join(sorted(accounts))}); this tool "
-            "reports one account at a time."
-        )
-
-    # O(n^2) over the handful of statements a run ever takes; StatementPeriod owns the
-    # closed-interval overlap test.
-    for i, (p_path, p_period) in enumerate(periods):
-        for q_path, q_period in periods[i + 1 :]:
-            if p_period.overlaps(q_period):
-                lo = max(p_period.start, q_period.start)
-                hi = min(p_period.end, q_period.end)
-                problems.append(
-                    f"overlapping periods: {p_path} and {q_path} both cover "
-                    f"{lo} to {hi}."
-                )
-
     if not problems:
         return
 
