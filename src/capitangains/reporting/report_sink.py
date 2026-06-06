@@ -1,25 +1,22 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from .fifo_domain import RealizedLine
+from .extract import SyepInterestRow, WithholdingRow
+from .fifo_domain import RealizedLine, TransferProtocol
 from .money import quantize_money
 from .report_builder import ReportBuilder
-
-# Column ranges for realized trades sheet formatting (1-indexed Excel columns)
-# Columns: ticker(1), currency(2), date(3), qty(4), gross_tcy(5), fees_tcy(6),
-#          net_tcy(7), alloc_tcy(8), pl_tcy(9), gross_eur(10), fees_eur(11),
-#          net_eur(12), alloc_eur(13), pl_eur(14), legs_json(15)
-_REALIZED_TCY_MONEY_COLS = range(5, 10)  # Trade currency columns (gross..pl)
-_REALIZED_EUR_MONEY_COLS = range(10, 15)  # EUR columns (gross..pl)
 
 # Single canonical label table: one key set, with both locale strings co-located per
 # field, so a locale cannot silently diverge (a field cannot exist in one language
@@ -177,13 +174,17 @@ _LABELS: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 
+# Currency-to-symbol map for money number formats; defined once at module scope rather
+# than rebuilt on every cell. Currencies absent here fall back to a quoted ISO code.
+_CURRENCY_SYMBOLS: dict[str, str] = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
+
 
 def _gap_status(rl: RealizedLine) -> str:
     """Human-readable basis provenance for a realized line's status column.
 
     Distinguishes a clean FIFO match (empty) from the two gap outcomes: a residual lot
-    synthesized from IBKR's ``Basis`` versus an unmatched remainder left at zero cost.
-    ``gap_fixed`` implies ``has_gap``, so it is checked first.
+    synthesized from IBKR's Basis versus an unmatched remainder left at zero cost.
+    gap_fixed implies has_gap, so it is checked first.
     """
     if not rl.has_gap:
         return ""
@@ -192,66 +193,506 @@ def _gap_status(rl: RealizedLine) -> str:
     return "zero-cost gap"
 
 
+@dataclass(frozen=True)
+class _NumberFormats:
+    """Locale-aware Excel number-format strings. Pure formatting policy depending only
+    on the locale, kept separate from the workbook-writing sink so the column
+    descriptors that consume it do not depend on ExcelReportSink.
+    """
+
+    locale: str
+
+    @property
+    def date(self) -> str:
+        return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+
+    def money(self, ccy: str) -> str:
+        loc = self.locale.upper()
+        cur = (ccy or "").upper()
+        sym = _CURRENCY_SYMBOLS.get(cur)
+        if sym:
+            if cur == "EUR" and loc == "PT":
+                return f'#,##0.00 "{sym}"'
+            return f"{sym}#,##0.00"
+        if loc == "PT":
+            return f'#,##0.00 "{cur}"'
+        return f'"{cur}" #,##0.00'
+
+
+_RowT = TypeVar("_RowT")
+
+
+@dataclass(frozen=True)
+class _Column(ABC, Generic[_RowT]):
+    """One column of a uniform table sheet: a header-label key plus the two behaviors
+    that must change together when the column's rendering changes -- the cell-value
+    coercion and the number format. Bundling them in one polymorphic class is the SRP
+    unit ("how to render one kind of cell") and lets the engine apply both without
+    switching on a format kind.
+    """
+
+    header_key: str
+
+    @abstractmethod
+    def cell_value(self, row: _RowT) -> object: ...
+
+    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+        # None leaves the cell at openpyxl's default "General" format. Returning None
+        # (never "") and assigning only when non-None keeps TEXT cells untouched, a
+        # load-bearing byte-preservation detail.
+        return None
+
+
+@dataclass(frozen=True)
+class _TextColumn(_Column[_RowT]):
+    value: Callable[[_RowT], object]
+
+    def cell_value(self, row: _RowT) -> object:
+        return self.value(row)
+
+
+@dataclass(frozen=True)
+class _DateColumn(_Column[_RowT]):
+    value: Callable[[_RowT], dt.date | None]
+
+    def cell_value(self, row: _RowT) -> object:
+        return self.value(row)
+
+    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+        # Applied unconditionally, including to a None date (e.g. absent SYEP dates).
+        return formats.date
+
+
+@dataclass(frozen=True)
+class _QtyColumn(_Column[_RowT]):
+    value: Callable[[_RowT], Decimal]
+
+    def cell_value(self, row: _RowT) -> object:
+        return float(self.value(row))
+
+    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+        return "0.########"
+
+
+@dataclass(frozen=True)
+class _PctColumn(_Column[_RowT]):
+    value: Callable[[_RowT], Decimal]
+
+    def cell_value(self, row: _RowT) -> object:
+        return float(self.value(row))
+
+    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+        return "0.00####"
+
+
+@dataclass(frozen=True)
+class _MoneyColumn(_Column[_RowT]):
+    value: Callable[[_RowT], Decimal | None]
+    currency: Callable[[_RowT], str]
+
+    def cell_value(self, row: _RowT) -> object:
+        v = self.value(row)
+        return None if v is None else float(v)
+
+    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+        # The currency selector is a uniform callable (per-row lambda or constant EUR),
+        # so no isinstance branch is needed and the format follows each row's currency.
+        return formats.money(self.currency(row))
+
+
+def _legs_json(rl: RealizedLine) -> str:
+    """Serialize a realized line's matched buy lots for its JSON cell."""
+    return json.dumps(
+        [
+            {
+                "buy_date": (leg.buy_date.isoformat() if leg.buy_date else None),
+                "qty": str(leg.qty),
+                "alloc_cost_ccy": str(leg.alloc_cost_ccy),
+            }
+            for leg in rl.legs
+        ]
+    )
+
+
+@dataclass(frozen=True)
+class _AnexoJRow:
+    """One acquisition-leg row of the Annex J breakdown (a realized line flattened over
+    its legs) with the per-leg EUR profit/loss precomputed.
+    """
+
+    symbol: str
+    currency: str
+    buy_date: dt.date | None
+    sell_date: dt.date
+    qty: Decimal
+    alloc_eur: Decimal | None
+    proceeds_eur: Decimal | None
+    pl_eur: Decimal | None
+    transferred: bool
+    synthetic: bool
+
+
+def _anexo_j_rows(report: ReportBuilder) -> Iterator[_AnexoJRow]:
+    for rl in report.realized_lines:
+        for leg in rl.legs:
+            alloc_eur = leg.alloc_cost_eur
+            proceeds_eur = leg.proceeds_share_eur
+            # P/L only when both EUR operands exist; keep the proceeds - alloc order.
+            pl_eur = (
+                quantize_money(proceeds_eur - alloc_eur)
+                if alloc_eur is not None and proceeds_eur is not None
+                else None
+            )
+            yield _AnexoJRow(
+                symbol=rl.symbol,
+                currency=rl.currency,
+                buy_date=leg.buy_date,
+                sell_date=rl.sell_date,
+                qty=leg.qty,
+                alloc_eur=alloc_eur,
+                proceeds_eur=proceeds_eur,
+                pl_eur=pl_eur,
+                transferred=leg.transferred,
+                synthetic=leg.synthetic,
+            )
+
+
+@dataclass(frozen=True)
+class _PerSymbolRow:
+    """One symbol's totals (single trade currency plus EUR) with a gap flag."""
+
+    symbol: str
+    currency: str
+    pl_tcy: Decimal
+    net_tcy: Decimal
+    alloc_tcy: Decimal
+    pl_eur: Decimal
+    net_eur: Decimal
+    alloc_eur: Decimal
+    has_gap: bool
+
+
+def _per_symbol_rows(report: ReportBuilder) -> Iterator[_PerSymbolRow]:
+    # A symbol's totals silently fold in any gap-filled or synthesized line; flag the
+    # symbol so the aggregate isn't read as a clean FIFO result. Built once per call.
+    gap_symbols = {rl.symbol for rl in report.realized_lines if rl.has_gap}
+    # Invariant: each symbol maps to exactly one trade currency (enforced at ingestion),
+    # so the single by_currency entry is taken directly.
+    for symbol, totals in sorted(report.symbol_totals.items()):
+        ccy, ccy_totals = next(iter(totals.by_currency.items()))
+        yield _PerSymbolRow(
+            symbol=symbol,
+            currency=ccy,
+            pl_tcy=ccy_totals.realized,
+            net_tcy=ccy_totals.proceeds,
+            alloc_tcy=ccy_totals.alloc_cost,
+            pl_eur=totals.eur.realized,
+            net_eur=totals.eur.proceeds,
+            alloc_eur=totals.eur.alloc_cost,
+            has_gap=symbol in gap_symbols,
+        )
+
+
+@dataclass(frozen=True)
+class _SheetSpec(Generic[_RowT]):
+    """Declarative description of one uniform table sheet.
+
+    A column is defined exactly once, with its header label, value extractor, and format
+    behavior bundled in one _Column; and column order lives in the single ordered
+    columns list, so the header, value, and format for a column cannot desynchronize.
+    rows owns all per-sheet preparation (sorting, flattening legs over realized lines,
+    per-symbol aggregation) so the engine stays a pure header+row+format loop.
+
+    label_section is separate from sheet_key because they usually match but not always
+    (the SYEP sheet titles under "syep_interest" while its columns live under
+    "syep"). skip_if_empty is evaluated on the prepared rows; this equals a
+    source-collection check only because every provider is a 1:1 sort/passthrough; a
+    future filtering provider would need a source-level predicate instead.
+
+    """
+
+    sheet_key: str
+    label_section: str
+    columns: Sequence[_Column[_RowT]]
+    rows: Callable[[ReportBuilder], Iterable[_RowT]]
+    skip_if_empty: bool = False
+
+
+_REALIZED_SPEC: _SheetSpec[RealizedLine] = _SheetSpec(
+    sheet_key="realized",
+    label_section="realized",
+    rows=lambda report: report.realized_lines,
+    columns=(
+        _TextColumn[RealizedLine]("ticker", value=lambda rl: rl.symbol),
+        _TextColumn[RealizedLine]("trade_currency", value=lambda rl: rl.currency),
+        _DateColumn[RealizedLine]("sell_date", value=lambda rl: rl.sell_date),
+        _QtyColumn[RealizedLine]("qty_sold", value=lambda rl: rl.sell_qty),
+        _MoneyColumn[RealizedLine](
+            "gross_tcy",
+            value=lambda rl: rl.sell_gross_ccy,
+            currency=lambda rl: rl.currency,
+        ),
+        _MoneyColumn[RealizedLine](
+            "fees_tcy",
+            value=lambda rl: rl.sell_comm_ccy,
+            currency=lambda rl: rl.currency,
+        ),
+        _MoneyColumn[RealizedLine](
+            "net_tcy",
+            value=lambda rl: rl.sell_net_ccy,
+            currency=lambda rl: rl.currency,
+        ),
+        _MoneyColumn[RealizedLine](
+            "alloc_tcy",
+            value=lambda rl: sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0")),
+            currency=lambda rl: rl.currency,
+        ),
+        _MoneyColumn[RealizedLine](
+            "pl_tcy",
+            value=lambda rl: rl.realized_pl_ccy,
+            currency=lambda rl: rl.currency,
+        ),
+        _MoneyColumn[RealizedLine](
+            "gross_eur",
+            value=lambda rl: rl.sell_gross_eur,
+            currency=lambda _r: "EUR",
+        ),
+        _MoneyColumn[RealizedLine](
+            "fees_eur",
+            value=lambda rl: rl.sell_comm_eur,
+            currency=lambda _r: "EUR",
+        ),
+        _MoneyColumn[RealizedLine](
+            "net_eur",
+            value=lambda rl: rl.sell_net_eur,
+            currency=lambda _r: "EUR",
+        ),
+        _MoneyColumn[RealizedLine](
+            "alloc_eur",
+            value=lambda rl: rl.alloc_cost_eur,
+            currency=lambda _r: "EUR",
+        ),
+        _MoneyColumn[RealizedLine](
+            "pl_eur",
+            value=lambda rl: rl.realized_pl_eur,
+            currency=lambda _r: "EUR",
+        ),
+        _TextColumn[RealizedLine]("legs_json", value=_legs_json),
+        _TextColumn[RealizedLine]("gap_status", value=_gap_status),
+    ),
+)
+
+
+_ANEXO_J_SPEC: _SheetSpec[_AnexoJRow] = _SheetSpec(
+    sheet_key="anexo_j",
+    label_section="anexo_j",
+    rows=_anexo_j_rows,
+    columns=(
+        _TextColumn[_AnexoJRow]("ticker", value=lambda r: r.symbol),
+        _TextColumn[_AnexoJRow]("trade_currency", value=lambda r: r.currency),
+        _DateColumn[_AnexoJRow]("buy_date", value=lambda r: r.buy_date),
+        _DateColumn[_AnexoJRow]("sell_date", value=lambda r: r.sell_date),
+        _QtyColumn[_AnexoJRow]("qty", value=lambda r: r.qty),
+        _MoneyColumn[_AnexoJRow](
+            "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: "EUR"
+        ),
+        _MoneyColumn[_AnexoJRow](
+            "proceeds_eur", value=lambda r: r.proceeds_eur, currency=lambda _r: "EUR"
+        ),
+        _MoneyColumn[_AnexoJRow](
+            "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: "EUR"
+        ),
+        _TextColumn[_AnexoJRow](
+            "transferred", value=lambda r: "Yes" if r.transferred else ""
+        ),
+        _TextColumn[_AnexoJRow](
+            "synthetic", value=lambda r: "Yes" if r.synthetic else ""
+        ),
+    ),
+)
+
+
+_PER_SYMBOL_SPEC: _SheetSpec[_PerSymbolRow] = _SheetSpec(
+    sheet_key="per_symbol",
+    label_section="per_symbol",
+    rows=_per_symbol_rows,
+    columns=(
+        _TextColumn[_PerSymbolRow]("ticker", value=lambda r: r.symbol),
+        _TextColumn[_PerSymbolRow]("trade_currency", value=lambda r: r.currency),
+        _MoneyColumn[_PerSymbolRow](
+            "pl_tcy", value=lambda r: r.pl_tcy, currency=lambda r: r.currency
+        ),
+        _MoneyColumn[_PerSymbolRow](
+            "net_tcy", value=lambda r: r.net_tcy, currency=lambda r: r.currency
+        ),
+        _MoneyColumn[_PerSymbolRow](
+            "alloc_tcy", value=lambda r: r.alloc_tcy, currency=lambda r: r.currency
+        ),
+        _MoneyColumn[_PerSymbolRow](
+            "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: "EUR"
+        ),
+        _MoneyColumn[_PerSymbolRow](
+            "net_eur", value=lambda r: r.net_eur, currency=lambda _r: "EUR"
+        ),
+        _MoneyColumn[_PerSymbolRow](
+            "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: "EUR"
+        ),
+        _TextColumn[_PerSymbolRow](
+            "has_gap", value=lambda r: "Yes" if r.has_gap else ""
+        ),
+    ),
+)
+
+
+class _CashFlowRow(Protocol):
+    """Shared shape of the dividend and account-interest rows: a dated, described cash
+    flow in a trade currency with an optional EUR equivalent. Both render as the same
+    five-column sheet, so a single _cash_flow_spec builds both.
+    """
+
+    date: dt.date
+    currency: str
+    description: str
+    amount: Decimal
+    amount_eur: Decimal | None
+
+
+_CashFlowT = TypeVar("_CashFlowT", bound=_CashFlowRow)
+
+
+def _cash_flow_spec(
+    sheet_key: str, source: Callable[[ReportBuilder], Iterable[_CashFlowT]]
+) -> _SheetSpec[_CashFlowT]:
+    """Build the spec for a cash-flow sheet (dividends, account interest), sorted by
+    description. The sheet title and column labels share sheet_key as their section.
+    """
+    return _SheetSpec(
+        sheet_key=sheet_key,
+        label_section=sheet_key,
+        skip_if_empty=True,
+        rows=lambda report: sorted(
+            source(report), key=lambda row: row.description.lower()
+        ),
+        columns=(
+            _DateColumn[_CashFlowT]("date", value=lambda r: r.date),
+            _TextColumn[_CashFlowT]("currency", value=lambda r: r.currency),
+            _TextColumn[_CashFlowT]("desc", value=lambda r: r.description),
+            _MoneyColumn[_CashFlowT](
+                "amount", value=lambda r: r.amount, currency=lambda r: r.currency
+            ),
+            _MoneyColumn[_CashFlowT](
+                "amount_eur", value=lambda r: r.amount_eur, currency=lambda _r: "EUR"
+            ),
+        ),
+    )
+
+
+_DIVIDENDS_SPEC = _cash_flow_spec("dividends", lambda report: report.dividends)
+_INTEREST_SPEC = _cash_flow_spec("interest", lambda report: report.interest)
+
+
+_SYEP_SPEC: _SheetSpec[SyepInterestRow] = _SheetSpec(
+    sheet_key="syep_interest",
+    label_section="syep",
+    skip_if_empty=True,
+    rows=lambda report: report.syep_interest,
+    columns=(
+        _DateColumn[SyepInterestRow]("date", value=lambda s: s.value_date),
+        _TextColumn[SyepInterestRow]("currency", value=lambda s: s.currency),
+        _TextColumn[SyepInterestRow]("symbol", value=lambda s: s.symbol),
+        _DateColumn[SyepInterestRow]("start_date", value=lambda s: s.start_date),
+        _QtyColumn[SyepInterestRow]("quantity", value=lambda s: s.quantity),
+        _MoneyColumn[SyepInterestRow](
+            "collateral",
+            value=lambda s: s.collateral_amount,
+            currency=lambda s: s.currency,
+        ),
+        _PctColumn[SyepInterestRow]("market_rate", value=lambda s: s.market_rate_pct),
+        _PctColumn[SyepInterestRow](
+            "customer_rate", value=lambda s: s.customer_rate_pct
+        ),
+        _MoneyColumn[SyepInterestRow](
+            "interest_paid",
+            value=lambda s: s.interest_paid,
+            currency=lambda s: s.currency,
+        ),
+        _MoneyColumn[SyepInterestRow](
+            "interest_paid_eur",
+            value=lambda s: s.interest_paid_eur,
+            currency=lambda _s: "EUR",
+        ),
+        _TextColumn[SyepInterestRow]("code", value=lambda s: s.code),
+    ),
+)
+
+
+_WITHHOLDING_SPEC: _SheetSpec[WithholdingRow] = _SheetSpec(
+    sheet_key="withholding",
+    label_section="withholding",
+    skip_if_empty=True,
+    rows=lambda report: sorted(
+        report.withholding,
+        key=lambda row: (row.currency.upper(), row.description.lower()),
+    ),
+    columns=(
+        _DateColumn[WithholdingRow]("date", value=lambda w: w.date),
+        _TextColumn[WithholdingRow]("currency", value=lambda w: w.currency),
+        _TextColumn[WithholdingRow]("desc", value=lambda w: w.description),
+        _TextColumn[WithholdingRow]("type", value=lambda w: w.type),
+        _TextColumn[WithholdingRow]("country", value=lambda w: w.country),
+        _MoneyColumn[WithholdingRow](
+            "amount", value=lambda w: w.amount, currency=lambda w: w.currency
+        ),
+        _MoneyColumn[WithholdingRow](
+            "amount_eur", value=lambda w: w.amount_eur, currency=lambda _w: "EUR"
+        ),
+    ),
+)
+
+
+_TRANSFERS_SPEC: _SheetSpec[TransferProtocol] = _SheetSpec(
+    sheet_key="transfers",
+    label_section="transfers",
+    skip_if_empty=True,
+    rows=lambda report: sorted(report.transfers, key=lambda t: (t.date, t.symbol)),
+    columns=(
+        _DateColumn[TransferProtocol]("date", value=lambda t: t.date),
+        _TextColumn[TransferProtocol]("symbol", value=lambda t: t.symbol),
+        _TextColumn[TransferProtocol]("direction", value=lambda t: t.direction),
+        _QtyColumn[TransferProtocol]("quantity", value=lambda t: t.quantity),
+        _TextColumn[TransferProtocol]("currency", value=lambda t: t.currency),
+        _MoneyColumn[TransferProtocol](
+            "market_value",
+            value=lambda t: t.market_value,
+            currency=lambda t: t.currency,
+        ),
+        _TextColumn[TransferProtocol]("code", value=lambda t: t.code),
+    ),
+)
+
+
 class ReportSink(Protocol):
     def write(self, report: ReportBuilder) -> Path:  # returns written file path
         ...
 
 
-@dataclass
-class ExcelReportSink:
-    out_path: Path
-    locale: str = "PT"  # "PT" (default) or "EN"
+@dataclass(frozen=True)
+class _SheetWriter:
+    """One workbook under construction in a single locale.
 
-    @property
-    def _date_format(self) -> str:
-        """Excel date format string based on locale."""
-        return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+    Bundles the openpyxl workbook with the locale-derived label view and number formats
+    so the per-sheet writers do not re-thread that context on every call. Constructed
+    fresh per ExcelReportSink.write; frozen because the bindings are fixed for one build
+    even though the workbook they point at is mutated in place.
+    """
 
-    def _labels(self) -> dict[str, dict[str, str]]:
-        """Project the canonical label table onto the active locale.
+    wb: Workbook
+    labels: dict[str, dict[str, str]]
+    formats: _NumberFormats
 
-        Returns a ``{section: {field: text}}`` view for the selected locale; any locale
-        other than "EN" falls back to "PT" (the report's default).
-        """
-        loc = "EN" if (self.locale or "PT").upper() == "EN" else "PT"
-        return {
-            section: {field: trans[loc] for field, trans in fields.items()}
-            for section, fields in _LABELS.items()
-        }
-
-    def write(self, report: ReportBuilder) -> Path:
-        out_path = Path(self.out_path)
-        wb = Workbook()
-
-        # Remove the default sheet
-        ws_default = wb.active
-        if ws_default is not None:
-            wb.remove(ws_default)
-
-        labels = self._labels()
-
-        self._write_summary(wb, report, labels)
-        self._write_realized(wb, report, labels)
-        self._write_anexo_j(wb, report, labels)
-        self._write_per_symbol(wb, report, labels)
-        self._write_dividends(wb, report, labels)
-        self._write_interest(wb, report, labels)
-        self._write_syep_interest(wb, report, labels)
-        self._write_withholding(wb, report, labels)
-        self._write_transfers(wb, report, labels)
-
-        for _ws in wb.worksheets:
-            self._autosize(_ws)
-
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        wb.save(out_path)
-        return out_path
-
-    def _write_summary(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
+    def write_summary(self, report: ReportBuilder) -> None:
         # Summary sheet (totals)
-        ws = wb.create_sheet(title=labels["sheet"]["summary"])
+        ws = self.wb.create_sheet(title=self.labels["sheet"]["summary"])
         total_eur = sum(
             (rl.realized_pl_eur or Decimal("0") for rl in report.realized_lines),
             Decimal("0"),
@@ -273,437 +714,49 @@ class ExcelReportSink:
             totals_by_cur[rl.currency] = (
                 totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
             )
-        ws.append([labels["summary"]["metric"], labels["summary"]["amount"]])
+        ws.append([self.labels["summary"]["metric"], self.labels["summary"]["amount"]])
 
         # Primary EUR totals
-        ws.append([labels["summary"]["total_eur"], float(total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self._money_fmt_for_currency(
-            "EUR"
-        )
-        ws.append([labels["summary"]["proceeds_eur"], float(proceeds_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self._money_fmt_for_currency(
-            "EUR"
-        )
-        ws.append([labels["summary"]["alloc_eur"], float(alloc_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self._money_fmt_for_currency(
-            "EUR"
-        )
+        ws.append([self.labels["summary"]["total_eur"], float(total_eur)])
+        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money("EUR")
+        ws.append([self.labels["summary"]["proceeds_eur"], float(proceeds_total_eur)])
+        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money("EUR")
+        ws.append([self.labels["summary"]["alloc_eur"], float(alloc_total_eur)])
+        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money("EUR")
+
         for cur, amt in sorted(totals_by_cur.items()):
-            ws.append([labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)])
-            ws.cell(
-                row=ws.max_row, column=2
-            ).number_format = self._money_fmt_for_currency(cur)
-
-    def _write_realized(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        # Realized trades sheet
-        ws = wb.create_sheet(title=labels["sheet"]["realized"])
-        ws.append(
-            [
-                labels["realized"]["ticker"],
-                labels["realized"]["trade_currency"],
-                labels["realized"]["sell_date"],
-                labels["realized"]["qty_sold"],
-                labels["realized"]["gross_tcy"],
-                labels["realized"]["fees_tcy"],
-                labels["realized"]["net_tcy"],
-                labels["realized"]["alloc_tcy"],
-                labels["realized"]["pl_tcy"],
-                labels["realized"]["gross_eur"],
-                labels["realized"]["fees_eur"],
-                labels["realized"]["net_eur"],
-                labels["realized"]["alloc_eur"],
-                labels["realized"]["pl_eur"],
-                labels["realized"]["legs_json"],
-                labels["realized"]["gap_status"],
-            ]
-        )
-
-        date_fmt = self._date_format
-        qty_fmt = "0.########"
-
-        for rl in report.realized_lines:
-            alloc_cost_ccy = sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
-            legs_json = json.dumps(
-                [
-                    {
-                        "buy_date": (ld.buy_date.isoformat() if ld.buy_date else None),
-                        "qty": str(ld.qty),
-                        "alloc_cost_ccy": str(ld.alloc_cost_ccy),
-                    }
-                    for ld in rl.legs
-                ]
-            )
             ws.append(
-                [
-                    rl.symbol,
-                    rl.currency,
-                    rl.sell_date,
-                    float(rl.sell_qty),
-                    float(rl.sell_gross_ccy),
-                    float(rl.sell_comm_ccy),
-                    float(rl.sell_net_ccy),
-                    float(alloc_cost_ccy),
-                    float(rl.realized_pl_ccy),
-                    (None if rl.sell_gross_eur is None else float(rl.sell_gross_eur)),
-                    (None if rl.sell_comm_eur is None else float(rl.sell_comm_eur)),
-                    (None if rl.sell_net_eur is None else float(rl.sell_net_eur)),
-                    (None if rl.alloc_cost_eur is None else float(rl.alloc_cost_eur)),
-                    (None if rl.realized_pl_eur is None else float(rl.realized_pl_eur)),
-                    legs_json,
-                    _gap_status(rl),
-                ]
+                [self.labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)]
             )
-            r = ws.max_row
-            ws.cell(row=r, column=3).number_format = date_fmt
-            ws.cell(row=r, column=4).number_format = qty_fmt
-            tcy_fmt = self._money_fmt_for_currency(rl.currency)
-            for c in _REALIZED_TCY_MONEY_COLS:
-                ws.cell(row=r, column=c).number_format = tcy_fmt
-            eur_fmt = self._money_fmt_for_currency("EUR")
-            for c in _REALIZED_EUR_MONEY_COLS:
-                ws.cell(row=r, column=c).number_format = eur_fmt
+            ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(cur)
 
-    def _write_anexo_j(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        # Annex J helper (per-leg breakdown with EUR values)
-        ws = wb.create_sheet(title=labels["sheet"]["anexo_j"])
-        ws.append(
-            [
-                labels["anexo_j"]["ticker"],
-                labels["anexo_j"]["trade_currency"],
-                labels["anexo_j"]["buy_date"],
-                labels["anexo_j"]["sell_date"],
-                labels["anexo_j"]["qty"],
-                labels["anexo_j"]["alloc_eur"],
-                labels["anexo_j"]["proceeds_eur"],
-                labels["anexo_j"]["pl_eur"],
-                labels["anexo_j"]["transferred"],
-                labels["anexo_j"]["synthetic"],
-            ]
-        )
+    def write_table(self, spec: _SheetSpec[_RowT], report: ReportBuilder) -> None:
+        """Write one uniform table sheet from its spec.
 
-        date_fmt = self._date_format
-        qty_fmt = "0.########"
-
-        for rl in report.realized_lines:
-            for leg in rl.legs:
-                alloc_eur = leg.alloc_cost_eur
-                proceeds_eur = leg.proceeds_share_eur
-                pl_eur = None
-                if alloc_eur is not None and proceeds_eur is not None:
-                    pl_eur = quantize_money(proceeds_eur - alloc_eur)
-                # Check if lot was from a transfer
-                is_transferred = leg.transferred
-                ws.append(
-                    [
-                        rl.symbol,
-                        rl.currency,
-                        leg.buy_date,
-                        rl.sell_date,
-                        float(leg.qty),
-                        (None if alloc_eur is None else float(alloc_eur)),
-                        (None if proceeds_eur is None else float(proceeds_eur)),
-                        (None if pl_eur is None else float(pl_eur)),
-                        "Yes" if is_transferred else "",
-                        "Yes" if leg.synthetic else "",
-                    ]
-                )
-                r = ws.max_row
-                ws.cell(row=r, column=3).number_format = date_fmt
-                ws.cell(row=r, column=4).number_format = date_fmt
-                ws.cell(row=r, column=5).number_format = qty_fmt
-                for c in (6, 7, 8):
-                    ws.cell(
-                        row=r, column=c
-                    ).number_format = self._money_fmt_for_currency("EUR")
-
-    def _write_per_symbol(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        # Per-symbol summary (trade currency + EUR)
-        ws = wb.create_sheet(title=labels["sheet"]["per_symbol"])
-        ws.append(
-            [
-                labels["per_symbol"]["ticker"],
-                labels["per_symbol"]["trade_currency"],
-                labels["per_symbol"]["pl_tcy"],
-                labels["per_symbol"]["net_tcy"],
-                labels["per_symbol"]["alloc_tcy"],
-                labels["per_symbol"]["pl_eur"],
-                labels["per_symbol"]["net_eur"],
-                labels["per_symbol"]["alloc_eur"],
-                labels["per_symbol"]["has_gap"],
-            ]
-        )
-
-        # A symbol's per-symbol totals silently fold in any gap-filled or synthesized
-        # line; flag the symbol so the aggregate isn't read as a clean FIFO result.
-        gap_symbols = {rl.symbol for rl in report.realized_lines if rl.has_gap}
-
-        # Invariant: each symbol maps to exactly one trade currency
-        # (enforced by validate_symbol_currency_uniqueness at ingestion).
-        for symbol, totals in sorted(report.symbol_totals.items()):
-            ccy, ccy_totals = next(iter(totals.by_currency.items()))
-            row = [
-                symbol,
-                ccy,
-                float(ccy_totals.realized),
-                float(ccy_totals.proceeds),
-                float(ccy_totals.alloc_cost),
-                float(totals.eur.realized),
-                float(totals.eur.proceeds),
-                float(totals.eur.alloc_cost),
-                "Yes" if symbol in gap_symbols else "",
-            ]
-            ws.append(row)
-
-            r = ws.max_row
-            # Money formats for trade currency values
-            tcy_fmt = self._money_fmt_for_currency(ccy)
-            for c in (3, 4, 5):
-                ws.cell(row=r, column=c).number_format = tcy_fmt
-            for c in (6, 7, 8):
-                ws.cell(row=r, column=c).number_format = self._money_fmt_for_currency(
-                    "EUR"
-                )
-
-    def _write_dividends(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        if not report.dividends:
+        Header, value, and format for column N all derive from the single ordered
+        spec.columns[N], so they cannot desynchronize; the format is applied
+        positionally over the same list that produced the value, and only when the
+        column returns one (TEXT cells are left at openpyxl's default "General").
+        """
+        rows = list(spec.rows(report))
+        if not rows and spec.skip_if_empty:
             return
-        ws = wb.create_sheet(title=labels["sheet"]["dividends"])
-        ws.append(
-            [
-                labels["dividends"]["date"],
-                labels["dividends"]["currency"],
-                labels["dividends"]["desc"],
-                labels["dividends"]["amount"],
-                labels["dividends"]["amount_eur"],
-            ]
-        )
-        sorted_divs = sorted(report.dividends, key=lambda row: row.description.lower())
-        date_fmt = self._date_format
 
-        for d in sorted_divs:
-            ws.append(
-                [
-                    d.date,
-                    d.currency,
-                    d.description,
-                    float(d.amount),
-                    (None if d.amount_eur is None else float(d.amount_eur)),
-                ]
-            )
+        section = self.labels[spec.label_section]
+        ws = self.wb.create_sheet(title=self.labels["sheet"][spec.sheet_key])
+        ws.append([section[col.header_key] for col in spec.columns])
+
+        for row in rows:
+            ws.append([col.cell_value(row) for col in spec.columns])
             r = ws.max_row
-            ws.cell(row=r, column=1).number_format = date_fmt
-            ws.cell(row=r, column=4).number_format = self._money_fmt_for_currency(
-                d.currency
-            )
-            ws.cell(row=r, column=5).number_format = self._money_fmt_for_currency("EUR")
+            for idx, col in enumerate(spec.columns, start=1):
+                fmt = col.number_format(self.formats, row)
+                if fmt is not None:
+                    ws.cell(row=r, column=idx).number_format = fmt
 
-    def _write_interest(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        if not report.interest:
-            return
-        ws = wb.create_sheet(title=labels["sheet"]["interest"])
-        ws.append(
-            [
-                labels["interest"]["date"],
-                labels["interest"]["currency"],
-                labels["interest"]["desc"],
-                labels["interest"]["amount"],
-                labels["interest"]["amount_eur"],
-            ]
-        )
-        sorted_interest = sorted(
-            report.interest,
-            key=lambda row: row.description.lower(),
-        )
-        date_fmt = self._date_format
-
-        for d in sorted_interest:
-            ws.append(
-                [
-                    d.date,
-                    d.currency,
-                    d.description,
-                    float(d.amount),
-                    (None if d.amount_eur is None else float(d.amount_eur)),
-                ]
-            )
-            r = ws.max_row
-            ws.cell(row=r, column=1).number_format = date_fmt
-            ws.cell(row=r, column=4).number_format = self._money_fmt_for_currency(
-                d.currency
-            )
-            ws.cell(row=r, column=5).number_format = self._money_fmt_for_currency("EUR")
-
-    def _write_syep_interest(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        if not report.syep_interest:
-            return
-        ws = wb.create_sheet(title=labels["sheet"]["syep_interest"])
-        ws.append(
-            [
-                labels["syep"]["date"],
-                labels["syep"]["currency"],
-                labels["syep"]["symbol"],
-                labels["syep"]["start_date"],
-                labels["syep"]["quantity"],
-                labels["syep"]["collateral"],
-                labels["syep"]["market_rate"],
-                labels["syep"]["customer_rate"],
-                labels["syep"]["interest_paid"],
-                labels["syep"]["interest_paid_eur"],
-                labels["syep"]["code"],
-            ]
-        )
-        pct_fmt = "0.00####"
-        date_fmt = self._date_format
-        qty_fmt = "0.########"
-
-        for row in report.syep_interest:
-            ws.append(
-                [
-                    row.value_date,
-                    row.currency,
-                    row.symbol,
-                    row.start_date,
-                    float(row.quantity),
-                    float(row.collateral_amount),
-                    float(row.market_rate_pct),
-                    float(row.customer_rate_pct),
-                    float(row.interest_paid),
-                    (
-                        None
-                        if row.interest_paid_eur is None
-                        else float(row.interest_paid_eur)
-                    ),
-                    row.code,
-                ]
-            )
-            r = ws.max_row
-            ws.cell(row=r, column=1).number_format = date_fmt
-            ws.cell(row=r, column=4).number_format = date_fmt
-            ws.cell(row=r, column=5).number_format = qty_fmt
-            ws.cell(row=r, column=6).number_format = self._money_fmt_for_currency(
-                row.currency
-            )
-            ws.cell(row=r, column=7).number_format = pct_fmt
-            ws.cell(row=r, column=8).number_format = pct_fmt
-            ws.cell(row=r, column=9).number_format = self._money_fmt_for_currency(
-                row.currency
-            )
-            ws.cell(row=r, column=10).number_format = self._money_fmt_for_currency(
-                "EUR"
-            )
-
-    def _write_withholding(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        if not report.withholding:
-            return
-        ws = wb.create_sheet(title=labels["sheet"]["withholding"])
-        ws.append(
-            [
-                labels["withholding"]["date"],
-                labels["withholding"]["currency"],
-                labels["withholding"]["desc"],
-                labels["withholding"]["type"],
-                labels["withholding"]["country"],
-                labels["withholding"]["amount"],
-                labels["withholding"]["amount_eur"],
-            ]
-        )
-        sorted_withholding = sorted(
-            report.withholding,
-            key=lambda row: (
-                row.currency.upper(),
-                row.description.lower(),
-            ),
-        )
-        date_fmt = self._date_format
-
-        for d in sorted_withholding:
-            ws.append(
-                [
-                    d.date,
-                    d.currency,
-                    d.description,
-                    d.type,
-                    d.country,
-                    float(d.amount),
-                    (None if d.amount_eur is None else float(d.amount_eur)),
-                ]
-            )
-            r = ws.max_row
-            ws.cell(row=r, column=1).number_format = date_fmt
-            ws.cell(row=r, column=6).number_format = self._money_fmt_for_currency(
-                d.currency
-            )
-            ws.cell(row=r, column=7).number_format = self._money_fmt_for_currency("EUR")
-
-    def _write_transfers(
-        self, wb: Workbook, report: ReportBuilder, labels: dict[str, dict[str, str]]
-    ) -> None:
-        if not report.transfers:
-            return
-        ws = wb.create_sheet(title=labels["sheet"]["transfers"])
-        ws.append(
-            [
-                labels["transfers"]["date"],
-                labels["transfers"]["symbol"],
-                labels["transfers"]["direction"],
-                labels["transfers"]["quantity"],
-                labels["transfers"]["currency"],
-                labels["transfers"]["market_value"],
-                labels["transfers"]["code"],
-            ]
-        )
-        sorted_transfers = sorted(
-            report.transfers,
-            key=lambda t: (t.date, t.symbol),
-        )
-        date_fmt = self._date_format
-        qty_fmt = "0.########"
-
-        for t in sorted_transfers:
-            ws.append(
-                [
-                    t.date,
-                    t.symbol,
-                    t.direction,
-                    float(t.quantity),
-                    t.currency,
-                    float(t.market_value),
-                    t.code,
-                ]
-            )
-            r = ws.max_row
-            ws.cell(row=r, column=1).number_format = date_fmt
-            ws.cell(row=r, column=4).number_format = qty_fmt
-            ws.cell(row=r, column=6).number_format = self._money_fmt_for_currency(
-                t.currency
-            )
-
-    def _money_fmt_for_currency(self, ccy: str) -> str:
-        loc = self.locale.upper()
-        cur = (ccy or "").upper()
-        symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
-        sym = symbols.get(cur)
-        if sym:
-            if cur == "EUR" and loc == "PT":
-                return f'#,##0.00 "{sym}"'
-            return f"{sym}#,##0.00"
-        if loc == "PT":
-            return f'#,##0.00 "{cur}"'
-        return f'"{cur}" #,##0.00'
+    def autosize_all(self) -> None:
+        for ws in self.wb.worksheets:
+            self._autosize(ws)
 
     def _autosize(
         self, sheet: Worksheet, max_width: int = 60, min_width: int = 10
@@ -719,13 +772,14 @@ class ExcelReportSink:
                 if hasattr(v, "strftime"):
                     s = (
                         v.strftime("%d/%m/%Y")
-                        if self.locale.upper() == "PT"
+                        if self.formats.locale.upper() == "PT"
                         else v.strftime("%Y-%m-%d")
                     )
                 else:
                     s = str(v)
                 if len(s) > max_len:
                     max_len = len(s)
+
             header = header_values[col - 1] if col - 1 < len(header_values) else None
             if header:
                 max_len = max(max_len, len(str(header)))
@@ -733,3 +787,46 @@ class ExcelReportSink:
             if header and "JSON" in str(header):
                 width = min(width, 50)
             sheet.column_dimensions[get_column_letter(col)].width = width
+
+
+@dataclass
+class ExcelReportSink:
+    out_path: Path
+    locale: str = "PT"  # "PT" (default) or "EN"
+
+    def _labels(self) -> dict[str, dict[str, str]]:
+        """Project the canonical label table onto the active locale.
+
+        Returns a {section: {field: text}} view for the selected locale; any locale
+        other than "EN" falls back to "PT" (the report's default).
+        """
+        loc = "EN" if (self.locale or "PT").upper() == "EN" else "PT"
+        return {
+            section: {field: trans[loc] for field, trans in fields.items()}
+            for section, fields in _LABELS.items()
+        }
+
+    def write(self, report: ReportBuilder) -> Path:
+        out_path = Path(self.out_path)
+        wb = Workbook()
+
+        # Remove the default sheet
+        ws_default = wb.active
+        if ws_default is not None:
+            wb.remove(ws_default)
+
+        writer = _SheetWriter(wb, self._labels(), _NumberFormats(self.locale))
+        writer.write_summary(report)
+        writer.write_table(_REALIZED_SPEC, report)
+        writer.write_table(_ANEXO_J_SPEC, report)
+        writer.write_table(_PER_SYMBOL_SPEC, report)
+        writer.write_table(_DIVIDENDS_SPEC, report)
+        writer.write_table(_INTEREST_SPEC, report)
+        writer.write_table(_SYEP_SPEC, report)
+        writer.write_table(_WITHHOLDING_SPEC, report)
+        writer.write_table(_TRANSFERS_SPEC, report)
+        writer.autosize_all()
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        wb.save(out_path)
+        return out_path
