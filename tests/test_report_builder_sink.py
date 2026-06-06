@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from openpyxl import load_workbook
 
-from capitangains.cmd.cli import validate_symbol_currency_uniqueness
+from capitangains.reporting import validate_symbol_currency_uniqueness
 from capitangains.reporting.extract import (
     DividendRow,
     InterestRow,

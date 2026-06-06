@@ -61,7 +61,7 @@ def test_transfers_order_by_date_relative_to_trades():
     """A transfer carries no intraday time, so it sorts on date alone.
 
     A same-day, same-symbol transfer/trade collision can no longer reach this sort: it
-    is rejected upstream by _report_transfer_ordering_collisions, since IBKR provides no
+    is rejected upstream by report_transfer_ordering_collisions, since IBKR provides no
     transfer timestamp to order it. The only same-day pairings that survive to the sort
     are in independent symbols (immaterial to FIFO), so the key needs no fabricated
     transfer-vs-trade tie-break -- date ordering is sufficient.

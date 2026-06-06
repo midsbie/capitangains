@@ -16,7 +16,7 @@ def _event_sort_key(
     Trades sort by their real intraday timestamp (IBKR's Date/Time), with buys before
     sells only as a tie-break for an identical timestamp. Transfers carry no intraday
     time, so they sort by date alone. That is sufficient because
-    _report_transfer_ordering_collisions has already aborted the run if any transfer
+    report_transfer_ordering_collisions has already aborted the run if any transfer
     shared a (symbol, currency) day with other order-sensitive activity. The only
     same-day pairings that can still reach this sort are in independent symbols, whose
     relative order does not affect FIFO (consumption is keyed per symbol).
@@ -46,9 +46,9 @@ class EventStream:
     the concrete extract rows here keeps the matcher decoupled from the extract layer.
 
     Upstream precondition (the caller's): same-day same-symbol transfer/trade collisions
-    must already be rejected (cli._report_transfer_ordering_collisions). That guarantee
-    makes ordering transfers by date alone against intraday-stamped trades sound;
-    _event_sort_key carries the full rationale.
+    must already be rejected (diagnostics.report_transfer_ordering_collisions). That
+    guarantee makes ordering transfers by date alone against intraday-stamped trades
+    sound; _event_sort_key carries the full rationale.
     """
 
     def __init__(

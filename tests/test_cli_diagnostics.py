@@ -1,19 +1,21 @@
-"""CLI-level aggregate diagnostics.
+"""Aggregate diagnostics and full-pipeline behavior.
 
-- ``_parse_acknowledged_gaps``: parse the itemized ``SYMBOL@YYYY-MM-DD`` acknowledgment
+Exercises ``capitangains.diagnostics`` (the boundary report helpers) and
+``capitangains.pipeline.run`` (the orchestration) together:
+
+- ``parse_acknowledged_gaps``: parse the itemized ``SYMBOL@YYYY-MM-DD`` acknowledgment
   spec; every malformed token is collected and reported as one ``DataQualityError``.
-- ``_report_gap_acknowledgments``: two-way tie-out of the gaps found against the
+- ``report_gap_acknowledgments``: two-way tie-out of the gaps found against the
   operator's acknowledgments. Any unacknowledged gap, acknowledged-but-defective Basis,
   or orphan acknowledgment is fatal (exit 2); a clean run emits one audit warning per
   synthesized lot, so synthetic cost basis is never silent.
-- ``process_files``: aborts (exit 2, no workbook) on a malformed spec, a failed gap
-  tie-out, or an FX table that cannot supply every rate the EUR report needs; exits 1
-  on an unreadable or unparseable FX table (a setup failure, not a data defect). Under
-  ``--dry-run`` it runs the full preflight and stops before the write, leaving any
-  existing output untouched.
+- ``run``: aborts (exit 2, no workbook) on a malformed spec, a failed gap tie-out, or an
+  FX table that cannot supply every rate the EUR report needs; exits 1 on an unreadable
+  or unparseable FX table (a setup failure, not a data defect). Under ``--dry-run`` it
+  runs the full preflight and stops before the write, leaving any existing output
+  untouched.
 """
 
-import argparse
 import csv
 import datetime as dt
 import logging
@@ -22,18 +24,18 @@ from decimal import Decimal
 import pytest
 from openpyxl import load_workbook
 
-from capitangains.cmd.cli import (
-    _format_reconciliation_sample,
-    _parse_acknowledged_gaps,
-    _report_gap_acknowledgments,
-    _report_reconciliation,
-    _report_statement_input_conflicts,
-    _report_transfer_ordering_collisions,
-    build_argparser,
-    process_files,
+from capitangains.cmd.cli import build_argparser
+from capitangains.diagnostics import (
+    format_reconciliation_sample,
+    parse_acknowledged_gaps,
+    report_gap_acknowledgments,
+    report_reconciliation,
+    report_statement_input_conflicts,
+    report_transfer_ordering_collisions,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser
+from capitangains.pipeline import RunOptions, run
 from capitangains.reporting import ReconciliationReport, SymbolReconciliation
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo_domain import GapEvent, GapResolution
@@ -50,24 +52,24 @@ def _gap(*, outcome, symbol="AAPL", date=dt.date(2024, 1, 1), message="no buy hi
     )
 
 
-# --- _parse_acknowledged_gaps ---------------------------------------------------------
+# --- parse_acknowledged_gaps ---------------------------------------------------------
 
 
 def test_parse_acknowledged_gaps_none_and_empty_yield_empty_set():
-    assert _parse_acknowledged_gaps(None) == frozenset()
-    assert _parse_acknowledged_gaps("") == frozenset()
+    assert parse_acknowledged_gaps(None) == frozenset()
+    assert parse_acknowledged_gaps("") == frozenset()
 
 
 def test_parse_acknowledged_gaps_skips_empty_tokens():
     # Leading, trailing, and doubled commas (plus surrounding whitespace) are skipped,
     # not errors; the real key survives.
-    assert _parse_acknowledged_gaps(" ,BABA@2024-01-01,") == frozenset(
+    assert parse_acknowledged_gaps(" ,BABA@2024-01-01,") == frozenset(
         {("BABA", dt.date(2024, 1, 1))}
     )
 
 
 def test_parse_acknowledged_gaps_dedupes_repeated_keys():
-    assert _parse_acknowledged_gaps("BABA@2024-01-01,BABA@2024-01-01") == frozenset(
+    assert parse_acknowledged_gaps("BABA@2024-01-01,BABA@2024-01-01") == frozenset(
         {("BABA", dt.date(2024, 1, 1))}
     )
 
@@ -76,32 +78,32 @@ def test_parse_acknowledged_gaps_rejects_malformed_tokens():
     # No "@", empty symbol, empty date, and unparseable date are each malformed.
     for bad in ("BABAnoat", "@2024-01-01", "BABA@", "BABA@notadate"):
         with pytest.raises(DataQualityError):
-            _parse_acknowledged_gaps(bad)
+            parse_acknowledged_gaps(bad)
 
 
 def test_parse_acknowledged_gaps_lists_every_malformed_token():
     # Accumulate, do not fail fast: both bad tokens appear so the spec is fixed in one
     # pass.
     with pytest.raises(DataQualityError) as exc:
-        _parse_acknowledged_gaps("BABAnoat,VOD@nope")
+        parse_acknowledged_gaps("BABAnoat,VOD@nope")
     msg = str(exc.value)
     assert "BABAnoat" in msg and "VOD@nope" in msg
 
 
-# --- _report_gap_acknowledgments ------------------------------------------------------
+# --- report_gap_acknowledgments ------------------------------------------------------
 
 
 def test_report_gap_acknowledgments_no_gaps_no_acks_is_silent(caplog):
     logger = logging.getLogger("gaps_none")
     with caplog.at_level(logging.INFO):
-        _report_gap_acknowledgments([], frozenset(), logger)
+        report_gap_acknowledgments([], frozenset(), logger)
     assert caplog.records == []
 
 
 def test_report_gap_acknowledgments_unacknowledged_gap_is_fatal(caplog):
     logger = logging.getLogger("gaps_unack")
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_gap_acknowledgments(
+        report_gap_acknowledgments(
             [_gap(outcome=GapResolution.UNACKNOWLEDGED)], frozenset(), logger
         )
 
@@ -113,7 +115,7 @@ def test_report_gap_acknowledgments_synthesized_gap_warns(caplog):
     logger = logging.getLogger("gaps_synth")
     acknowledged = frozenset({("AAPL", dt.date(2024, 1, 1))})
     with caplog.at_level(logging.WARNING):
-        _report_gap_acknowledgments(
+        report_gap_acknowledgments(
             [_gap(outcome=GapResolution.SYNTHESIZED)], acknowledged, logger
         )
 
@@ -143,7 +145,7 @@ def test_report_gap_acknowledgments_accumulates_every_fatal_category(caplog):
     )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_gap_acknowledgments([unack, defective], acknowledged, logger)
+        report_gap_acknowledgments([unack, defective], acknowledged, logger)
 
     assert exc.value.code == 2
     messages = [r.getMessage() for r in caplog.records]
@@ -153,7 +155,7 @@ def test_report_gap_acknowledgments_accumulates_every_fatal_category(caplog):
     assert any("tie-out failed" in m for m in messages)
 
 
-# --- _report_transfer_ordering_collisions ---------------------------------------------
+# --- report_transfer_ordering_collisions ---------------------------------------------
 
 
 def _trade_row(symbol, currency, date, qty="10"):
@@ -198,7 +200,7 @@ def test_report_transfer_ordering_collisions_silent_without_collision(caplog):
         _transfer_row("MSFT", "USD", "2024-06-10"),
     ]
     with caplog.at_level(logging.ERROR):
-        _report_transfer_ordering_collisions(trades, transfers, logger)
+        report_transfer_ordering_collisions(trades, transfers, logger)
     assert caplog.records == []
 
 
@@ -211,7 +213,7 @@ def test_report_transfer_ordering_collisions_two_same_day_transfers_is_fatal(cap
         _transfer_row("AAPL", "USD", "2024-06-10", "Out"),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_transfer_ordering_collisions([], transfers, logger)
+        report_transfer_ordering_collisions([], transfers, logger)
 
     assert exc.value.code == 2
     assert any(
@@ -233,7 +235,7 @@ def test_report_transfer_ordering_collisions_lists_every_collision(caplog):
         _transfer_row("VOD", "GBP", "2024-07-01"),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_transfer_ordering_collisions(trades, transfers, logger)
+        report_transfer_ordering_collisions(trades, transfers, logger)
 
     assert exc.value.code == 2
     messages = [r.getMessage() for r in caplog.records]
@@ -242,7 +244,7 @@ def test_report_transfer_ordering_collisions_lists_every_collision(caplog):
     assert any("2 symbol-day(s)" in m for m in messages)
 
 
-# --- _report_statement_input_conflicts ------------------------------------------------
+# --- report_statement_input_conflicts ------------------------------------------------
 
 
 def _meta_model(*, account=None, period=None):
@@ -269,7 +271,7 @@ _Y2024 = "January 1, 2024 - December 31, 2024"
 def test_statement_conflicts_single_file_is_skipped():
     # A lone statement has nothing to overlap; the check never inspects its metadata.
     logger = logging.getLogger("conflicts_single")
-    _report_statement_input_conflicts(
+    report_statement_input_conflicts(
         ["a.csv"], [_meta_model(account="U1", period=_Y2024)], logger
     )
 
@@ -280,7 +282,7 @@ def test_statement_conflicts_disjoint_periods_ok():
         _meta_model(account="U1", period=_Y2023),
         _meta_model(account="U1", period=_Y2024),
     ]
-    _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+    report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
 
 def test_statement_conflicts_overlapping_periods_fatal(caplog):
@@ -290,7 +292,7 @@ def test_statement_conflicts_overlapping_periods_fatal(caplog):
         _meta_model(account="U1", period="June 1, 2024 - December 31, 2024"),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
     assert exc.value.code == 2
     messages = [r.getMessage() for r in caplog.records]
@@ -304,7 +306,7 @@ def test_statement_conflicts_same_period_twice_fatal(caplog):
     logger = logging.getLogger("conflicts_dup")
     model = _meta_model(account="U1", period=_Y2024)
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "a.csv"], [model, model], logger)
+        report_statement_input_conflicts(["a.csv", "a.csv"], [model, model], logger)
 
     assert exc.value.code == 2
     assert any("overlapping periods" in r.getMessage() for r in caplog.records)
@@ -318,7 +320,7 @@ def test_statement_conflicts_multiple_accounts_fatal(caplog):
         _meta_model(account="U2", period=_Y2024),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
     assert exc.value.code == 2
     assert any(
@@ -336,7 +338,7 @@ def test_statement_conflicts_missing_period_fatal(caplog):
         _meta_model(account="U1", period=None),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
     assert exc.value.code == 2
     assert any("missing reporting period" in r.getMessage() for r in caplog.records)
@@ -349,7 +351,7 @@ def test_statement_conflicts_missing_account_fatal(caplog):
         _meta_model(account=None, period=_Y2024),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
     assert exc.value.code == 2
     assert any("missing account number" in r.getMessage() for r in caplog.records)
@@ -362,7 +364,7 @@ def test_statement_conflicts_unparseable_period_fatal(caplog):
         _meta_model(account="U1", period="2024-01-01 to 2024-12-31"),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
+        report_statement_input_conflicts(["a.csv", "b.csv"], models, logger)
 
     assert exc.value.code == 2
     assert any("statement period" in r.getMessage().lower() for r in caplog.records)
@@ -373,14 +375,14 @@ def test_statement_conflicts_accumulates_every_problem(caplog):
     logger = logging.getLogger("conflicts_accum")
     models = [_meta_model(account="U1", period=_Y2024) for _ in range(3)]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        _report_statement_input_conflicts(["a.csv", "b.csv", "c.csv"], models, logger)
+        report_statement_input_conflicts(["a.csv", "b.csv", "c.csv"], models, logger)
 
     assert exc.value.code == 2
     overlaps = [r for r in caplog.records if "overlapping periods" in r.getMessage()]
     assert len(overlaps) == 3  # (a,b), (a,c), (b,c)
 
 
-# --- process_files integration --------------------------------------------------------
+# --- run() integration --------------------------------------------------------
 
 
 _TRADES_HEADER = [
@@ -497,16 +499,15 @@ def _write_single_sell(path, *, symbol, currency, basis, realized, proceeds="120
         csv.writer(fp).writerows([_TRADES_HEADER, sell])
 
 
-def _args(stmt, out):
-    return argparse.Namespace(
-        input=[str(stmt)],
+def _args(stmt, out, *, fx_table=None, auto_fix_sell_gaps=None, dry_run=False):
+    return RunOptions(
+        inputs=[str(stmt)],
         year=2024,
-        fx_table=None,
+        fx_table=fx_table,
         locale="EN",
         output=str(out),
-        auto_fix_sell_gaps=None,
-        dry_run=False,
-        verbose=0,
+        auto_fix_sell_gaps=auto_fix_sell_gaps,
+        dry_run=dry_run,
     )
 
 
@@ -519,7 +520,7 @@ def test_process_files_exits_2_when_fx_table_incomplete(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -533,11 +534,10 @@ def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, caplog):
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     _write_statement(stmt)  # USD: needs the FX table to convert
-    args = _args(stmt, out)
-    args.fx_table = str(tmp_path / "does_not_exist.csv")
+    args = _args(stmt, out, fx_table=str(tmp_path / "does_not_exist.csv"))
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(args)
+        run(args)
 
     assert exc.value.code == 1
     assert not out.exists()
@@ -552,11 +552,10 @@ def test_process_files_exits_2_on_malformed_acknowledgment_spec(tmp_path, caplog
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     _write_statement(stmt)  # valid statement; only the spec is malformed
-    args = _args(stmt, out)
-    args.auto_fix_sell_gaps = "BABA@oops"
+    args = _args(stmt, out, auto_fix_sell_gaps="BABA@oops")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(args)
+        run(args)
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -572,7 +571,7 @@ def test_process_files_exits_2_on_malformed_trade_row(tmp_path, caplog):
         csv.writer(fp).writerows([_TRADES_HEADER, _trade("AAPL", "USD", date="")])
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -590,7 +589,7 @@ def test_process_files_exits_2_on_symbol_currency_violation(tmp_path, caplog):
         )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -613,7 +612,7 @@ def test_process_files_exits_2_on_same_day_transfer_trade_collision(tmp_path, ca
         csv.writer(fp).writerows(rows)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -655,7 +654,7 @@ def test_process_files_allows_same_day_transfer_in_a_different_symbol(tmp_path, 
         csv.writer(fp).writerows(rows)
 
     with caplog.at_level(logging.ERROR):
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert out.exists()
     assert not any(
@@ -679,7 +678,7 @@ def test_process_files_transfers_sheet_shows_only_reporting_year(tmp_path):
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(rows)
 
-    process_files(_args(stmt, out))
+    run(_args(stmt, out))
 
     assert out.exists()
     ws = load_workbook(out)["Stock Transfers"]
@@ -702,7 +701,7 @@ def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
         )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -725,7 +724,7 @@ def test_process_files_lists_every_extraction_defect(tmp_path, caplog):
         csv.writer(fp).writerows(rows)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -745,7 +744,7 @@ def test_process_files_exits_2_on_unacknowledged_gap(tmp_path, caplog):
     )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args(stmt, out))
+        run(_args(stmt, out))
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -758,11 +757,10 @@ def test_process_files_exits_2_on_orphan_acknowledgment(tmp_path, caplog):
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     _write_statement(stmt)  # fully matched: no gaps
-    args = _args(stmt, out)
-    args.auto_fix_sell_gaps = "GHOST@2024-01-01"
+    args = _args(stmt, out, auto_fix_sell_gaps="GHOST@2024-01-01")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(args)
+        run(args)
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -782,11 +780,10 @@ def test_process_files_exits_2_on_acknowledged_gap_with_corrupt_basis(tmp_path, 
     _write_single_sell(
         stmt, symbol="CORRUPT", currency="USD", basis="-99999", realized="200"
     )
-    args = _args(stmt, out)
-    args.auto_fix_sell_gaps = "CORRUPT@2024-06-10"
+    args = _args(stmt, out, auto_fix_sell_gaps="CORRUPT@2024-06-10")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(args)
+        run(args)
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -803,11 +800,10 @@ def test_process_files_exits_2_on_acknowledged_gap_with_missing_basis(tmp_path, 
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     _write_single_sell(stmt, symbol="NOBASIS", currency="USD", basis="", realized="")
-    args = _args(stmt, out)
-    args.auto_fix_sell_gaps = "NOBASIS@2024-06-10"
+    args = _args(stmt, out, auto_fix_sell_gaps="NOBASIS@2024-06-10")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(args)
+        run(args)
 
     assert exc.value.code == 2
     assert not out.exists()
@@ -825,11 +821,10 @@ def test_process_files_synthesizes_acknowledged_gap_and_writes_workbook(
     _write_single_sell(
         stmt, symbol="EURGAP", currency="EUR", basis="-1000", realized="200"
     )
-    args = _args(stmt, out)
-    args.auto_fix_sell_gaps = "EURGAP@2024-06-10"
+    args = _args(stmt, out, auto_fix_sell_gaps="EURGAP@2024-06-10")
 
     with caplog.at_level(logging.WARNING):
-        process_files(args)
+        run(args)
 
     assert out.exists()
     assert any("Synthesized residual lot" in r.getMessage() for r in caplog.records)
@@ -853,11 +848,10 @@ def test_process_files_dry_run_writes_no_workbook_on_clean_input(tmp_path, caplo
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     _write_statement(stmt, currency="EUR")  # matched, EUR: clean through to the write
-    args = _args(stmt, out)
-    args.dry_run = True
+    args = _args(stmt, out, dry_run=True)
 
     with caplog.at_level(logging.INFO):
-        process_files(args)  # no SystemExit
+        run(args)  # no SystemExit
 
     assert not out.exists()
     assert any("Dry run" in r.getMessage() for r in caplog.records)
@@ -870,10 +864,9 @@ def test_process_files_dry_run_does_not_overwrite_existing_output(tmp_path):
     out = tmp_path / "out.xlsx"
     _write_statement(stmt, currency="EUR")
     out.write_bytes(b"prior report")
-    args = _args(stmt, out)
-    args.dry_run = True
+    args = _args(stmt, out, dry_run=True)
 
-    process_files(args)
+    run(args)
 
     assert out.read_bytes() == b"prior report"
 
@@ -885,18 +878,17 @@ def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows([_TRADES_HEADER, _trade("AAPL", "EUR", date="")])
-    args = _args(stmt, out)
-    args.dry_run = True
+    args = _args(stmt, out, dry_run=True)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(args)
+        run(args)
 
     assert exc.value.code == 2
     assert not out.exists()
     assert any("Date/Time" in r.getMessage() for r in caplog.records)
 
 
-# --- process_files multi-file overlap gate --------------------------------------------
+# --- run() multi-file overlap gate --------------------------------------------
 
 
 def _statement_meta_rows(account, period):
@@ -935,15 +927,14 @@ def _write_full_statement(path, *, account, period, year, currency="EUR"):
 
 
 def _args_multi(stmts, out, *, year=2024):
-    return argparse.Namespace(
-        input=[str(s) for s in stmts],
+    return RunOptions(
+        inputs=[str(s) for s in stmts],
         year=year,
         fx_table=None,
         locale="EN",
         output=str(out),
         auto_fix_sell_gaps=None,
         dry_run=False,
-        verbose=0,
     )
 
 
@@ -956,7 +947,7 @@ def test_process_files_disjoint_statements_write_workbook(tmp_path):
     _write_full_statement(a, account="U1", period=_Y2023, year=2023)
     _write_full_statement(b, account="U1", period=_Y2024, year=2024)
 
-    process_files(_args_multi([a, b], out))
+    run(_args_multi([a, b], out))
 
     assert out.exists()
 
@@ -971,14 +962,14 @@ def test_process_files_exits_2_on_overlapping_statements(tmp_path, caplog):
     _write_full_statement(b, account="U1", period=_Y2024, year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        process_files(_args_multi([a, b], out))
+        run(_args_multi([a, b], out))
 
     assert exc.value.code == 2
     assert not out.exists()
     assert any("overlapping periods" in r.getMessage() for r in caplog.records)
 
 
-# --- _format_reconciliation_sample ----------------------------------------------------
+# --- format_reconciliation_sample ----------------------------------------------------
 
 
 def _recon(symbol, computed, ibkr):
@@ -989,7 +980,7 @@ def _recon(symbol, computed, ibkr):
 
 def test_format_reconciliation_sample_lists_all_when_within_cap():
     items = [_recon("AAA", Decimal("1"), Decimal("2"))]
-    rendered = _format_reconciliation_sample(items)
+    rendered = format_reconciliation_sample(items)
     assert "showing" not in rendered
     assert "AAA (USD) mine=1 IBKR=2 diff=1" in rendered
 
@@ -998,7 +989,7 @@ def test_format_reconciliation_sample_labels_truncation():
     # More than the cap: the line announces "showing K of N" so a truncated sample is
     # never mistaken for the full set, and emits exactly the cap's worth of entries.
     items = [_recon(f"S{i:02d}", Decimal("1"), Decimal("3")) for i in range(12)]
-    rendered = _format_reconciliation_sample(items)
+    rendered = format_reconciliation_sample(items)
     assert rendered.startswith("showing 10 of 12:")
     assert rendered.count("mine=") == 10
     assert "S00" in rendered and "S09" in rendered  # first 10 shown
@@ -1019,7 +1010,7 @@ def test_report_reconciliation_separates_classes_by_severity(caplog):
     logger = logging.getLogger("recon_render")
 
     with caplog.at_level(logging.DEBUG, logger="recon_render"):
-        _report_reconciliation(report, logger)
+        report_reconciliation(report, logger)
 
     leveled = [(r.levelno, r.getMessage()) for r in caplog.records]
     assert any(

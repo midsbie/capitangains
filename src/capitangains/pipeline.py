@@ -1,0 +1,251 @@
+"""Application orchestration for the IBKR-to-Portugal capital-gains report.
+
+run is the composition root: given a RunOptions it wires the statement parser, the
+activity-statement source, the FIFO matcher (with its gap policy), FX conversion, the
+soft IBKR reconciliation, and the Excel sink into one chronological pipeline and drives
+them in order. It is framework-agnostic -- it depends on an explicit options value,
+never on argparse -- so the same pipeline can be exercised from a test or any other
+front-end, not only the CLI.
+
+Every stage that can reject the input is a fail-closed gate: the run aborts (exit 2, no
+workbook) rather than emit a figure it cannot stand behind. The per-stage diagnostics
+live in capitangains.diagnostics; this module only sequences them.
+
+Delegation map:
+- Parsing/model:    capitangains.model
+- Data extraction:  capitangains.reporting.source / capitangains.reporting.extract
+- FIFO matching:    capitangains.reporting.fifo
+- FX conversion:    capitangains.reporting.fx
+- Reconciliation:   capitangains.reporting.reconcile
+- Output writing:   capitangains.reporting.report_sink
+- Boundary reports: capitangains.diagnostics
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+from capitangains.diagnostics import (
+    parse_acknowledged_gaps,
+    report_extraction_defects,
+    report_gap_acknowledgments,
+    report_missing_fx,
+    report_reconciliation,
+    report_statement_input_conflicts,
+    report_transfer_ordering_collisions,
+)
+from capitangains.errors import DataQualityError
+from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
+from capitangains.reporting import (
+    EventStream,
+    FifoMatcher,
+    FxTable,
+    IbkrActivityStatementSource,
+    ReportBuilder,
+    reconcile_realized_against_ibkr,
+    validate_symbol_currency_uniqueness,
+)
+from capitangains.reporting.gap_policy import build_gap_policy
+from capitangains.reporting.report_sink import ExcelReportSink
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """Explicit, framework-agnostic inputs for one report run.
+
+    Mirrors the CLI surface but carries no argparse coupling: main translates the parsed
+    arguments into this value and run consumes it. Verbosity is deliberately absent --
+    logging is configured at the boundary before run is ever called.
+    """
+
+    inputs: Sequence[str]
+    year: int
+    fx_table: str | None
+    locale: str
+    output: str | None
+    auto_fix_sell_gaps: str | None
+    dry_run: bool
+
+
+def run(options: RunOptions) -> None:
+    logger = logging.getLogger(__name__)
+
+    # Parse the gap-acknowledgment spec before any file I/O so a malformed spec fails
+    # fast (exit 2) without touching the statements.
+    try:
+        acknowledged = parse_acknowledged_gaps(options.auto_fix_sell_gaps)
+    except DataQualityError as e:
+        logger.error("%s", e)
+        raise SystemExit(2) from e
+
+    # Parse one or more CSVs
+    inputs = options.inputs
+    logger.info("Reading %d file(s): %s", len(inputs), ", ".join(inputs))
+
+    parser = IbkrStatementCsvParser()
+    models = []
+    reports = []
+    for p in inputs:
+        m, rep = parser.parse_file(p)
+        logger.debug(
+            "Parsed %s: %d sections, %d subtables",
+            p,
+            len(m.sections),
+            sum(len(subs) for subs in m.sections.values()),
+        )
+        models.append(m)
+        reports.append(rep)
+
+    # A multi-file run must be a single-account, non-overlapping set of statements;
+    # overlapping inputs would double-count trades into FIFO. Reject before merging.
+    report_statement_input_conflicts(inputs, models, logger)
+
+    model = merge_models(models)
+    parse_report = merge_reports(reports)
+    parse_report.log_with(logger)
+    if parse_report.has_errors:
+        raise SystemExit(2)
+
+    # The source runs every section extractor, each of which accumulates its row-level
+    # data-quality defects rather than failing on the first bad row, so a single run
+    # surfaces every rejected row. The source unions those defects in extractor order;
+    # halt once at the boundary (exit 2, no workbook) if any are present -- consistent
+    # with the parse-error abort above.
+    parsed = IbkrActivityStatementSource(asset_scope="stocks_etfs").read(model)
+    report_extraction_defects(parsed.defects, logger)
+
+    logger.info(
+        "Extracted: %d trades, %d dividends, %d withholding, %d interest, %d transfers",
+        len(parsed.trades),
+        len(parsed.dividends),
+        len(parsed.withholding),
+        len(parsed.interest),
+        len(parsed.transfers),
+    )
+
+    # Cross-row invariant (not per-row): raises one aggregated DataQualityError,
+    # translated to a clean exit 2 here. The per-row extraction defects above are
+    # already handled.
+    try:
+        validate_symbol_currency_uniqueness(parsed.trades, parsed.transfers)
+    except DataQualityError as e:
+        logger.error("%s", e)
+        raise SystemExit(2) from e
+
+    # A transfer carries only a date (IBKR gives transfers no intraday time), so a
+    # transfer sharing a symbol's day with other order-sensitive activity cannot be
+    # ordered for FIFO. Halt rather than guess -- see the helper's rationale.
+    report_transfer_ordering_collisions(parsed.trades, parsed.transfers, logger)
+
+    # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
+    # itself stays agnostic of how gaps are resolved.
+    matcher = FifoMatcher(gap_policy=build_gap_policy(acknowledged))
+
+    # Replay trades and transfers through the matcher as one chronological stream so
+    # FIFO lot creation/consumption respects actual event ordering. EventStream owns
+    # that ordering (it sorts at construction), so the matcher's ingestion precondition
+    # is an invariant of the type rather than a contract this call site must honor.
+    # Same-day same-symbol transfer collisions were already rejected above.
+    realized = EventStream(parsed.trades, parsed.transfers).replay(matcher)
+
+    logger.info(
+        "FIFO matching: %d trades processed, %d realized lines generated",
+        len(parsed.trades),
+        len(realized),
+    )
+
+    report_gap_acknowledgments(matcher.gap_events, acknowledged, logger)
+
+    # Build report
+    rb = ReportBuilder(year=options.year)
+    for rl in realized:
+        if rl.sell_date.year == options.year:
+            rb.add_realized(rl)
+    rb.set_dividends([d for d in parsed.dividends if d.date.year == options.year])
+    rb.set_withholding([w for w in parsed.withholding if w.date.year == options.year])
+
+    # Keep only rows with a value date in the selected year (drop CSV 'Total' lines)
+    rb.set_syep_interest(
+        [
+            r
+            for r in parsed.syep_interest
+            if r.value_date and r.value_date.year == options.year
+        ]
+    )
+    rb.set_interest([i for i in parsed.interest if i.date.year == options.year])
+    # Display only this year's transfers, like every other category above. The full
+    # multi-file set (prior years included) was needed to seed FIFO, but that ingestion
+    # is already complete (the matching loop above); ReportBuilder.transfers feeds only
+    # the Stock Transfers sheet, never any computed figure. So scoping it to
+    # options.year is display-only -- it cannot move a tax number -- and keeps a
+    # prior-year seeding transfer from masquerading as a current-year event on a
+    # single-year report.
+    rb.set_transfers([t for t in parsed.transfers if t.date.year == options.year])
+
+    logger.info(
+        "Report built: %d realized lines, %d dividend lines, %d withholding lines",
+        len(rb.realized_lines),
+        len(rb.dividends),
+        len(rb.withholding),
+    )
+
+    # FX conversion if provided
+    fx: FxTable | None = None
+    if options.fx_table:
+        try:
+            fx = FxTable.from_csv(options.fx_table)
+        except Exception as e:
+            # A missing or unparseable FX table is a setup failure, not a defect in the
+            # statement data. It exits 1, a class apart from the curated gates' exit 2,
+            # and is surfaced as one clean ERROR rather than a raw crash.
+            logger.error(
+                "Failed to prepare FX conversion from %s: %s", options.fx_table, e
+            )
+            raise SystemExit(1) from e
+
+    rb.convert_eur(fx)
+    report_missing_fx(rb.fx_missing, logger)
+
+    # Soft reconciliation: cross-check our realized P/L against IBKR's own per-trade
+    # `Realized P/L`, per symbol, in each instrument's trade currency. No FX stands
+    # between the two sides, so a disagreement beyond cent rounding is a real accounting
+    # gap rather than a rate artifact. Single-file only: IBKR's per-statement realized
+    # column cannot be meaningfully summed across periods.
+    if len(inputs) == 1:
+        try:
+            report = reconcile_realized_against_ibkr(
+                parsed.trades, rb.realized_lines, options.year
+            )
+            report_reconciliation(report, logger)
+        except Exception:
+            logger.exception("Reconciliation failed; continuing without it.")
+    else:
+        logger.info(
+            "Skipping IBKR realized-P/L reconciliation for multi-file input "
+            "(spans multiple periods)."
+        )
+
+    # Determine output path
+    out_path = (
+        Path(options.output) if options.output else Path(f"report_{options.year}.xlsx")
+    )
+
+    # The workbook write is this program's only side effect; everything above is pure
+    # validation and computation, and every abort path precedes it. A dry run performs
+    # that full preflight and stops here, so an existing report at out_path is left
+    # untouched. (It cannot exercise the write stage itself -- serialization, path
+    # permissions, disk.)
+    if options.dry_run:
+        logger.info(
+            "Dry run: all checks passed; no workbook written (would write to %s).",
+            out_path,
+        )
+        return
+
+    # Write outputs via sink
+    sink = ExcelReportSink(out_path=out_path, locale=options.locale)
+    out_path = sink.write(rb)
+    logger.info("Wrote workbook to %s", out_path)

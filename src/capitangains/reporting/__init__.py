@@ -23,6 +23,7 @@ from .reconcile import (
 from .report_builder import ReportBuilder
 from .report_sink import ExcelReportSink
 from .source import IbkrActivityStatementSource, ParsedStatement
+from .validation import validate_symbol_currency_uniqueness
 
 __all__ = [
     "EventStream",
@@ -49,4 +50,5 @@ __all__ = [
     "ExcelReportSink",
     "IbkrActivityStatementSource",
     "ParsedStatement",
+    "validate_symbol_currency_uniqueness",
 ]
