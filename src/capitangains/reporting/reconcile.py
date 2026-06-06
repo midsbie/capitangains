@@ -50,6 +50,23 @@ class SymbolReconciliation:
         d = self.diff
         return d is not None and d <= self.tolerance
 
+    @property
+    def sign_diverged(self) -> bool:
+        """True when both sides booked realized P/L but disagree on gain vs loss.
+
+        A wrong gain/loss direction is a stronger signal than a magnitude gap: it
+        almost always means a structural matching or basis error, not rounding or a
+        partial lot. Restricted to material, two-sided cases -- a ``None`` side is
+        membership, not a sign flip, and a within-tolerance tie is not a divergence.
+        """
+        if self.computed is None or self.ibkr is None or self.is_match:
+            return False
+        return (
+            self.computed != 0
+            and self.ibkr != 0
+            and (self.computed > 0) != (self.ibkr > 0)
+        )
+
 
 @dataclass(frozen=True)
 class ReconciliationReport:
@@ -68,6 +85,25 @@ class ReconciliationReport:
     reconciled: list[SymbolReconciliation]
     synthetic: list[SymbolReconciliation]
     incomplete: list[tuple[str, str]]
+
+    @property
+    def sign_flips(self) -> list[SymbolReconciliation]:
+        """Independently-checked keys whose gain/loss direction disagrees with IBKR.
+
+        The strongest mismatch class: a wrong sign almost always marks a structural
+        matching or basis bug, so it is surfaced apart from mere magnitude gaps.
+        """
+        return [r for r in self.reconciled if r.sign_diverged]
+
+    @property
+    def value_diffs(self) -> list[SymbolReconciliation]:
+        """Independently-checked keys that disagree, but only in magnitude.
+
+        Every non-matching reconciled key that is not a sign flip -- a real gap (a
+        missing lot, a basis proxy), or the one-sided membership case where a side
+        booked no realized P/L (``diff`` is ``None``, so it is neither match nor flip).
+        """
+        return [r for r in self.reconciled if not r.is_match and not r.sign_diverged]
 
 
 def reconcile_realized_against_ibkr(

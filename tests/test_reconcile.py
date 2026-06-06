@@ -205,3 +205,69 @@ def test_each_symbol_compared_in_its_own_currency():
         ("GOOGL", "USD"),
     ]
     assert all(r.is_match for r in results)
+
+
+def test_sign_flip_is_sign_diverged():
+    # Our FIFO says a gain; IBKR's per-trade realized says a loss. The gain/loss
+    # direction disagrees -- a structural signal, flagged apart from a magnitude gap.
+    trades = [_trade("FLIP", "USD", "-100", "-2000.00")]
+    lines = [_line("FLIP", "USD", "1000.00")]
+
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
+
+    assert not r.is_match
+    assert r.sign_diverged
+
+
+def test_same_sign_large_gap_is_not_sign_diverged():
+    # Both sides agree it is a gain; only the magnitude differs -- a value gap, not a
+    # direction flip, so sign_diverged stays False while is_match is still False.
+    trades = [_trade("MAG", "USD", "-100", "5000.00")]
+    lines = [_line("MAG", "USD", "1000.00")]
+
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
+
+    assert not r.is_match
+    assert not r.sign_diverged
+
+
+def test_within_tolerance_opposite_signs_is_not_divergence():
+    # Opposite signs but both sub-cent: the diff is inside the rounding band, so it is a
+    # match, and sign_diverged must not fire on rounding noise.
+    trades = [_trade("TINY", "USD", "-100", "-0.004")]
+    lines = [_line("TINY", "USD", "0.004")]
+
+    [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
+
+    assert r.is_match
+    assert not r.sign_diverged
+
+
+def test_one_sided_membership_is_not_sign_diverged():
+    # A missing side is membership divergence, not a sign flip (it needs both sides).
+    trades = [_trade("ONE", "USD", "-100", "500.00")]
+
+    [r] = reconcile_realized_against_ibkr(trades, [], 2024).reconciled
+
+    assert r.computed is None
+    assert not r.sign_diverged
+
+
+def test_report_partitions_divergences_by_class():
+    # The report exposes divergence-class views over the independently-checked keys: a
+    # sign flip, a magnitude-only gap, and a clean match each land where they belong.
+    trades = [
+        _trade("FLIP", "USD", "-100", "-2000.00"),  # mine +1000 vs IBKR -2000: sign
+        _trade("GAP", "USD", "-100", "5000.00"),  # mine +1000 vs IBKR +5000: magnitude
+        _trade("OK", "USD", "-100", "10.00"),  # mine +10 vs IBKR +10: match
+    ]
+    lines = [
+        _line("FLIP", "USD", "1000.00"),
+        _line("GAP", "USD", "1000.00"),
+        _line("OK", "USD", "10.00"),
+    ]
+
+    report = reconcile_realized_against_ibkr(trades, lines, 2024)
+
+    assert [r.symbol for r in report.sign_flips] == ["FLIP"]
+    assert [r.symbol for r in report.value_diffs] == ["GAP"]

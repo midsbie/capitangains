@@ -63,8 +63,10 @@ from capitangains.reporting import (
     FifoMatcher,
     FxTable,
     IbkrActivityStatementSource,
+    ReconciliationReport,
     ReportBuilder,
     StatementPeriod,
+    SymbolReconciliation,
     TradeRow,
     TransferRow,
     parse_statement_metadata,
@@ -108,14 +110,14 @@ def validate_symbol_currency_uniqueness(
 def _parse_acknowledged_gaps(spec: str | None) -> frozenset[GapKey]:
     """Parse the operator's itemized gap-acknowledgment spec into a set of keys.
 
-    The spec is a comma-separated list of ``SYMBOL@YYYY-MM-DD`` tokens, each naming one
+    The spec is a comma-separated list of SYMBOL@YYYY-MM-DD tokens, each naming one
     unmatched SELL the operator has reviewed and authorized to be valued from IBKR's
     per-trade Basis. Symbols are case-sensitive and compared verbatim (only surrounding
-    whitespace is stripped); a single key authorizes every gap sharing that
-    ``(symbol, date)``. Empty tokens (from a leading, trailing, or doubled comma) are
-    skipped; ``None`` or an all-empty spec yields an empty set -- zero acknowledgments.
-    Every malformed token is collected and reported together as one ``DataQualityError``
-    so the spec can be fixed in a single pass.
+    whitespace is stripped); a single key authorizes every gap sharing that (symbol,
+    date). Empty tokens (from a leading, trailing, or doubled comma) are skipped; None
+    or an all-empty spec yields an empty set; zero acknowledgments.  Every malformed
+    token is collected and reported together as one DataQualityError so the spec can be
+    fixed in a single pass.
     """
     if spec is None:
         return frozenset()
@@ -447,6 +449,74 @@ def _report_statement_input_conflicts(
     raise SystemExit(2)
 
 
+_RECONCILIATION_SAMPLE = 10
+
+
+def _format_reconciliation_sample(items: Sequence[SymbolReconciliation]) -> str:
+    """Render a capped, count-honest sample of reconciliation entries for one log line.
+
+    Shows at most _RECONCILIATION_SAMPLE entries; when more exist it prefixes "showing K
+    of N", so a truncated list can never be read as the full set -- the signal the bare
+    [:10] slice it replaces did not give. diff is included so a synthetic or value line
+    keeps its magnitude visible.
+
+    """
+    head = "; ".join(
+        f"{r.symbol} ({r.currency}) mine={r.computed} IBKR={r.ibkr} diff={r.diff}"
+        for r in items[:_RECONCILIATION_SAMPLE]
+    )
+    if len(items) > _RECONCILIATION_SAMPLE:
+        return f"showing {_RECONCILIATION_SAMPLE} of {len(items)}: {head}"
+    return head
+
+
+def _report_reconciliation(
+    report: ReconciliationReport, logger: logging.Logger
+) -> None:
+    """Render the IBKR realized-P/L cross-check to the log, by divergence class.
+
+    Every reconciled key is traced at DEBUG; the divergence classes are then surfaced on
+    their own lines so distinct anomalies never share one. A gain/loss sign flip leads
+    ahead of magnitude-only gaps, since it almost always marks a structural matching or
+    basis bug rather than rounding. Synthesized-basis keys are reported apart at INFO:
+    their agreement with IBKR is tautological, so a green reconciliation must not claim
+    them, though a large diff on one still flags a real gap in its genuine portion.
+    """
+    for r in report.reconciled:
+        logger.debug(
+            "Reconciliation: %s (%s) - mine: %s, IBKR: %s, diff: %s (%s)",
+            r.symbol,
+            r.currency,
+            r.computed,
+            r.ibkr,
+            r.diff,
+            "OK" if r.is_match else "MISMATCH",
+        )
+    sign_flips = report.sign_flips
+    if sign_flips:
+        logger.warning(
+            "Reconciliation: %d symbol(s) disagree with IBKR on gain/loss direction "
+            "-- likely a matching or basis bug [%s]",
+            len(sign_flips),
+            _format_reconciliation_sample(sign_flips),
+        )
+    value_diffs = report.value_diffs
+    if value_diffs:
+        logger.warning(
+            "Reconciliation: %d symbol(s) disagree with IBKR realized P/L beyond "
+            "rounding [%s]",
+            len(value_diffs),
+            _format_reconciliation_sample(value_diffs),
+        )
+    if report.synthetic:
+        logger.info(
+            "Reconciliation: %d symbol(s) carry synthesized basis -- not independently "
+            "confirmed [%s]",
+            len(report.synthetic),
+            _format_reconciliation_sample(report.synthetic),
+        )
+
+
 def process_files(args: argparse.Namespace) -> None:
     # Get logger for this module
     logger = logging.getLogger(__name__)
@@ -598,42 +668,7 @@ def process_files(args: argparse.Namespace) -> None:
             report = reconcile_realized_against_ibkr(
                 parsed.trades, rb.realized_lines, args.year
             )
-            for r in report.reconciled:
-                logger.debug(
-                    "Reconciliation: %s (%s) - mine: %s, IBKR: %s, diff: %s (%s)",
-                    r.symbol,
-                    r.currency,
-                    r.computed,
-                    r.ibkr,
-                    r.diff,
-                    "OK" if r.is_match else "MISMATCH",
-                )
-            mismatches = [r for r in report.reconciled if not r.is_match]
-            if mismatches:
-                logger.warning(
-                    "Reconciliation: %d symbol(s) disagree with IBKR realized P/L "
-                    "[symbol, currency, mine, IBKR]: %s",
-                    len(mismatches),
-                    [
-                        (r.symbol, r.currency, r.computed, r.ibkr)
-                        for r in mismatches[:10]
-                    ],
-                )
-            if report.synthetic:
-                # A synthesized line agrees with IBKR by construction, so report these
-                # separately: a green reconciliation must not read as independent
-                # confirmation. The figures still matter since, where a symbol mixes
-                # synthesized and genuine sells, the diff tracks the genuine portion, so
-                # a large diff here is a real gap, not a tautology.
-                logger.info(
-                    "Reconciliation: %d symbol(s) carry synthesized basis -- not "
-                    "independently confirmed [symbol, currency, mine, IBKR, diff]: %s",
-                    len(report.synthetic),
-                    [
-                        (r.symbol, r.currency, r.computed, r.ibkr, r.diff)
-                        for r in report.synthetic[:10]
-                    ],
-                )
+            _report_reconciliation(report, logger)
         except Exception:
             logger.exception("Reconciliation failed; continuing without it.")
     else:

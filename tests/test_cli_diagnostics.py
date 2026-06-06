@@ -23,8 +23,10 @@ import pytest
 from openpyxl import load_workbook
 
 from capitangains.cmd.cli import (
+    _format_reconciliation_sample,
     _parse_acknowledged_gaps,
     _report_gap_acknowledgments,
+    _report_reconciliation,
     _report_statement_input_conflicts,
     _report_transfer_ordering_collisions,
     build_argparser,
@@ -32,6 +34,7 @@ from capitangains.cmd.cli import (
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser
+from capitangains.reporting import ReconciliationReport, SymbolReconciliation
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo_domain import GapEvent, GapResolution
 
@@ -973,3 +976,61 @@ def test_process_files_exits_2_on_overlapping_statements(tmp_path, caplog):
     assert exc.value.code == 2
     assert not out.exists()
     assert any("overlapping periods" in r.getMessage() for r in caplog.records)
+
+
+# --- _format_reconciliation_sample ----------------------------------------------------
+
+
+def _recon(symbol, computed, ibkr):
+    return SymbolReconciliation(
+        symbol=symbol, currency="USD", computed=computed, ibkr=ibkr, n_sells=1
+    )
+
+
+def test_format_reconciliation_sample_lists_all_when_within_cap():
+    items = [_recon("AAA", Decimal("1"), Decimal("2"))]
+    rendered = _format_reconciliation_sample(items)
+    assert "showing" not in rendered
+    assert "AAA (USD) mine=1 IBKR=2 diff=1" in rendered
+
+
+def test_format_reconciliation_sample_labels_truncation():
+    # More than the cap: the line announces "showing K of N" so a truncated sample is
+    # never mistaken for the full set, and emits exactly the cap's worth of entries.
+    items = [_recon(f"S{i:02d}", Decimal("1"), Decimal("3")) for i in range(12)]
+    rendered = _format_reconciliation_sample(items)
+    assert rendered.startswith("showing 10 of 12:")
+    assert rendered.count("mine=") == 10
+    assert "S00" in rendered and "S09" in rendered  # first 10 shown
+    assert "S10" not in rendered and "S11" not in rendered  # remainder truncated
+
+
+def test_report_reconciliation_separates_classes_by_severity(caplog):
+    # Sign flips and magnitude gaps each get their own WARNING; synthesized-basis keys
+    # are reported apart at INFO. One render, three distinct, correctly-leveled lines.
+    report = ReconciliationReport(
+        reconciled=[
+            _recon("FLIP", Decimal("1000"), Decimal("-2000")),  # sign flip
+            _recon("GAP", Decimal("1000"), Decimal("5000")),  # magnitude gap
+        ],
+        synthetic=[_recon("SYN", Decimal("42"), Decimal("42"))],
+        incomplete=[],
+    )
+    logger = logging.getLogger("recon_render")
+
+    with caplog.at_level(logging.DEBUG, logger="recon_render"):
+        _report_reconciliation(report, logger)
+
+    leveled = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert any(
+        lvl == logging.WARNING and "gain/loss direction" in m and "FLIP" in m
+        for lvl, m in leveled
+    )
+    assert any(
+        lvl == logging.WARNING and "beyond rounding" in m and "GAP" in m
+        for lvl, m in leveled
+    )
+    assert any(
+        lvl == logging.INFO and "synthesized basis" in m and "SYN" in m
+        for lvl, m in leveled
+    )
