@@ -1,3 +1,4 @@
+from .event_stream import EventStream
 from .extract import (
     ExtractionDefect,
     StatementMetadata,
@@ -24,6 +25,7 @@ from .report_sink import ExcelReportSink
 from .source import IbkrActivityStatementSource, ParsedStatement
 
 __all__ = [
+    "EventStream",
     "ExtractionDefect",
     "TradeRow",
     "TransferRow",

@@ -1,7 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.cmd.cli import _event_sort_key
+from capitangains.reporting.event_stream import _event_sort_key
 from capitangains.reporting.extract import TradeRow, TransferRow
 
 

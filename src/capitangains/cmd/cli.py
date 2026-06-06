@@ -58,6 +58,7 @@ from capitangains.model import (
     merge_reports,
 )
 from capitangains.reporting import (
+    EventStream,
     ExtractionDefect,
     FifoMatcher,
     FxTable,
@@ -102,27 +103,6 @@ def validate_symbol_currency_uniqueness(
         f"symbol-currency uniqueness violated -- each symbol must map to exactly "
         f"one trade currency, but the following appear in multiple:\n{details}"
     )
-
-
-def _event_sort_key(
-    event: TradeRow | TransferRow,
-) -> tuple[dt.date, str, int]:
-    """Order the merged trade/transfer stream for FIFO ingestion.
-
-    Trades sort by their real intraday timestamp (IBKR's Date/Time), with buys before
-    sells only as a tie-break for an identical timestamp. Transfers carry no intraday
-    time, so they sort by date alone. That is sufficient because
-    _report_transfer_ordering_collisions has already aborted the run if any transfer
-    shared a (symbol, currency) day with other order-sensitive activity. The only
-    same-day pairings that can still reach this sort are in independent symbols, whose
-    relative order does not affect FIFO (consumption is keyed per symbol).
-    """
-    if isinstance(event, TransferRow):
-        return (event.date, "", 0)
-    elif isinstance(event, TradeRow):
-        sub = 0 if event.quantity > 0 else 1
-        return (event.date, event.datetime_str, sub)
-    raise ValueError(f"unexpected event type: {type(event)}")
 
 
 def _parse_acknowledged_gaps(spec: str | None) -> frozenset[GapKey]:
@@ -544,24 +524,12 @@ def process_files(args: argparse.Namespace) -> None:
     # itself stays agnostic of how gaps are resolved.
     matcher = FifoMatcher(gap_policy=build_gap_policy(acknowledged))
 
-    # Merge trades and transfers into a single chronological stream so that FIFO lot
-    # creation/consumption respects actual event ordering. Same-day same-symbol transfer
-    # collisions were already rejected above, so the sort key needs no fabricated
-    # transfer-vs-trade tie-break (see _event_sort_key).
-    events: list[TradeRow | TransferRow] = [*parsed.trades, *parsed.transfers]
-    events.sort(key=_event_sort_key)
-
-    realized = []
-    for event in events:
-        if isinstance(event, TransferRow):
-            matcher.ingest_transfer(event)
-            continue
-        elif not isinstance(event, TradeRow):
-            raise ValueError(f"unexpected event type in merged stream: {type(event)}")
-
-        rl = matcher.ingest_trade(event)
-        if rl is not None:  # keep only realized lines generated from sells
-            realized.append(rl)
+    # Replay trades and transfers through the matcher as one chronological stream so
+    # FIFO lot creation/consumption respects actual event ordering. EventStream owns
+    # that ordering (it sorts at construction), so the matcher's ingestion precondition
+    # is an invariant of the type rather than a contract this call site must honor.
+    # Same-day same-symbol transfer collisions were already rejected above.
+    realized = EventStream(parsed.trades, parsed.transfers).replay(matcher)
 
     logger.info(
         "FIFO matching: %d trades processed, %d realized lines generated",

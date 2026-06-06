@@ -211,9 +211,10 @@ def parse_trades_stocklike(
                 skipped_rows += 1
 
     # Intentionally unsorted: ordering is the pipeline's responsibility, not the
-    # extractor's. The CLI merges trades with transfers and sorts that combined stream
-    # by cli._event_sort_key -- the single source of ordering truth for FIFO -- with a
-    # key equivalent to the one this layer used to apply, so pre-sorting here was moot.
+    # extractor's. The pipeline merges trades with transfers and orders that combined
+    # stream in EventStream (reporting.event_stream), the single source of ordering
+    # truth for FIFO, with a key equivalent to the one this layer used to apply, so
+    # pre-sorting here was moot.
     if skipped_rows:
         logger.info(
             "Trades (scope=%r): skipped %d row(s) -- out-of-scope asset category "
