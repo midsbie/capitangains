@@ -13,7 +13,7 @@ load-bearing guarantee that the engine never assigns a number format to a text c
 
 The summary sheet is intentionally excluded: it is a metric/value table left as-is by
 the refactor, and its labels and values are covered by the test_summary_and_formats
-module (its money number formats reuse the same _NumberFormats.money exercised
+module (its money number formats reuse the same NumberFormats.money exercised
 here). Its presence and position are still locked via _SHEET_ORDER.
 """
 
@@ -31,8 +31,9 @@ from capitangains.reporting.extract import (
     TransferRow,
     WithholdingRow,
 )
+from capitangains.reporting.i18n import NumberFormats
 from capitangains.reporting.report_builder import ReportBuilder
-from capitangains.reporting.report_sink import ExcelReportSink, _NumberFormats
+from capitangains.reporting.report_sink import ExcelReportSink
 
 
 def _build_report() -> ReportBuilder:
@@ -1047,4 +1048,4 @@ def test_optional_sheets_omitted_when_source_empty(tmp_path):
     ],
 )
 def test_money_format_fallbacks(locale, ccy, expected):
-    assert _NumberFormats(locale).money(ccy) == expected
+    assert NumberFormats(locale).money(ccy) == expected

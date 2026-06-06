@@ -15,13 +15,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .extract import SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
-from .i18n import labels_for
+from .i18n import NumberFormats, labels_for
 from .money import quantize_money
 from .report_builder import ReportBuilder
-
-# Currency-to-symbol map for money number formats; defined once at module scope rather
-# than rebuilt on every cell. Currencies absent here fall back to a quoted ISO code.
-_CURRENCY_SYMBOLS: dict[str, str] = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
 
 
 def _gap_status(rl: RealizedLine) -> str:
@@ -36,32 +32,6 @@ def _gap_status(rl: RealizedLine) -> str:
     if rl.gap_fixed:
         return "synthesized from Basis"
     return "zero-cost gap"
-
-
-@dataclass(frozen=True)
-class _NumberFormats:
-    """Locale-aware Excel number-format strings. Pure formatting policy depending only
-    on the locale, kept separate from the workbook-writing sink so the column
-    descriptors that consume it do not depend on ExcelReportSink.
-    """
-
-    locale: str
-
-    @property
-    def date(self) -> str:
-        return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
-
-    def money(self, ccy: str) -> str:
-        loc = self.locale.upper()
-        cur = (ccy or "").upper()
-        sym = _CURRENCY_SYMBOLS.get(cur)
-        if sym:
-            if cur == "EUR" and loc == "PT":
-                return f'#,##0.00 "{sym}"'
-            return f"{sym}#,##0.00"
-        if loc == "PT":
-            return f'#,##0.00 "{cur}"'
-        return f'"{cur}" #,##0.00'
 
 
 _RowT = TypeVar("_RowT")
@@ -81,7 +51,7 @@ class _Column(ABC, Generic[_RowT]):
     @abstractmethod
     def cell_value(self, row: _RowT) -> object: ...
 
-    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+    def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         # None leaves the cell at openpyxl's default "General" format. Returning None
         # (never "") and assigning only when non-None keeps TEXT cells untouched, a
         # load-bearing byte-preservation detail.
@@ -103,7 +73,7 @@ class _DateColumn(_Column[_RowT]):
     def cell_value(self, row: _RowT) -> object:
         return self.value(row)
 
-    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+    def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         # Applied unconditionally, including to a None date (e.g. absent SYEP dates).
         return formats.date
 
@@ -115,7 +85,7 @@ class _QtyColumn(_Column[_RowT]):
     def cell_value(self, row: _RowT) -> object:
         return float(self.value(row))
 
-    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+    def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         return "0.########"
 
 
@@ -126,7 +96,7 @@ class _PctColumn(_Column[_RowT]):
     def cell_value(self, row: _RowT) -> object:
         return float(self.value(row))
 
-    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+    def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         return "0.00####"
 
 
@@ -139,7 +109,7 @@ class _MoneyColumn(_Column[_RowT]):
         v = self.value(row)
         return None if v is None else float(v)
 
-    def number_format(self, formats: _NumberFormats, row: _RowT) -> str | None:
+    def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         # The currency selector is a uniform callable (per-row lambda or constant EUR),
         # so no isinstance branch is needed and the format follows each row's currency.
         return formats.money(self.currency(row))
@@ -533,7 +503,7 @@ class _SheetWriter:
 
     wb: Workbook
     labels: dict[str, dict[str, str]]
-    formats: _NumberFormats
+    formats: NumberFormats
 
     def write_summary(self, report: ReportBuilder) -> None:
         # Summary sheet (totals)
@@ -648,7 +618,7 @@ class ExcelReportSink:
         if ws_default is not None:
             wb.remove(ws_default)
 
-        writer = _SheetWriter(wb, labels_for(self.locale), _NumberFormats(self.locale))
+        writer = _SheetWriter(wb, labels_for(self.locale), NumberFormats(self.locale))
         writer.write_summary(report)
         writer.write_table(_REALIZED_SPEC, report)
         writer.write_table(_ANEXO_J_SPEC, report)

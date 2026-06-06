@@ -1,13 +1,16 @@
-"""Localization layer for the Excel report: the canonical label catalog and its
-per-locale projection.
+"""Localization layer for the Excel report: the label catalog and its per-locale
+projection, plus the matching locale-aware number formats.
 
 LABELS co-locates both locale strings per field under one key set, so a locale cannot
 silently diverge (a field cannot exist in one language alone). labels_for projects the
 catalog onto the active locale; any locale other than "EN" falls back to "PT" (the
-report's default).
+report's default). NumberFormats is the matching policy for numeric cells (date order
+and currency presentation), which also vary by locale.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 LABELS: dict[str, dict[str, dict[str, str]]] = {
     "sheet": {
@@ -174,3 +177,34 @@ def labels_for(locale: str) -> dict[str, dict[str, str]]:
         section: {field: trans[loc] for field, trans in fields.items()}
         for section, fields in LABELS.items()
     }
+
+
+# Currency-to-symbol map for money number formats; defined once at module scope rather
+# than rebuilt on every cell. Currencies absent here fall back to a quoted ISO code.
+_CURRENCY_SYMBOLS: dict[str, str] = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
+
+
+@dataclass(frozen=True)
+class NumberFormats:
+    """Locale-aware Excel number-format strings. Pure formatting policy depending only
+    on the locale, kept separate from the workbook-writing sink so the column
+    descriptors that consume it do not depend on ExcelReportSink.
+    """
+
+    locale: str
+
+    @property
+    def date(self) -> str:
+        return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+
+    def money(self, ccy: str) -> str:
+        loc = self.locale.upper()
+        cur = (ccy or "").upper()
+        sym = _CURRENCY_SYMBOLS.get(cur)
+        if sym:
+            if cur == "EUR" and loc == "PT":
+                return f'#,##0.00 "{sym}"'
+            return f"{sym}#,##0.00"
+        if loc == "PT":
+            return f'#,##0.00 "{cur}"'
+        return f'"{cur}" #,##0.00'
