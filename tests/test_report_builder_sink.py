@@ -1,6 +1,5 @@
 import datetime as dt
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,8 +15,9 @@ from capitangains.reporting.extract import (
 )
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.fx import FxTable
+from capitangains.reporting.i18n import LABELS, labels_for
 from capitangains.reporting.report_builder import ReportBuilder
-from capitangains.reporting.report_sink import _LABELS, ExcelReportSink, _gap_status
+from capitangains.reporting.report_sink import ExcelReportSink, _gap_status
 
 
 def _make_fx(rates):
@@ -469,7 +469,7 @@ def test_every_label_field_defines_both_locales():
     """
     field_locale_sets = {
         (section, field): frozenset(translations)
-        for section, fields in _LABELS.items()
+        for section, fields in LABELS.items()
         for field, translations in fields.items()
     }
     assert field_locale_sets, "label table is empty"
@@ -485,7 +485,7 @@ def test_every_label_field_defines_both_locales():
     # No empty translations slip through.
     blank = [
         (section, field, loc)
-        for section, fields in _LABELS.items()
+        for section, fields in LABELS.items()
         for field, translations in fields.items()
         for loc, text in translations.items()
         if not text.strip()
@@ -499,9 +499,9 @@ def test_pt_projection_renders_portuguese_labels():
     Includes the Anexo-J realized-P/L header, whose PT text carries a non-breaking
     hyphen (U+2011) that must survive byte-for-byte.
     """
-    pt = ExcelReportSink(out_path=Path("x.xlsx"), locale="PT")._labels()
+    pt = labels_for("PT")
     assert pt["sheet"]["summary"] == "Totais de Operações"
     assert pt["realized"]["ticker"] == "Símbolo"
     assert pt["anexo_j"]["pl_eur"] == "Mais/menos\u2011valia (EUR)"
     # Any unrecognized locale falls back to PT (the report's default).
-    assert ExcelReportSink(out_path=Path("x.xlsx"), locale="XX")._labels() == pt
+    assert labels_for("XX") == pt
