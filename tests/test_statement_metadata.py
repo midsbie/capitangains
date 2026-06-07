@@ -16,7 +16,7 @@ from capitangains.reporting.extract import (
     StatementPeriod,
     parse_statement_metadata,
 )
-from tests.support import parse_model
+from tests.support import ACCOUNT_COLUMNS, STATEMENT_COLUMNS, header_row, parse_model
 
 # --- StatementPeriod.parse ------------------------------------------------------------
 
@@ -91,8 +91,8 @@ def test_overlaps_containment_and_symmetry():
 # --- parse_statement_metadata ---------------------------------------------------------
 
 
-_STATEMENT_HEADER = ["Statement", "Header", "Field Name", "Field Value"]
-_ACCOUNT_HEADER = ["Account Information", "Header", "Field Name", "Field Value"]
+_STATEMENT_HEADER = header_row("Statement", STATEMENT_COLUMNS)
+_ACCOUNT_HEADER = header_row("Account Information", ACCOUNT_COLUMNS)
 
 
 def test_extracts_account_and_period():
