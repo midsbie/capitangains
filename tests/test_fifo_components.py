@@ -2,12 +2,12 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
-from fixtures import Trade
 
 from capitangains.reporting.fifo_domain import GapResolution, Lot, SellMatchLeg
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
 from capitangains.reporting.positions import PositionBook
 from capitangains.reporting.realized_builder import build_realized_line
+from tests.support import Trade
 
 
 def test_position_book_fifo_consumption_and_residual_tracking():

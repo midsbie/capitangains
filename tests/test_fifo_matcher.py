@@ -2,7 +2,6 @@ import datetime as dt
 from decimal import Decimal
 
 import pytest
-from fixtures import Trade, Transfer
 
 from capitangains.reporting.events import EventRecorder
 from capitangains.reporting.fifo import FifoMatcher
@@ -15,6 +14,7 @@ from capitangains.reporting.fifo_domain import (
 )
 from capitangains.reporting.gap_policy import GapPolicy, UnacknowledgedGapPolicy
 from capitangains.reporting.positions import PositionBook
+from tests.support import Trade, Transfer
 
 
 class DummyPolicy(GapPolicy):
