@@ -282,6 +282,32 @@ def report_transfer_ordering_collisions(
     raise SystemExit(2)
 
 
+def report_invalid_statements(problems: Sequence[str], logger: logging.Logger) -> None:
+    """Abort if any input statement's account/period identity is missing or malformed.
+
+    The partition (reporting.validation.partition_statements_by_metadata) owns the
+    rationale and produces one "<path>: <reason>" string per file whose identity could
+    not be established. The boundary lists every one, then a single SystemExit(2)
+    without writing a workbook. An empty sequence means every input's identity is sound
+    and nothing is logged. Sequenced before the cross-file conflict check, which assumes
+    a parseable identity on every input.
+    """
+    if not problems:
+        return
+
+    for problem in problems:
+        logger.error("%s", problem)
+
+    logger.error(
+        "%d input statement(s) have a missing or malformed identity; no workbook "
+        "written. A valid statement carries an Account number (Account Information) "
+        "and a parseable reporting Period (Statement). Correct the file(s) above and "
+        "rerun.",
+        len(problems),
+    )
+    raise SystemExit(2)
+
+
 def report_statement_input_conflicts(
     problems: Sequence[str], logger: logging.Logger
 ) -> None:

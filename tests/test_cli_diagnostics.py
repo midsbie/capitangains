@@ -28,6 +28,7 @@ from capitangains.diagnostics import (
     format_reconciliation_sample,
     parse_acknowledged_gaps,
     report_gap_acknowledgments,
+    report_invalid_statements,
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
@@ -38,12 +39,19 @@ from capitangains.model import IbkrStatementCsvParser
 from capitangains.pipeline import RunOptions, run
 from capitangains.reporting import (
     ReconciliationReport,
+    StatementInput,
     SymbolReconciliation,
     TransferOrderingCollision,
     detect_statement_input_conflicts,
     detect_transfer_ordering_collisions,
+    partition_statements_by_metadata,
 )
-from capitangains.reporting.extract import TradeRow, TransferRow
+from capitangains.reporting.extract import (
+    StatementMetadata,
+    StatementPeriod,
+    TradeRow,
+    TransferRow,
+)
 from capitangains.reporting.fifo_domain import GapEvent, GapResolution
 
 
@@ -321,30 +329,37 @@ _Y2023 = "January 1, 2023 - December 31, 2023"
 _Y2024 = "January 1, 2024 - December 31, 2024"
 
 
+def _stmt(path, *, account, period_str):
+    """A StatementInput with already-valid identity, the detector's input shape."""
+    return StatementInput(
+        path, StatementMetadata(account, StatementPeriod.parse(period_str))
+    )
+
+
 def test_detect_statement_conflicts_single_file_is_skipped():
-    # A lone statement has nothing to overlap; the check never inspects its metadata.
+    # A lone statement has nothing to overlap.
     assert (
         detect_statement_input_conflicts(
-            ["a.csv"], [_meta_model(account="U1", period=_Y2024)]
+            [_stmt("a.csv", account="U1", period_str=_Y2024)]
         )
         == []
     )
 
 
 def test_detect_statement_conflicts_disjoint_periods_ok():
-    models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account="U1", period=_Y2024),
+    statements = [
+        _stmt("a.csv", account="U1", period_str=_Y2023),
+        _stmt("b.csv", account="U1", period_str=_Y2024),
     ]
-    assert detect_statement_input_conflicts(["a.csv", "b.csv"], models) == []
+    assert detect_statement_input_conflicts(statements) == []
 
 
 def test_detect_statement_conflicts_overlapping_periods():
-    models = [
-        _meta_model(account="U1", period=_Y2024),
-        _meta_model(account="U1", period="June 1, 2024 - December 31, 2024"),
+    statements = [
+        _stmt("a.csv", account="U1", period_str=_Y2024),
+        _stmt("b.csv", account="U1", period_str="June 1, 2024 - December 31, 2024"),
     ]
-    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
+    problems = detect_statement_input_conflicts(statements)
     assert any(
         "overlapping periods" in p and "a.csv" in p and "b.csv" in p for p in problems
     )
@@ -352,54 +367,76 @@ def test_detect_statement_conflicts_overlapping_periods():
 
 def test_detect_statement_conflicts_same_period_twice():
     # The same file passed twice is the degenerate identical-interval overlap.
-    model = _meta_model(account="U1", period=_Y2024)
-    problems = detect_statement_input_conflicts(["a.csv", "a.csv"], [model, model])
+    s = _stmt("a.csv", account="U1", period_str=_Y2024)
+    problems = detect_statement_input_conflicts([s, s])
     assert any("overlapping periods" in p for p in problems)
 
 
 def test_detect_statement_conflicts_multiple_accounts():
     # Different accounts, even with disjoint periods, are out of scope (co-mingling).
-    models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account="U2", period=_Y2024),
+    statements = [
+        _stmt("a.csv", account="U1", period_str=_Y2023),
+        _stmt("b.csv", account="U2", period_str=_Y2024),
     ]
-    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
+    problems = detect_statement_input_conflicts(statements)
     assert any("multiple accounts" in p and "U1" in p and "U2" in p for p in problems)
-
-
-def test_detect_statement_conflicts_missing_period():
-    models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account="U1", period=None),
-    ]
-    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
-    assert any("missing reporting period" in p for p in problems)
-
-
-def test_detect_statement_conflicts_missing_account():
-    models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account=None, period=_Y2024),
-    ]
-    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
-    assert any("missing account number" in p for p in problems)
-
-
-def test_detect_statement_conflicts_unparseable_period():
-    models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account="U1", period="2024-01-01 to 2024-12-31"),
-    ]
-    problems = detect_statement_input_conflicts(["a.csv", "b.csv"], models)
-    assert any("statement period" in p.lower() for p in problems)
 
 
 def test_detect_statement_conflicts_accumulates_every_problem():
     # Three statements, three overlapping pairs: all are returned.
-    models = [_meta_model(account="U1", period=_Y2024) for _ in range(3)]
-    problems = detect_statement_input_conflicts(["a.csv", "b.csv", "c.csv"], models)
+    statements = [
+        _stmt(f"{name}.csv", account="U1", period_str=_Y2024)
+        for name in ("a", "b", "c")
+    ]
+    problems = detect_statement_input_conflicts(statements)
     overlaps = [p for p in problems if "overlapping periods" in p]
     assert len(overlaps) == 3  # (a,b), (a,c), (b,c)
+
+
+# --- statement identity: partition ---------------------------------------------------
+
+
+def test_partition_statements_all_valid_yields_no_problems():
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period=_Y2024),
+    ]
+    selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
+    assert problems == []
+    assert [(s.path, s.metadata.account) for s in selected] == [
+        ("a.csv", "U1"),
+        ("b.csv", "U1"),
+    ]
+
+
+def test_partition_statements_flags_missing_period():
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period=None),
+    ]
+    selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
+    assert [s.path for s in selected] == ["a.csv"]
+    assert any("b.csv" in p and "missing reporting period" in p for p in problems)
+
+
+def test_partition_statements_flags_missing_account():
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account=None, period=_Y2024),
+    ]
+    selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
+    assert [s.path for s in selected] == ["a.csv"]
+    assert any("b.csv" in p and "missing account number" in p for p in problems)
+
+
+def test_partition_statements_flags_unparseable_period():
+    models = [
+        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period="2024-01-01 to 2024-12-31"),
+    ]
+    selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
+    assert [s.path for s in selected] == ["a.csv"]
+    assert any("b.csv" in p and "statement period" in p.lower() for p in problems)
 
 
 # --- statement input conflicts: reporter ---------------------------------------------
@@ -427,6 +464,34 @@ def test_report_statement_input_conflicts_lists_and_exits(caplog):
     assert any("overlapping periods" in m for m in messages)
     assert any("multiple accounts" in m for m in messages)
     assert any("single-account, non-overlapping set" in m for m in messages)
+
+
+# --- statement identity: reporter ----------------------------------------------------
+
+
+def test_report_invalid_statements_silent_when_empty(caplog):
+    logger = logging.getLogger("invalid_report_none")
+    with caplog.at_level(logging.ERROR):
+        report_invalid_statements([], logger)
+    assert caplog.records == []
+
+
+def test_report_invalid_statements_lists_and_exits(caplog):
+    # One ERROR per malformed file, then a summary naming what a valid identity needs,
+    # then a single exit 2 -- no fail-fast, mirroring the other boundary reporters.
+    logger = logging.getLogger("invalid_report_fatal")
+    problems = [
+        "a.csv: missing account number (Account Information)",
+        "b.csv: Unparseable statement period: '2024-01-01 to 2024-12-31'",
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        report_invalid_statements(problems, logger)
+
+    assert exc.value.code == 2
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("a.csv" in m and "missing account number" in m for m in messages)
+    assert any("b.csv" in m for m in messages)
+    assert any("missing or malformed identity" in m for m in messages)
 
 
 # --- run() integration --------------------------------------------------------
@@ -500,7 +565,9 @@ def _trade(symbol, currency, *, date="2024-01-10, 10:00:00", qty="10"):
 def _write_statement(path, *, currency="USD"):
     # A matched BUY(10) then SELL(10): no gap, so the gap tie-out is a no-op. USD needs
     # an FX table to convert; EUR converts by identity and runs clean to the write step.
-    rows = [
+    # Carries a valid Account/Period identity so the run clears the identity gate and
+    # reaches the condition each dependent test actually exercises.
+    rows = _statement_meta_rows("U1", _Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", currency),
         [
@@ -525,7 +592,9 @@ def _write_statement(path, *, currency="USD"):
 
 
 def _write_single_sell(path, *, symbol, currency, basis, realized, proceeds="1200"):
-    # A lone SELL with no prior BUY: the whole quantity is an unmatched gap.
+    # A lone SELL with no prior BUY: the whole quantity is an unmatched gap. Carries a
+    # valid Account/Period identity so the run clears the identity gate and reaches the
+    # gap tie-out each dependent test exercises.
     sell = [
         "Trades",
         "Data",
@@ -543,7 +612,9 @@ def _write_single_sell(path, *, symbol, currency, basis, realized, proceeds="120
         realized,
     ]
     with open(path, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows([_TRADES_HEADER, sell])
+        csv.writer(fp).writerows(
+            _statement_meta_rows("U1", _Y2024) + [_TRADES_HEADER, sell]
+        )
 
 
 def _args(stmt, out, *, fx_table=None, auto_fix_sell_gaps=None, dry_run=False):
@@ -615,7 +686,10 @@ def test_process_files_exits_2_on_malformed_trade_row(tmp_path, caplog):
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows([_TRADES_HEADER, _trade("AAPL", "USD", date="")])
+        csv.writer(fp).writerows(
+            _statement_meta_rows("U1", _Y2024)
+            + [_TRADES_HEADER, _trade("AAPL", "USD", date="")]
+        )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(_args(stmt, out))
@@ -632,7 +706,8 @@ def test_process_files_exits_2_on_symbol_currency_violation(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            [_TRADES_HEADER, _trade("ABC", "USD"), _trade("ABC", "EUR")]
+            _statement_meta_rows("U1", _Y2024)
+            + [_TRADES_HEADER, _trade("ABC", "USD"), _trade("ABC", "EUR")]
         )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
@@ -649,7 +724,7 @@ def test_process_files_exits_2_on_same_day_transfer_trade_collision(tmp_path, ca
     # aborts with exit 2 -- naming the symbol/day -- rather than fabricate an order.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = [
+    rows = _statement_meta_rows("U1", _Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", "USD", date="2024-06-10, 10:00:00"),
         _TRANSFERS_HEADER,
@@ -675,7 +750,7 @@ def test_process_files_allows_same_day_transfer_in_a_different_symbol(tmp_path, 
     # identity, so the run completes and writes the workbook.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = [
+    rows = _statement_meta_rows("U1", _Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", "EUR", date="2024-01-10, 10:00:00"),
         [
@@ -717,7 +792,7 @@ def test_process_files_transfers_sheet_shows_only_reporting_year(tmp_path):
     # are IN transfers seeding open lots; all EUR, so the run converts by identity.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = [
+    rows = _statement_meta_rows("U1", _Y2024) + [
         _TRANSFERS_HEADER,
         _transfer_data("SEEDLOT", "EUR", "2023-11-01"),
         _transfer_data("CURRENTXFER", "EUR", "2024-03-01"),
@@ -741,7 +816,8 @@ def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            [
+            _statement_meta_rows("U1", _Y2024)
+            + [
                 ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
                 ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
             ]
@@ -761,7 +837,7 @@ def test_process_files_lists_every_extraction_defect(tmp_path, caplog):
     # workbook -- so the operator fixes every defect in one pass, not one-per-rerun.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = [
+    rows = _statement_meta_rows("U1", _Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", "USD", date=""),  # bad trade: blank Date/Time
         ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
@@ -924,7 +1000,10 @@ def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows([_TRADES_HEADER, _trade("AAPL", "EUR", date="")])
+        csv.writer(fp).writerows(
+            _statement_meta_rows("U1", _Y2024)
+            + [_TRADES_HEADER, _trade("AAPL", "EUR", date="")]
+        )
     args = _args(stmt, out, dry_run=True)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
@@ -1068,6 +1147,78 @@ def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, caplog):
     messages = [r.getMessage() for r in caplog.records]
     assert not any("synthesized basis" in m for m in messages)
     assert any("disagree with IBKR realized P/L beyond rounding" in m for m in messages)
+
+
+# --- run() statement-identity gate --------------------------------------------
+
+
+def test_process_files_single_file_missing_account_exits_2(tmp_path, caplog):
+    # Identity is validated unconditionally, not only on the multi-file path: a lone
+    # statement whose Account is blank halts at the identity gate with exit 2 and no
+    # workbook, before any contents are trusted.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(stmt, account="", period=_Y2024, year=2024)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("missing account number" in m for m in messages)
+    assert any("missing or malformed identity" in m for m in messages)
+
+
+def test_process_files_single_file_malformed_period_exits_2(tmp_path, caplog):
+    # A single statement whose Period does not parse is equally fatal at the identity
+    # gate -- the precondition is establish identity before trusting contents.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(
+        stmt, account="U1", period="2024-01-01 to 2024-12-31", year=2024
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any(
+        "missing or malformed identity" in r.getMessage() for r in caplog.records
+    )
+
+
+def test_process_files_single_file_valid_identity_writes_workbook(tmp_path):
+    # The control: a lone statement with a sound Account/Period identity clears the gate
+    # and runs through to the workbook. EUR converts by identity, so no FX table needed.
+    stmt = tmp_path / "stmt.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(stmt, account="U1", period=_Y2024, year=2024)
+
+    run(_args(stmt, out))
+
+    assert out.exists()
+
+
+def test_process_files_multifile_one_invalid_identity_exits_2(tmp_path, caplog):
+    # In a multi-file set, a single member with an unparseable identity halts the whole
+    # run at the identity gate (exit 2, no workbook) -- before the cross-file conflict
+    # check, which assumes every period is parseable.
+    a = tmp_path / "2023.csv"
+    b = tmp_path / "2024.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(a, account="U1", period=_Y2023, year=2023)
+    _write_full_statement(b, account="U1", period="2024-01-01 to 2024-12-31", year=2024)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args_multi([a, b], out))
+
+    assert exc.value.code == 2
+    assert not out.exists()
+    assert any(
+        "missing or malformed identity" in r.getMessage() for r in caplog.records
+    )
 
 
 # --- format_reconciliation_sample ----------------------------------------------------

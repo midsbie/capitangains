@@ -33,6 +33,7 @@ from capitangains.diagnostics import (
     parse_acknowledged_gaps,
     report_extraction_defects,
     report_gap_acknowledgments,
+    report_invalid_statements,
     report_missing_fx,
     report_reconciliation,
     report_statement_input_conflicts,
@@ -50,6 +51,7 @@ from capitangains.reporting import (
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
     detect_transfer_ordering_collisions,
+    partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
 )
 from capitangains.reporting.gap_policy import build_gap_policy
@@ -103,17 +105,26 @@ def run(options: RunOptions) -> None:
         models.append(m)
         reports.append(rep)
 
-    # A multi-file run must be a single-account, non-overlapping set of statements;
-    # overlapping inputs would double-count trades into FIFO. Detect before merging and
-    # halt at the boundary if the inputs conflict.
-    input_conflicts = detect_statement_input_conflicts(inputs, models)
-    report_statement_input_conflicts(input_conflicts, logger)
-
-    model = merge_models(models)
+    # Parse errors are the most fundamental failure -- a file that did not parse has no
+    # trustworthy identity or contents -- so halt on them before any further gate.
     parse_report = merge_reports(reports)
     parse_report.log_with(logger)
     if parse_report.has_errors:
         raise SystemExit(2)
+
+    # Validate every input's statement identity (account + reporting period) as a
+    # fail-closed precondition, regardless of file count, before trusting its contents.
+    statements, invalid = partition_statements_by_metadata(inputs, models)
+    report_invalid_statements(invalid, logger)
+
+    # A multi-file run must further be a single-account, non-overlapping set of
+    # statements; overlapping inputs would double-count trades into FIFO. The identity
+    # gate above guarantees every period here is parseable. Detect before merging and
+    # halt at the boundary if the inputs conflict.
+    input_conflicts = detect_statement_input_conflicts(statements)
+    report_statement_input_conflicts(input_conflicts, logger)
+
+    model = merge_models(models)
 
     # The source runs every section extractor, each of which accumulates its row-level
     # data-quality defects rather than failing on the first bad row, so a single run
