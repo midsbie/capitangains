@@ -10,26 +10,16 @@ ignored. An IBKR-shaped file whose identity will not parse is selected with
 import csv
 
 from capitangains.cmd.discovery import DiscoveryResult, discover_statements
+from tests.support import (
+    TRADES_COLUMNS,
+    Y2023,
+    Y2024,
+    header_row,
+    statement_meta_rows,
+    trade_data,
+    write_statement_csv,
+)
 
-_TRADES_HEADER = [
-    "Trades",
-    "Header",
-    "DataDiscriminator",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date/Time",
-    "Quantity",
-    "T. Price",
-    "Proceeds",
-    "Comm/Fee",
-    "Code",
-    "Basis",
-    "Realized P/L",
-]
-
-_Y2023 = "January 1, 2023 - December 31, 2023"
-_Y2024 = "January 1, 2024 - December 31, 2024"
 _Y2025 = "January 1, 2025 - December 31, 2025"
 
 
@@ -37,31 +27,11 @@ def _write_statement(path, *, period, year, account="U1", currency="EUR"):
     # An IBKR-shaped statement: a 'Statement' section (the structural discriminator),
     # account/period identity, and a single opening BUY in `year`.
     rows = [
-        ["Statement", "Header", "Field Name", "Field Value"],
-        ["Statement", "Data", "Title", "Activity Statement"],
-        ["Statement", "Data", "Period", period],
-        ["Account Information", "Header", "Field Name", "Field Value"],
-        ["Account Information", "Data", "Account", account],
-        _TRADES_HEADER,
-        [
-            "Trades",
-            "Data",
-            "Order",
-            "Stocks",
-            currency,
-            "AAPL",
-            f"{year}-02-10, 10:00:00",
-            "10",
-            "100",
-            "-1000",
-            "-1",
-            "O",
-            "1000",
-            "0",
-        ],
+        *statement_meta_rows(account=account, period=period),
+        header_row("Trades", TRADES_COLUMNS),
+        trade_data(currency=currency, datetime_str=f"{year}-02-10, 10:00:00"),
     ]
-    with open(path, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(rows)
+    write_statement_csv(path, rows)
 
 
 def _write_forex(path):
@@ -76,8 +46,8 @@ def _write_forex(path):
 
 
 def test_selects_year_and_earlier(tmp_path):
-    _write_statement(tmp_path / "2023.csv", period=_Y2023, year=2023)
-    _write_statement(tmp_path / "2024.csv", period=_Y2024, year=2024)
+    _write_statement(tmp_path / "2023.csv", period=Y2023, year=2023)
+    _write_statement(tmp_path / "2024.csv", period=Y2024, year=2024)
 
     result = discover_statements(tmp_path, 2024)
 
@@ -87,7 +57,7 @@ def test_selects_year_and_earlier(tmp_path):
 
 
 def test_excludes_future(tmp_path):
-    _write_statement(tmp_path / "2024.csv", period=_Y2024, year=2024)
+    _write_statement(tmp_path / "2024.csv", period=Y2024, year=2024)
     _write_statement(tmp_path / "2025.csv", period=_Y2025, year=2025)
 
     result = discover_statements(tmp_path, 2024)
@@ -97,7 +67,7 @@ def test_excludes_future(tmp_path):
 
 
 def test_ignores_non_statement_csv(tmp_path):
-    _write_statement(tmp_path / "2024.csv", period=_Y2024, year=2024)
+    _write_statement(tmp_path / "2024.csv", period=Y2024, year=2024)
     _write_forex(tmp_path / "forex.csv")
 
     result = discover_statements(tmp_path, 2024)
@@ -120,10 +90,10 @@ def test_unparseable_identity_is_selected_with_no_period(tmp_path):
 
 def test_non_recursive_and_csv_only(tmp_path):
     # Only *.csv directly in the directory: a nested csv and a non-csv are both skipped.
-    _write_statement(tmp_path / "2024.csv", period=_Y2024, year=2024)
+    _write_statement(tmp_path / "2024.csv", period=Y2024, year=2024)
     nested = tmp_path / "nested"
     nested.mkdir()
-    _write_statement(nested / "2023.csv", period=_Y2023, year=2023)
+    _write_statement(nested / "2023.csv", period=Y2023, year=2023)
     (tmp_path / "notes.txt").write_text("not a csv", encoding="utf-8")
 
     result = discover_statements(tmp_path, 2024)
@@ -141,8 +111,8 @@ def test_empty_directory(tmp_path):
 def test_selected_ordered_by_period_then_path(tmp_path):
     # selected is sorted by (period start, path); a period=None entry sorts last,
     # independent of its filename.
-    _write_statement(tmp_path / "b_2024.csv", period=_Y2024, year=2024)
-    _write_statement(tmp_path / "a_2023.csv", period=_Y2023, year=2023)
+    _write_statement(tmp_path / "b_2024.csv", period=Y2024, year=2024)
+    _write_statement(tmp_path / "a_2023.csv", period=Y2023, year=2023)
     _write_statement(
         tmp_path / "aaa_bad.csv", period="2024-01-01 to 2024-12-31", year=2024
     )

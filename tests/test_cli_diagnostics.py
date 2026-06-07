@@ -48,7 +48,19 @@ from capitangains.reporting import (
 )
 from capitangains.reporting.extract import StatementMetadata, StatementPeriod
 from capitangains.reporting.fifo_domain import GapResolution
-from tests.support import make_gap_event, trade_row, transfer_row
+from tests.support import (
+    TRADES_COLUMNS,
+    TRANSFERS_COLUMNS,
+    Y2023,
+    Y2024,
+    header_row,
+    make_gap_event,
+    statement_meta_rows,
+    trade_data,
+    trade_row,
+    transfer_data,
+    transfer_row,
+)
 
 
 def _gap(*, outcome, symbol="AAPL", date=dt.date(2024, 1, 1), message="no buy history"):
@@ -304,10 +316,6 @@ def _meta_model(*, account=None, period=None):
     return model
 
 
-_Y2023 = "January 1, 2023 - December 31, 2023"
-_Y2024 = "January 1, 2024 - December 31, 2024"
-
-
 def _stmt(path, *, account, period_str):
     """A StatementInput with already-valid identity, the detector's input shape."""
     return StatementInput(
@@ -319,7 +327,7 @@ def test_detect_statement_conflicts_single_file_is_skipped():
     # A lone statement has nothing to overlap.
     assert (
         detect_statement_input_conflicts(
-            [_stmt("a.csv", account="U1", period_str=_Y2024)]
+            [_stmt("a.csv", account="U1", period_str=Y2024)]
         )
         == []
     )
@@ -327,15 +335,15 @@ def test_detect_statement_conflicts_single_file_is_skipped():
 
 def test_detect_statement_conflicts_disjoint_periods_ok():
     statements = [
-        _stmt("a.csv", account="U1", period_str=_Y2023),
-        _stmt("b.csv", account="U1", period_str=_Y2024),
+        _stmt("a.csv", account="U1", period_str=Y2023),
+        _stmt("b.csv", account="U1", period_str=Y2024),
     ]
     assert detect_statement_input_conflicts(statements) == []
 
 
 def test_detect_statement_conflicts_overlapping_periods():
     statements = [
-        _stmt("a.csv", account="U1", period_str=_Y2024),
+        _stmt("a.csv", account="U1", period_str=Y2024),
         _stmt("b.csv", account="U1", period_str="June 1, 2024 - December 31, 2024"),
     ]
     problems = detect_statement_input_conflicts(statements)
@@ -346,7 +354,7 @@ def test_detect_statement_conflicts_overlapping_periods():
 
 def test_detect_statement_conflicts_same_period_twice():
     # The same file passed twice is the degenerate identical-interval overlap.
-    s = _stmt("a.csv", account="U1", period_str=_Y2024)
+    s = _stmt("a.csv", account="U1", period_str=Y2024)
     problems = detect_statement_input_conflicts([s, s])
     assert any("overlapping periods" in p for p in problems)
 
@@ -354,8 +362,8 @@ def test_detect_statement_conflicts_same_period_twice():
 def test_detect_statement_conflicts_multiple_accounts():
     # Different accounts, even with disjoint periods, are out of scope (co-mingling).
     statements = [
-        _stmt("a.csv", account="U1", period_str=_Y2023),
-        _stmt("b.csv", account="U2", period_str=_Y2024),
+        _stmt("a.csv", account="U1", period_str=Y2023),
+        _stmt("b.csv", account="U2", period_str=Y2024),
     ]
     problems = detect_statement_input_conflicts(statements)
     assert any("multiple accounts" in p and "U1" in p and "U2" in p for p in problems)
@@ -364,8 +372,7 @@ def test_detect_statement_conflicts_multiple_accounts():
 def test_detect_statement_conflicts_accumulates_every_problem():
     # Three statements, three overlapping pairs: all are returned.
     statements = [
-        _stmt(f"{name}.csv", account="U1", period_str=_Y2024)
-        for name in ("a", "b", "c")
+        _stmt(f"{name}.csv", account="U1", period_str=Y2024) for name in ("a", "b", "c")
     ]
     problems = detect_statement_input_conflicts(statements)
     overlaps = [p for p in problems if "overlapping periods" in p]
@@ -377,8 +384,8 @@ def test_detect_statement_conflicts_accumulates_every_problem():
 
 def test_partition_statements_all_valid_yields_no_problems():
     models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account="U1", period=_Y2024),
+        _meta_model(account="U1", period=Y2023),
+        _meta_model(account="U1", period=Y2024),
     ]
     selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
     assert problems == []
@@ -390,7 +397,7 @@ def test_partition_statements_all_valid_yields_no_problems():
 
 def test_partition_statements_flags_missing_period():
     models = [
-        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period=Y2023),
         _meta_model(account="U1", period=None),
     ]
     selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
@@ -400,8 +407,8 @@ def test_partition_statements_flags_missing_period():
 
 def test_partition_statements_flags_missing_account():
     models = [
-        _meta_model(account="U1", period=_Y2023),
-        _meta_model(account=None, period=_Y2024),
+        _meta_model(account="U1", period=Y2023),
+        _meta_model(account=None, period=Y2024),
     ]
     selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
     assert [s.path for s in selected] == ["a.csv"]
@@ -410,7 +417,7 @@ def test_partition_statements_flags_missing_account():
 
 def test_partition_statements_flags_unparseable_period():
     models = [
-        _meta_model(account="U1", period=_Y2023),
+        _meta_model(account="U1", period=Y2023),
         _meta_model(account="U1", period="2024-01-01 to 2024-12-31"),
     ]
     selected, problems = partition_statements_by_metadata(["a.csv", "b.csv"], models)
@@ -476,69 +483,18 @@ def test_report_invalid_statements_lists_and_exits(caplog):
 # --- run() integration --------------------------------------------------------
 
 
-_TRADES_HEADER = [
-    "Trades",
-    "Header",
-    "DataDiscriminator",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date/Time",
-    "Quantity",
-    "T. Price",
-    "Proceeds",
-    "Comm/Fee",
-    "Code",
-    "Basis",
-    "Realized P/L",
-]
-
-_TRANSFERS_HEADER = [
-    "Transfers",
-    "Header",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date",
-    "Direction",
-    "Qty",
-    "Market Value",
-    "Code",
-]
+_TRADES_HEADER = header_row("Trades", TRADES_COLUMNS)
+_TRANSFERS_HEADER = header_row("Transfers", TRANSFERS_COLUMNS)
 
 
 def _transfer_data(symbol, currency, date, *, direction="In", qty="10"):
-    return [
-        "Transfers",
-        "Data",
-        "Stocks",
-        currency,
-        symbol,
-        date,
-        direction,
-        qty,
-        "1000",
-        "",
-    ]
+    return transfer_data(
+        symbol=symbol, currency=currency, date=date, direction=direction, quantity=qty
+    )
 
 
 def _trade(symbol, currency, *, date="2024-01-10, 10:00:00", qty="10"):
-    return [
-        "Trades",
-        "Data",
-        "Order",
-        "Stocks",
-        currency,
-        symbol,
-        date,
-        qty,
-        "100",
-        "-1000",
-        "-1",
-        "O",
-        "1000",
-        "0",
-    ]
+    return trade_data(symbol=symbol, currency=currency, datetime_str=date, quantity=qty)
 
 
 def _write_statement(path, *, currency="USD"):
@@ -546,25 +502,20 @@ def _write_statement(path, *, currency="USD"):
     # an FX table to convert; EUR converts by identity and runs clean to the write step.
     # Carries a valid Account/Period identity so the run clears the identity gate and
     # reaches the condition each dependent test actually exercises.
-    rows = _statement_meta_rows("U1", _Y2024) + [
+    rows = _statement_meta_rows("U1", Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", currency),
-        [
-            "Trades",
-            "Data",
-            "Order",
-            "Stocks",
-            currency,
-            "AAPL",
-            "2024-06-10, 10:00:00",
-            "-10",
-            "110",
-            "1100",
-            "-1",
-            "C",
-            "-1001",
-            "99",
-        ],
+        trade_data(
+            currency=currency,
+            datetime_str="2024-06-10, 10:00:00",
+            quantity="-10",
+            t_price="110",
+            proceeds="1100",
+            comm_fee="-1",
+            code="C",
+            basis="-1001",
+            realized="99",
+        ),
     ]
     with open(path, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(rows)
@@ -574,25 +525,21 @@ def _write_single_sell(path, *, symbol, currency, basis, realized, proceeds="120
     # A lone SELL with no prior BUY: the whole quantity is an unmatched gap. Carries a
     # valid Account/Period identity so the run clears the identity gate and reaches the
     # gap tie-out each dependent test exercises.
-    sell = [
-        "Trades",
-        "Data",
-        "Order",
-        "Stocks",
-        currency,
-        symbol,
-        "2024-06-10, 10:00:00",
-        "-10",
-        "120",
-        proceeds,
-        "0",
-        "C",
-        basis,
-        realized,
-    ]
+    sell = trade_data(
+        symbol=symbol,
+        currency=currency,
+        datetime_str="2024-06-10, 10:00:00",
+        quantity="-10",
+        t_price="120",
+        proceeds=proceeds,
+        comm_fee="0",
+        code="C",
+        basis=basis,
+        realized=realized,
+    )
     with open(path, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            _statement_meta_rows("U1", _Y2024) + [_TRADES_HEADER, sell]
+            _statement_meta_rows("U1", Y2024) + [_TRADES_HEADER, sell]
         )
 
 
@@ -666,7 +613,7 @@ def test_process_files_exits_2_on_malformed_trade_row(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            _statement_meta_rows("U1", _Y2024)
+            _statement_meta_rows("U1", Y2024)
             + [_TRADES_HEADER, _trade("AAPL", "USD", date="")]
         )
 
@@ -685,7 +632,7 @@ def test_process_files_exits_2_on_symbol_currency_violation(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            _statement_meta_rows("U1", _Y2024)
+            _statement_meta_rows("U1", Y2024)
             + [_TRADES_HEADER, _trade("ABC", "USD"), _trade("ABC", "EUR")]
         )
 
@@ -703,7 +650,7 @@ def test_process_files_exits_2_on_same_day_transfer_trade_collision(tmp_path, ca
     # aborts with exit 2 -- naming the symbol/day -- rather than fabricate an order.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", _Y2024) + [
+    rows = _statement_meta_rows("U1", Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", "USD", date="2024-06-10, 10:00:00"),
         _TRANSFERS_HEADER,
@@ -729,7 +676,7 @@ def test_process_files_allows_same_day_transfer_in_a_different_symbol(tmp_path, 
     # identity, so the run completes and writes the workbook.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", _Y2024) + [
+    rows = _statement_meta_rows("U1", Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", "EUR", date="2024-01-10, 10:00:00"),
         [
@@ -771,7 +718,7 @@ def test_process_files_transfers_sheet_shows_only_reporting_year(tmp_path):
     # are IN transfers seeding open lots; all EUR, so the run converts by identity.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", _Y2024) + [
+    rows = _statement_meta_rows("U1", Y2024) + [
         _TRANSFERS_HEADER,
         _transfer_data("SEEDLOT", "EUR", "2023-11-01"),
         _transfer_data("CURRENTXFER", "EUR", "2024-03-01"),
@@ -795,7 +742,7 @@ def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            _statement_meta_rows("U1", _Y2024)
+            _statement_meta_rows("U1", Y2024)
             + [
                 ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
                 ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
@@ -816,7 +763,7 @@ def test_process_files_lists_every_extraction_defect(tmp_path, caplog):
     # workbook -- so the operator fixes every defect in one pass, not one-per-rerun.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", _Y2024) + [
+    rows = _statement_meta_rows("U1", Y2024) + [
         _TRADES_HEADER,
         _trade("AAPL", "USD", date=""),  # bad trade: blank Date/Time
         ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
@@ -980,7 +927,7 @@ def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
     out = tmp_path / "out.xlsx"
     with open(stmt, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(
-            _statement_meta_rows("U1", _Y2024)
+            _statement_meta_rows("U1", Y2024)
             + [_TRADES_HEADER, _trade("AAPL", "EUR", date="")]
         )
     args = _args(stmt, out, dry_run=True)
@@ -997,13 +944,7 @@ def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
 
 
 def _statement_meta_rows(account, period):
-    return [
-        ["Statement", "Header", "Field Name", "Field Value"],
-        ["Statement", "Data", "Title", "Activity Statement"],
-        ["Statement", "Data", "Period", period],
-        ["Account Information", "Header", "Field Name", "Field Value"],
-        ["Account Information", "Data", "Account", account],
-    ]
+    return statement_meta_rows(account=account, period=period)
 
 
 def _write_full_statement(
@@ -1016,22 +957,17 @@ def _write_full_statement(
     # sets the sell's IBKR Realized P/L, so a test can plant an obviously wrong value
     # to drive a reconciliation mismatch. The defaults reproduce the original pair.
     buy = _trade("AAPL", currency, date=f"{year}-02-10, 10:00:00")
-    sell = [
-        "Trades",
-        "Data",
-        "Order",
-        "Stocks",
-        currency,
-        "AAPL",
-        f"{year}-06-10, 10:00:00",
-        "-10",
-        "110",
-        "1100",
-        "-1",
-        "C",
-        "-1001",
-        realized,
-    ]
+    sell = trade_data(
+        currency=currency,
+        datetime_str=f"{year}-06-10, 10:00:00",
+        quantity="-10",
+        t_price="110",
+        proceeds="1100",
+        comm_fee="-1",
+        code="C",
+        basis="-1001",
+        realized=realized,
+    )
     legs_rows = {"both": [buy, sell], "open": [buy], "close": [sell]}[legs]
     rows = _statement_meta_rows(account, period) + [_TRADES_HEADER, *legs_rows]
     with open(path, "w", newline="", encoding="utf-8") as fp:
@@ -1056,8 +992,8 @@ def test_process_files_disjoint_statements_write_workbook(tmp_path):
     a = tmp_path / "2023.csv"
     b = tmp_path / "2024.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(a, account="U1", period=_Y2023, year=2023)
-    _write_full_statement(b, account="U1", period=_Y2024, year=2024)
+    _write_full_statement(a, account="U1", period=Y2023, year=2023)
+    _write_full_statement(b, account="U1", period=Y2024, year=2024)
 
     run(_args_multi([a, b], out))
 
@@ -1070,8 +1006,8 @@ def test_process_files_exits_2_on_overlapping_statements(tmp_path, caplog):
     a = tmp_path / "2024_a.csv"
     b = tmp_path / "2024_b.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(a, account="U1", period=_Y2024, year=2024)
-    _write_full_statement(b, account="U1", period=_Y2024, year=2024)
+    _write_full_statement(a, account="U1", period=Y2024, year=2024)
+    _write_full_statement(b, account="U1", period=Y2024, year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(_args_multi([a, b], out))
@@ -1089,8 +1025,8 @@ def test_process_files_multifile_runs_reconciliation(tmp_path, caplog):
     a = tmp_path / "2023.csv"
     b = tmp_path / "2024.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(a, account="U1", period=_Y2023, year=2023)
-    _write_full_statement(b, account="U1", period=_Y2024, year=2024)
+    _write_full_statement(a, account="U1", period=Y2023, year=2023)
+    _write_full_statement(b, account="U1", period=Y2024, year=2024)
 
     with caplog.at_level(logging.DEBUG):
         run(_args_multi([a, b], out))
@@ -1114,9 +1050,9 @@ def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, caplog):
     prior = tmp_path / "2023.csv"
     current = tmp_path / "2024.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(prior, account="U1", period=_Y2023, year=2023, legs="open")
+    _write_full_statement(prior, account="U1", period=Y2023, year=2023, legs="open")
     _write_full_statement(
-        current, account="U1", period=_Y2024, year=2024, legs="close", realized="9999"
+        current, account="U1", period=Y2024, year=2024, legs="close", realized="9999"
     )
 
     with caplog.at_level(logging.DEBUG):
@@ -1137,7 +1073,7 @@ def test_process_files_single_file_missing_account_exits_2(tmp_path, caplog):
     # workbook, before any contents are trusted.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(stmt, account="", period=_Y2024, year=2024)
+    _write_full_statement(stmt, account="", period=Y2024, year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(_args(stmt, out))
@@ -1173,7 +1109,7 @@ def test_process_files_single_file_valid_identity_writes_workbook(tmp_path):
     # and runs through to the workbook. EUR converts by identity, so no FX table needed.
     stmt = tmp_path / "stmt.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(stmt, account="U1", period=_Y2024, year=2024)
+    _write_full_statement(stmt, account="U1", period=Y2024, year=2024)
 
     run(_args(stmt, out))
 
@@ -1187,7 +1123,7 @@ def test_process_files_multifile_one_invalid_identity_exits_2(tmp_path, caplog):
     a = tmp_path / "2023.csv"
     b = tmp_path / "2024.csv"
     out = tmp_path / "out.xlsx"
-    _write_full_statement(a, account="U1", period=_Y2023, year=2023)
+    _write_full_statement(a, account="U1", period=Y2023, year=2023)
     _write_full_statement(b, account="U1", period="2024-01-01 to 2024-12-31", year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:

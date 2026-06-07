@@ -19,55 +19,24 @@ import sys
 import pytest
 
 from capitangains.cmd.cli import build_argparser, main, resolve_inputs
-
-_TRADES_HEADER = [
-    "Trades",
-    "Header",
-    "DataDiscriminator",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date/Time",
-    "Quantity",
-    "T. Price",
-    "Proceeds",
-    "Comm/Fee",
-    "Code",
-    "Basis",
-    "Realized P/L",
-]
-
-_Y2023 = "January 1, 2023 - December 31, 2023"
-_Y2024 = "January 1, 2024 - December 31, 2024"
+from tests.support import (
+    TRADES_COLUMNS,
+    Y2023,
+    Y2024,
+    header_row,
+    statement_meta_rows,
+    trade_data,
+    write_statement_csv,
+)
 
 
 def _write_statement(path, *, period, year, account="U1", currency="EUR"):
     rows = [
-        ["Statement", "Header", "Field Name", "Field Value"],
-        ["Statement", "Data", "Title", "Activity Statement"],
-        ["Statement", "Data", "Period", period],
-        ["Account Information", "Header", "Field Name", "Field Value"],
-        ["Account Information", "Data", "Account", account],
-        _TRADES_HEADER,
-        [
-            "Trades",
-            "Data",
-            "Order",
-            "Stocks",
-            currency,
-            "AAPL",
-            f"{year}-02-10, 10:00:00",
-            "10",
-            "100",
-            "-1000",
-            "-1",
-            "O",
-            "1000",
-            "0",
-        ],
+        *statement_meta_rows(account=account, period=period),
+        header_row("Trades", TRADES_COLUMNS),
+        trade_data(currency=currency, datetime_str=f"{year}-02-10, 10:00:00"),
     ]
-    with open(path, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(rows)
+    write_statement_csv(path, rows)
 
 
 def _write_forex(path):
@@ -127,8 +96,8 @@ def test_resolve_inputs_positional_passthrough():
 def test_resolve_inputs_discovers_and_prints_manifest(tmp_path, capsys):
     d = tmp_path / "d"
     d.mkdir()
-    _write_statement(d / "2023.csv", period=_Y2023, year=2023)
-    _write_statement(d / "2024.csv", period=_Y2024, year=2024)
+    _write_statement(d / "2023.csv", period=Y2023, year=2023)
+    _write_statement(d / "2024.csv", period=Y2024, year=2024)
     _write_forex(d / "forex.csv")
 
     inputs = _resolve(["--year", "2024", "--statements-dir", str(d)])
@@ -149,7 +118,7 @@ def test_main_statements_dir_writes_workbook(tmp_path, monkeypatch):
     # by identity, so no FX table is needed.
     d = tmp_path / "d"
     d.mkdir()
-    _write_statement(d / "2024.csv", period=_Y2024, year=2024)
+    _write_statement(d / "2024.csv", period=Y2024, year=2024)
     out = tmp_path / "out.xlsx"
     monkeypatch.setattr(
         sys,
