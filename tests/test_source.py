@@ -14,80 +14,25 @@ from decimal import Decimal
 import pytest
 
 from capitangains.reporting import IbkrActivityStatementSource, ParsedStatement
-from tests.support import parse_model
+from tests.support import (
+    DIVIDENDS_COLUMNS,
+    INTEREST_COLUMNS,
+    SYEP_COLUMNS,
+    SYEP_SECTION,
+    TRADES_COLUMNS,
+    TRANSFERS_COLUMNS,
+    WITHHOLDING_COLUMNS,
+    header_row,
+    parse_model,
+    section_table,
+    trade_data,
+)
 
-_SYEP_SECTION = "Stock Yield Enhancement Program Securities Lent Interest Details"
-
-_TRADE_HEADER = [
-    "Trades",
-    "Header",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date/Time",
-    "Quantity",
-    "T. Price",
-    "Proceeds",
-    "Comm/Fee",
-    "Code",
-    "Basis",
-    "Realized P/L",
-]
-_TRANSFER_HEADER = [
-    "Transfers",
-    "Header",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date",
-    "Direction",
-    "Qty",
-    "Market Value",
-    "Code",
-]
-_DIVIDEND_HEADER = ["Dividends", "Header", "Currency", "Date", "Description", "Amount"]
-_WITHHOLDING_HEADER = [
-    "Withholding Tax",
-    "Header",
-    "Currency",
-    "Date",
-    "Description",
-    "Amount",
-    "Code",
-]
-_INTEREST_HEADER = ["Interest", "Header", "Currency", "Date", "Description", "Amount"]
-_SYEP_HEADER = [
-    _SYEP_SECTION,
-    "Header",
-    "Currency",
-    "Value Date",
-    "Symbol",
-    "Start Date",
-    "Quantity",
-    "Collateral Amount",
-    "Market-based Rate (%)",
-    "Interest Rate on Customer Collateral (%)",
-    "Interest Paid to Customer",
-    "Code",
-]
+_TRADE_HEADER = header_row("Trades", TRADES_COLUMNS)
 
 
 def _trade(asset, symbol, *, qty="10"):
-    return [
-        "Trades",
-        "Data",
-        asset,
-        "USD",
-        symbol,
-        "2024-01-10, 10:00:00",
-        qty,
-        "100",
-        "-1000",
-        "-1",
-        "O",
-        "1000",
-        "0",
-    ]
+    return trade_data(asset_category=asset, symbol=symbol, quantity=qty)
 
 
 def test_read_aggregates_all_sections():
@@ -95,48 +40,42 @@ def test_read_aggregates_all_sections():
         [
             _TRADE_HEADER,
             _trade("Stocks", "AAPL"),
-            _TRANSFER_HEADER,
-            [
+            *section_table(
                 "Transfers",
-                "Data",
-                "Stocks",
-                "USD",
-                "MSFT",
-                "2024-02-10",
-                "In",
-                "5",
-                "500",
-                "",
-            ],
-            _DIVIDEND_HEADER,
-            ["Dividends", "Data", "EUR", "2024-01-05", "Div ABC", "10.00"],
-            _WITHHOLDING_HEADER,
-            [
+                TRANSFERS_COLUMNS,
+                ["Stocks", "USD", "MSFT", "2024-02-10", "In", "5", "500", ""],
+            ),
+            *section_table(
+                "Dividends",
+                DIVIDENDS_COLUMNS,
+                ["EUR", "2024-01-05", "Div ABC", "10.00"],
+            ),
+            *section_table(
                 "Withholding Tax",
-                "Data",
-                "USD",
-                "2024-01-06",
-                "ABC Cash Dividend - US Tax",
-                "-1.50",
-                "",
-            ],
-            _INTEREST_HEADER,
-            ["Interest", "Data", "USD", "2024-01-07", "Credit Interest", "2.00"],
-            _SYEP_HEADER,
-            [
-                _SYEP_SECTION,
-                "Data",
-                "USD",
-                "2024-01-15",
-                "AAPL",
-                "2024-01-01",
-                "1000",
-                "150000.00",
-                "5.50",
-                "4.75",
-                "195.83",
-                "SL",
-            ],
+                WITHHOLDING_COLUMNS,
+                ["USD", "2024-01-06", "ABC Cash Dividend - US Tax", "-1.50", ""],
+            ),
+            *section_table(
+                "Interest",
+                INTEREST_COLUMNS,
+                ["USD", "2024-01-07", "Credit Interest", "2.00"],
+            ),
+            *section_table(
+                SYEP_SECTION,
+                SYEP_COLUMNS,
+                [
+                    "USD",
+                    "2024-01-15",
+                    "AAPL",
+                    "2024-01-01",
+                    "1000",
+                    "150000.00",
+                    "5.50",
+                    "4.75",
+                    "195.83",
+                    "SL",
+                ],
+            ),
         ]
     )
 
@@ -175,8 +114,11 @@ def test_read_unions_defects_in_call_order():
         [
             _TRADE_HEADER,
             _trade("Stocks", "BAD", qty="xyz"),
-            _DIVIDEND_HEADER,
-            ["Dividends", "Data", "EUR", "2024-03-03", "Bad Div", "xyz"],
+            *section_table(
+                "Dividends",
+                DIVIDENDS_COLUMNS,
+                ["EUR", "2024-03-03", "Bad Div", "xyz"],
+            ),
         ]
     )
 

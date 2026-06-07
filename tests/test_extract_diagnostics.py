@@ -14,43 +14,17 @@ from capitangains.reporting.extract import (
     parse_transfers,
     parse_withholding_tax,
 )
-from tests.support import parse_model
+from tests.support import TRADES_COLUMNS, header_row, parse_model, trade_data
 
 _EXTRACT_LOGGER = "capitangains.reporting.extract"
 
-_TRADE_HEADER = [
-    "Trades",
-    "Header",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date/Time",
-    "Quantity",
-    "T. Price",
-    "Proceeds",
-    "Comm/Fee",
-    "Code",
-    "Basis",
-    "Realized P/L",
-]
+_TRADE_HEADER = header_row("Trades", TRADES_COLUMNS)
 
 
 def _trade_data(asset, symbol, *, basis="1000", realized="0"):
-    return [
-        "Trades",
-        "Data",
-        asset,
-        "USD",
-        symbol,
-        "2024-01-10, 10:00:00",
-        "10",
-        "100",
-        "-1000",
-        "-1",
-        "O",
-        basis,
-        realized,
-    ]
+    return trade_data(
+        asset_category=asset, symbol=symbol, basis=basis, realized=realized
+    )
 
 
 def test_trades_out_of_scope_rows_counted_as_info(caplog):
