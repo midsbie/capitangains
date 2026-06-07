@@ -543,339 +543,336 @@ def _write_single_sell(path, *, symbol, currency, basis, realized, proceeds="120
         )
 
 
-def _args(stmt, out, *, fx_table=None, auto_fix_sell_gaps=None, dry_run=False):
+def _args(stmt, out_path, *, fx_table=None, auto_fix_sell_gaps=None, dry_run=False):
     return RunOptions(
         inputs=[str(stmt)],
         year=2024,
         fx_table=fx_table,
         locale="EN",
-        output=str(out),
+        output=str(out_path),
         auto_fix_sell_gaps=auto_fix_sell_gaps,
         dry_run=dry_run,
     )
 
 
-def test_process_files_exits_2_when_fx_table_incomplete(tmp_path, caplog):
+def test_process_files_exits_2_when_fx_table_incomplete(tmp_path, out_path, caplog):
     # Non-EUR data with no FX table cannot be converted. A complete table is a
     # precondition, so this aborts with exit 2 and writes no workbook with
     # blank/substituted EUR figures, rather than warning + exit 0.
     stmt = tmp_path / "stmt.csv"
     _write_statement(stmt)
-    out = tmp_path / "out.xlsx"
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("Missing FX rate" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, caplog):
+def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, out_path, caplog):
     # A missing or unparseable --fx-table file is a setup failure, not a statement-data
     # defect, so it halts with exit 1 -- a class apart from the curated gates' exit 2 --
     # surfaced as one clean ERROR (explicit, not an emergent raw crash) and no workbook.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_statement(stmt)  # USD: needs the FX table to convert
-    args = _args(stmt, out, fx_table=str(tmp_path / "does_not_exist.csv"))
+    args = _args(stmt, out_path, fx_table=str(tmp_path / "does_not_exist.csv"))
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(args)
 
     assert exc.value.code == 1
-    assert not out.exists()
+    assert not out_path.exists()
     assert any(
         "Failed to prepare FX conversion" in r.getMessage() for r in caplog.records
     )
 
 
-def test_process_files_exits_2_on_malformed_acknowledgment_spec(tmp_path, caplog):
+def test_process_files_exits_2_on_malformed_acknowledgment_spec(
+    tmp_path, out_path, caplog
+):
     # A malformed spec must abort before any file is read (fail fast), with exit 2, no
     # workbook, and an ERROR naming the bad token.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_statement(stmt)  # valid statement; only the spec is malformed
-    args = _args(stmt, out, auto_fix_sell_gaps="BABA@oops")
+    args = _args(stmt, out_path, auto_fix_sell_gaps="BABA@oops")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(args)
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("BABA@oops" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_exits_2_on_malformed_trade_row(tmp_path, caplog):
+def test_process_files_exits_2_on_malformed_trade_row(
+    write_statement, out_path, caplog
+):
     # A row-level parse defect (blank Date/Time) must abort cleanly with exit 2, not a
     # raw traceback (exit 1), and write no workbook.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(
-            _statement_meta_rows("U1", Y2024)
-            + [_TRADES_HEADER, _trade("AAPL", "USD", date="")]
-        )
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [_TRADES_HEADER, _trade("AAPL", "USD", date="")]
+    )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("Date/Time" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_exits_2_on_symbol_currency_violation(tmp_path, caplog):
+def test_process_files_exits_2_on_symbol_currency_violation(
+    write_statement, out_path, caplog
+):
     # A legitimate-but-rejected data condition (one symbol in two currencies) must abort
     # with exit 2, not a raw traceback.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(
-            _statement_meta_rows("U1", Y2024)
-            + [_TRADES_HEADER, _trade("ABC", "USD"), _trade("ABC", "EUR")]
-        )
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [_TRADES_HEADER, _trade("ABC", "USD"), _trade("ABC", "EUR")]
+    )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("symbol-currency uniqueness" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_exits_2_on_same_day_transfer_trade_collision(tmp_path, caplog):
+def test_process_files_exits_2_on_same_day_transfer_trade_collision(
+    write_statement, out_path, caplog
+):
     # IBKR gives transfers no intraday time, so a transfer landing on the same day as a
     # trade in the SAME symbol cannot be ordered for FIFO. The tool refuses to guess and
     # aborts with exit 2 -- naming the symbol/day -- rather than fabricate an order.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", Y2024) + [
-        _TRADES_HEADER,
-        _trade("AAPL", "USD", date="2024-06-10, 10:00:00"),
-        _TRANSFERS_HEADER,
-        _transfer_data("AAPL", "USD", "2024-06-10"),
-    ]
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(rows)
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRADES_HEADER,
+            _trade("AAPL", "USD", date="2024-06-10, 10:00:00"),
+            _TRANSFERS_HEADER,
+            _transfer_data("AAPL", "USD", "2024-06-10"),
+        ]
+    )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any(
         "Unorderable same-day events" in r.getMessage() and "AAPL" in r.getMessage()
         for r in caplog.records
     )
 
 
-def test_process_files_allows_same_day_transfer_in_a_different_symbol(tmp_path, caplog):
+def test_process_files_allows_same_day_transfer_in_a_different_symbol(
+    write_statement, out_path, caplog
+):
     # The guard is scoped to (symbol, currency): a transfer sharing a day with trades in
     # an UNRELATED symbol is independent for FIFO and must not halt. EUR converts by
     # identity, so the run completes and writes the workbook.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", Y2024) + [
-        _TRADES_HEADER,
-        _trade("AAPL", "EUR", date="2024-01-10, 10:00:00"),
-        [
-            "Trades",
-            "Data",
-            "Order",
-            "Stocks",
-            "EUR",
-            "AAPL",
-            "2024-06-10, 10:00:00",
-            "-10",
-            "110",
-            "1100",
-            "-1",
-            "C",
-            "-1001",
-            "99",
-        ],
-        _TRANSFERS_HEADER,
-        _transfer_data("MSFT", "EUR", "2024-06-10"),
-    ]
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(rows)
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRADES_HEADER,
+            _trade("AAPL", "EUR", date="2024-01-10, 10:00:00"),
+            [
+                "Trades",
+                "Data",
+                "Order",
+                "Stocks",
+                "EUR",
+                "AAPL",
+                "2024-06-10, 10:00:00",
+                "-10",
+                "110",
+                "1100",
+                "-1",
+                "C",
+                "-1001",
+                "99",
+            ],
+            _TRANSFERS_HEADER,
+            _transfer_data("MSFT", "EUR", "2024-06-10"),
+        ]
+    )
 
     with caplog.at_level(logging.ERROR):
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
-    assert out.exists()
+    assert out_path.exists()
     assert not any(
         "Unorderable same-day events" in r.getMessage() for r in caplog.records
     )
 
 
-def test_process_files_transfers_sheet_shows_only_reporting_year(tmp_path):
+def test_process_files_transfers_sheet_shows_only_reporting_year(
+    write_statement, out_path
+):
     # The report is a single-year document, so the Stock Transfers sheet -- like every
     # other category -- shows only args.year. A prior-year transfer is supplied solely
     # to seed FIFO (here SEEDLOT, 2023); it must not surface on the 2024 sheet as if it
     # were a current-year event, while a genuine 2024 transfer (CURRENTXFER) must. Both
     # are IN transfers seeding open lots; all EUR, so the run converts by identity.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", Y2024) + [
-        _TRANSFERS_HEADER,
-        _transfer_data("SEEDLOT", "EUR", "2023-11-01"),
-        _transfer_data("CURRENTXFER", "EUR", "2024-03-01"),
-    ]
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(rows)
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRANSFERS_HEADER,
+            _transfer_data("SEEDLOT", "EUR", "2023-11-01"),
+            _transfer_data("CURRENTXFER", "EUR", "2024-03-01"),
+        ]
+    )
 
-    run(_args(stmt, out))
+    run(_args(stmt, out_path))
 
-    assert out.exists()
-    ws = load_workbook(out)["Stock Transfers"]
+    assert out_path.exists()
+    ws = load_workbook(out_path)["Stock Transfers"]
     symbols = {row[1] for row in ws.iter_rows(min_row=2, values_only=True)}
     assert symbols == {"CURRENTXFER"}
 
 
-def test_process_files_exits_2_on_malformed_dividend_amount(tmp_path, caplog):
+def test_process_files_exits_2_on_malformed_dividend_amount(
+    write_statement, out_path, caplog
+):
     # A present-but-malformed cash-flow value (bad dividend Amount) must abort with
     # exit 2 like trades/SYEP/transfers, not escape as a raw traceback. The
     # skip-incomplete gate only drops rows missing core fields, not malformed amounts.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(
-            _statement_meta_rows("U1", Y2024)
-            + [
-                ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
-                ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
-            ]
-        )
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
+            ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
+        ]
+    )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("Amount" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_lists_every_extraction_defect(tmp_path, caplog):
+def test_process_files_lists_every_extraction_defect(write_statement, out_path, caplog):
     # Accumulate, do not fail fast: a malformed trade row AND a malformed dividend row
     # in the same statement are BOTH reported in one run, then a single exit 2 with no
     # workbook -- so the operator fixes every defect in one pass, not one-per-rerun.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    rows = _statement_meta_rows("U1", Y2024) + [
-        _TRADES_HEADER,
-        _trade("AAPL", "USD", date=""),  # bad trade: blank Date/Time
-        ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
-        ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
-    ]
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(rows)
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRADES_HEADER,
+            _trade("AAPL", "USD", date=""),  # bad trade: blank Date/Time
+            ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
+            ["Dividends", "Data", "USD", "2024-01-15", "AAPL Dividend", "invalid"],
+        ]
+    )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     messages = [r.getMessage() for r in caplog.records]
     assert any("Trades" in m and "Date/Time" in m for m in messages)
     assert any("Dividends" in m and "Amount" in m for m in messages)
     assert any("rejected 2 row(s)" in m for m in messages)
 
 
-def test_process_files_exits_2_on_unacknowledged_gap(tmp_path, caplog):
+def test_process_files_exits_2_on_unacknowledged_gap(tmp_path, out_path, caplog):
     # A real SELL gap left unacknowledged (no spec) is fatal: a known taxable disposal
     # must never be silently valued at zero cost.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_single_sell(
         stmt, symbol="ORPH", currency="USD", basis="-1000", realized="200"
     )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("Unacknowledged SELL gap" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_exits_2_on_orphan_acknowledgment(tmp_path, caplog):
+def test_process_files_exits_2_on_orphan_acknowledgment(tmp_path, out_path, caplog):
     # A clean statement (no gaps) with an acknowledgment that matches nothing is fatal:
     # the operator must not carry a stale or mistyped acknowledgment.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_statement(stmt)  # fully matched: no gaps
-    args = _args(stmt, out, auto_fix_sell_gaps="GHOST@2024-01-01")
+    args = _args(stmt, out_path, auto_fix_sell_gaps="GHOST@2024-01-01")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(args)
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any(
         "Orphan acknowledgment" in r.getMessage() and "GHOST" in r.getMessage()
         for r in caplog.records
     )
 
 
-def test_process_files_exits_2_on_acknowledged_gap_with_corrupt_basis(tmp_path, caplog):
+def test_process_files_exits_2_on_acknowledged_gap_with_corrupt_basis(
+    tmp_path, out_path, caplog
+):
     # An acknowledged gap whose Basis contradicts IBKR's own Realized P/L
     # (Proceeds + Comm + Basis != Realized) is DEFECTIVE; synthesizing from it would
     # fabricate the gain, so the run aborts with exit 2 and writes no workbook. The rich
     # message survives the move to the boundary (mentions both "Basis" and "Realized").
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_single_sell(
         stmt, symbol="CORRUPT", currency="USD", basis="-99999", realized="200"
     )
-    args = _args(stmt, out, auto_fix_sell_gaps="CORRUPT@2024-06-10")
+    args = _args(stmt, out_path, auto_fix_sell_gaps="CORRUPT@2024-06-10")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(args)
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any(
         "Basis" in r.getMessage() and "Realized" in r.getMessage()
         for r in caplog.records
     )
 
 
-def test_process_files_exits_2_on_acknowledged_gap_with_missing_basis(tmp_path, caplog):
+def test_process_files_exits_2_on_acknowledged_gap_with_missing_basis(
+    tmp_path, out_path, caplog
+):
     # An acknowledged gap with no IBKR Basis at all is DEFECTIVE: there is no figure to
     # synthesize from, so the run aborts (exit 2, no workbook) rather than electing a
     # zero basis.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_single_sell(stmt, symbol="NOBASIS", currency="USD", basis="", realized="")
-    args = _args(stmt, out, auto_fix_sell_gaps="NOBASIS@2024-06-10")
+    args = _args(stmt, out_path, auto_fix_sell_gaps="NOBASIS@2024-06-10")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(args)
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("defective IBKR Basis" in r.getMessage() for r in caplog.records)
 
 
 def test_process_files_synthesizes_acknowledged_gap_and_writes_workbook(
-    tmp_path, caplog
+    tmp_path, out_path, caplog
 ):
     # An acknowledged gap with a valid IBKR Basis is synthesized: the run completes,
     # writes the workbook, and emits the per-lot audit warning so the synthetic basis is
     # never silent. EUR trades need no FX table (identity conversion).
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_single_sell(
         stmt, symbol="EURGAP", currency="EUR", basis="-1000", realized="200"
     )
-    args = _args(stmt, out, auto_fix_sell_gaps="EURGAP@2024-06-10")
+    args = _args(stmt, out_path, auto_fix_sell_gaps="EURGAP@2024-06-10")
 
     with caplog.at_level(logging.WARNING):
         run(args)
 
-    assert out.exists()
+    assert out_path.exists()
     assert any("Synthesized residual lot" in r.getMessage() for r in caplog.records)
 
 
@@ -891,52 +888,51 @@ def test_argparser_accepts_dry_run_short_and_long_flags():
     assert parser.parse_args(["--year", "2024", "stmt.csv"]).dry_run is False
 
 
-def test_process_files_dry_run_writes_no_workbook_on_clean_input(tmp_path, caplog):
+def test_process_files_dry_run_writes_no_workbook_on_clean_input(
+    tmp_path, out_path, caplog
+):
     # A run that would otherwise succeed writes nothing under --dry-run: it returns
     # normally (exit 0), leaves no file at out_path, and announces the preflight.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_statement(stmt, currency="EUR")  # matched, EUR: clean through to the write
-    args = _args(stmt, out, dry_run=True)
+    args = _args(stmt, out_path, dry_run=True)
 
     with caplog.at_level(logging.INFO):
         run(args)  # no SystemExit
 
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("Dry run" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_dry_run_does_not_overwrite_existing_output(tmp_path):
+def test_process_files_dry_run_does_not_overwrite_existing_output(tmp_path, out_path):
     # The existing report at out_path is left byte-for-byte untouched: --dry-run never
     # clobbers a prior good workbook.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_statement(stmt, currency="EUR")
-    out.write_bytes(b"prior report")
-    args = _args(stmt, out, dry_run=True)
+    out_path.write_bytes(b"prior report")
+    args = _args(stmt, out_path, dry_run=True)
 
     run(args)
 
-    assert out.read_bytes() == b"prior report"
+    assert out_path.read_bytes() == b"prior report"
 
 
-def test_process_files_dry_run_still_exits_2_on_defect(tmp_path, caplog):
+def test_process_files_dry_run_still_exits_2_on_defect(
+    write_statement, out_path, caplog
+):
     # --dry-run validates; it does not suppress failures. A row-level defect still
     # aborts with exit 2 and writes no workbook, exactly as a real run would.
-    stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
-    with open(stmt, "w", newline="", encoding="utf-8") as fp:
-        csv.writer(fp).writerows(
-            _statement_meta_rows("U1", Y2024)
-            + [_TRADES_HEADER, _trade("AAPL", "EUR", date="")]
-        )
-    args = _args(stmt, out, dry_run=True)
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [_TRADES_HEADER, _trade("AAPL", "EUR", date="")]
+    )
+    args = _args(stmt, out_path, dry_run=True)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         run(args)
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("Date/Time" in r.getMessage() for r in caplog.records)
 
 
@@ -974,64 +970,61 @@ def _write_full_statement(
         csv.writer(fp).writerows(rows)
 
 
-def _args_multi(stmts, out, *, year=2024):
+def _args_multi(stmts, out_path, *, year=2024):
     return RunOptions(
         inputs=[str(s) for s in stmts],
         year=year,
         fx_table=None,
         locale="EN",
-        output=str(out),
+        output=str(out_path),
         auto_fix_sell_gaps=None,
         dry_run=False,
     )
 
 
-def test_process_files_disjoint_statements_write_workbook(tmp_path):
+def test_process_files_disjoint_statements_write_workbook(tmp_path, out_path):
     # Two single-account statements for adjacent, non-overlapping years merge cleanly
     # and produce a workbook: the gate must not flag a legitimate multi-file run.
     a = tmp_path / "2023.csv"
     b = tmp_path / "2024.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(a, account="U1", period=Y2023, year=2023)
     _write_full_statement(b, account="U1", period=Y2024, year=2024)
 
-    run(_args_multi([a, b], out))
+    run(_args_multi([a, b], out_path))
 
-    assert out.exists()
+    assert out_path.exists()
 
 
-def test_process_files_exits_2_on_overlapping_statements(tmp_path, caplog):
+def test_process_files_exits_2_on_overlapping_statements(tmp_path, out_path, caplog):
     # The same period supplied twice would double-count trades into FIFO; the run aborts
     # before merging and writes no workbook.
     a = tmp_path / "2024_a.csv"
     b = tmp_path / "2024_b.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(a, account="U1", period=Y2024, year=2024)
     _write_full_statement(b, account="U1", period=Y2024, year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args_multi([a, b], out))
+        run(_args_multi([a, b], out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any("overlapping periods" in r.getMessage() for r in caplog.records)
 
 
-def test_process_files_multifile_runs_reconciliation(tmp_path, caplog):
+def test_process_files_multifile_runs_reconciliation(tmp_path, out_path, caplog):
     # The reconciliation now runs for multi-file input: the old single-file guard is
     # gone. Two disjoint self-contained years (mirroring the disjoint-write test)
     # reconcile, so the per-symbol DEBUG trace appears and the "Skipping..." line never
     # does. The check is purely diagnostic, so the workbook is still written.
     a = tmp_path / "2023.csv"
     b = tmp_path / "2024.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(a, account="U1", period=Y2023, year=2023)
     _write_full_statement(b, account="U1", period=Y2024, year=2024)
 
     with caplog.at_level(logging.DEBUG):
-        run(_args_multi([a, b], out))
+        run(_args_multi([a, b], out_path))
 
-    assert out.exists()
+    assert out_path.exists()
     messages = [r.getMessage() for r in caplog.records]
     assert not any("Skipping IBKR realized-P/L reconciliation" in m for m in messages)
     assert any(
@@ -1040,7 +1033,7 @@ def test_process_files_multifile_runs_reconciliation(tmp_path, caplog):
     )
 
 
-def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, caplog):
+def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, out_path, caplog):
     # The case the old guard suppressed: a 2024 sell whose opening lot lives in a
     # 2023 file. Multi-file mode seeds FIFO with the real 2023 buy, so the 2024 sell
     # matches a genuine lot -- no gap, no --auto-fix-sell-gaps, no synthesized basis --
@@ -1049,16 +1042,15 @@ def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, caplog):
     # catches the disagreement.
     prior = tmp_path / "2023.csv"
     current = tmp_path / "2024.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(prior, account="U1", period=Y2023, year=2023, legs="open")
     _write_full_statement(
         current, account="U1", period=Y2024, year=2024, legs="close", realized="9999"
     )
 
     with caplog.at_level(logging.DEBUG):
-        run(_args_multi([prior, current], out))
+        run(_args_multi([prior, current], out_path))
 
-    assert out.exists()
+    assert out_path.exists()
     messages = [r.getMessage() for r in caplog.records]
     assert not any("synthesized basis" in m for m in messages)
     assert any("disagree with IBKR realized P/L beyond rounding" in m for m in messages)
@@ -1067,70 +1059,68 @@ def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, caplog):
 # --- run() statement-identity gate --------------------------------------------
 
 
-def test_process_files_single_file_missing_account_exits_2(tmp_path, caplog):
+def test_process_files_single_file_missing_account_exits_2(tmp_path, out_path, caplog):
     # Identity is validated unconditionally, not only on the multi-file path: a lone
     # statement whose Account is blank halts at the identity gate with exit 2 and no
     # workbook, before any contents are trusted.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(stmt, account="", period=Y2024, year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     messages = [r.getMessage() for r in caplog.records]
     assert any("missing account number" in m for m in messages)
     assert any("missing or malformed identity" in m for m in messages)
 
 
-def test_process_files_single_file_malformed_period_exits_2(tmp_path, caplog):
+def test_process_files_single_file_malformed_period_exits_2(tmp_path, out_path, caplog):
     # A single statement whose Period does not parse is equally fatal at the identity
     # gate -- the precondition is establish identity before trusting contents.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(
         stmt, account="U1", period="2024-01-01 to 2024-12-31", year=2024
     )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args(stmt, out))
+        run(_args(stmt, out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any(
         "missing or malformed identity" in r.getMessage() for r in caplog.records
     )
 
 
-def test_process_files_single_file_valid_identity_writes_workbook(tmp_path):
+def test_process_files_single_file_valid_identity_writes_workbook(tmp_path, out_path):
     # The control: a lone statement with a sound Account/Period identity clears the gate
     # and runs through to the workbook. EUR converts by identity, so no FX table needed.
     stmt = tmp_path / "stmt.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(stmt, account="U1", period=Y2024, year=2024)
 
-    run(_args(stmt, out))
+    run(_args(stmt, out_path))
 
-    assert out.exists()
+    assert out_path.exists()
 
 
-def test_process_files_multifile_one_invalid_identity_exits_2(tmp_path, caplog):
+def test_process_files_multifile_one_invalid_identity_exits_2(
+    tmp_path, out_path, caplog
+):
     # In a multi-file set, a single member with an unparseable identity halts the whole
     # run at the identity gate (exit 2, no workbook) -- before the cross-file conflict
     # check, which assumes every period is parseable.
     a = tmp_path / "2023.csv"
     b = tmp_path / "2024.csv"
-    out = tmp_path / "out.xlsx"
     _write_full_statement(a, account="U1", period=Y2023, year=2023)
     _write_full_statement(b, account="U1", period="2024-01-01 to 2024-12-31", year=2024)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        run(_args_multi([a, b], out))
+        run(_args_multi([a, b], out_path))
 
     assert exc.value.code == 2
-    assert not out.exists()
+    assert not out_path.exists()
     assert any(
         "missing or malformed identity" in r.getMessage() for r in caplog.records
     )

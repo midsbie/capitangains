@@ -66,12 +66,11 @@ def build_rb_for_summary():
     return rb
 
 
-def test_summary_sheet_contents(tmp_path):
+def test_summary_sheet_contents(out_path):
     rb = build_rb_for_summary()
-    out = tmp_path / "out.xlsx"
-    sink = ExcelReportSink(out_path=out, locale="EN")
+    sink = ExcelReportSink(out_path=out_path, locale="EN")
     sink.write(rb)
-    wb = load_workbook(out)
+    wb = load_workbook(out_path)
     ws = wb["Trading Totals"]
     rows = list(ws.iter_rows(values_only=True))
     # Expect header + at least 4 lines:
@@ -89,12 +88,11 @@ def test_summary_sheet_contents(tmp_path):
     assert not any(s == "Total Realized P/L (EUR)" for s in breakdown_labels)
 
 
-def test_per_symbol_number_formats(tmp_path):
+def test_per_symbol_number_formats(out_path):
     rb = build_rb_for_summary()
-    out = tmp_path / "out.xlsx"
-    sink = ExcelReportSink(out_path=out, locale="EN")
+    sink = ExcelReportSink(out_path=out_path, locale="EN")
     sink.write(rb)
-    wb = load_workbook(out)
+    wb = load_workbook(out_path)
     ws = wb["Per Symbol Summary"]
     # Find AMD (USD) row and assert number formats
     for row in ws.iter_rows(min_row=2):
