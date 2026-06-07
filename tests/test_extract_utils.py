@@ -1,7 +1,6 @@
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import (
     parse_dividends,
     parse_interest,
@@ -9,12 +8,7 @@ from capitangains.reporting.extract import (
     parse_trades_stocklike,
     parse_withholding_tax,
 )
-
-
-def _parse_rows(rows):
-    parser = IbkrStatementCsvParser()
-    model, _ = parser.parse_rows(rows)
-    return model
+from tests.support import parse_model
 
 
 def test_parse_trades_scope_and_field_parsing():
@@ -95,7 +89,7 @@ def test_parse_trades_scope_and_field_parsing():
             "",
         ],
     ]
-    model = _parse_rows(rows)
+    model = parse_model(rows)
 
     trades, _ = parse_trades_stocklike(model, asset_scope="stocks_etfs")
     # Order-independent: the extractor no longer sorts (ordering is asserted at the
@@ -146,7 +140,7 @@ def test_parse_dividends_and_withholding_classification():
             "INT",
         ],
     ]
-    model = _parse_rows(rows)
+    model = parse_model(rows)
 
     dividends, _ = parse_dividends(model)
     assert len(dividends) == 1
@@ -207,7 +201,7 @@ def test_parse_syep_interest_skips_totals_and_coerces_numbers():
             "",
         ],
     ]
-    model = _parse_rows(rows)
+    model = parse_model(rows)
 
     result, _ = parse_syep_interest_details(model)
     assert len(result) == 1
@@ -223,7 +217,7 @@ def test_parse_interest_skips_totals():
         ["Interest", "Data", "USD", "2024-02-05", "Monthly Interest", "1.23"],
         ["Interest", "Data", "Total", "", "", "100"],
     ]
-    model = _parse_rows(rows)
+    model = parse_model(rows)
 
     interest, _ = parse_interest(model)
     assert len(interest) == 1

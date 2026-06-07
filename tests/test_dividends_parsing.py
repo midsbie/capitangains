@@ -6,16 +6,8 @@ Test coverage for src/capitangains/reporting/extract.py::parse_dividends
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_dividends
-
-
-def _parse_rows(rows):
-    """Helper to parse CSV rows into IbkrModel."""
-    parser = IbkrStatementCsvParser()
-    model, _ = parser.parse_rows(rows)
-    return model
-
+from tests.support import parse_model
 
 # =============================================================================
 # Happy Path Tests
@@ -43,7 +35,7 @@ def test_parse_basic_dividend():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 1
@@ -92,7 +84,7 @@ def test_parse_multiple_dividends():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 3
@@ -122,7 +114,7 @@ def test_parse_amount_with_thousand_separator():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 1
@@ -150,7 +142,7 @@ def test_parse_amount_with_high_precision():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 1
@@ -191,7 +183,7 @@ def test_skip_rows_with_empty_currency():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     # Only the first row should be parsed
@@ -228,7 +220,7 @@ def test_skip_rows_with_empty_date():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 1
@@ -264,7 +256,7 @@ def test_skip_rows_with_empty_description():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 1
@@ -308,7 +300,7 @@ def test_skip_total_in_eur_rows():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     # Total in EUR row should be skipped (empty date and description)
@@ -341,7 +333,7 @@ def test_error_invalid_amount_format():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, defects = parse_dividends(model)
     assert defects
     assert not dividends
@@ -368,7 +360,7 @@ def test_error_empty_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, defects = parse_dividends(model)
     assert defects
     assert "empty string" in defects[0].reason
@@ -396,7 +388,7 @@ def test_error_invalid_date_format():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, defects = parse_dividends(model)
     assert defects
     assert not dividends
@@ -423,7 +415,7 @@ def test_parse_negative_dividend_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 1

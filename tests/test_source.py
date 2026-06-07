@@ -13,8 +13,8 @@ from decimal import Decimal
 
 import pytest
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting import IbkrActivityStatementSource, ParsedStatement
+from tests.support import parse_model
 
 _SYEP_SECTION = "Stock Yield Enhancement Program Securities Lent Interest Details"
 
@@ -72,11 +72,6 @@ _SYEP_HEADER = [
 ]
 
 
-def _model(rows):
-    model, _ = IbkrStatementCsvParser().parse_rows(rows)
-    return model
-
-
 def _trade(asset, symbol, *, qty="10"):
     return [
         "Trades",
@@ -96,7 +91,7 @@ def _trade(asset, symbol, *, qty="10"):
 
 
 def test_read_aggregates_all_sections():
-    model = _model(
+    model = parse_model(
         [
             _TRADE_HEADER,
             _trade("Stocks", "AAPL"),
@@ -176,7 +171,7 @@ def test_read_unions_defects_in_call_order():
     # non-numeric Amount each yield one row-level defect (neither survives into its
     # section). The trade extractor runs before the dividend one, so the union lists
     # Trades before Dividends.
-    model = _model(
+    model = parse_model(
         [
             _TRADE_HEADER,
             _trade("Stocks", "BAD", qty="xyz"),
@@ -194,7 +189,7 @@ def test_read_unions_defects_in_call_order():
 
 
 def test_read_asset_scope_passthrough():
-    model = _model(
+    model = parse_model(
         [
             _TRADE_HEADER,
             _trade("Stocks", "AAPL"),
@@ -213,7 +208,7 @@ def test_read_asset_scope_passthrough():
 
 
 def test_read_is_pure(caplog):
-    model = _model([_TRADE_HEADER, _trade("Stocks", "BAD", qty="xyz")])
+    model = parse_model([_TRADE_HEADER, _trade("Stocks", "BAD", qty="xyz")])
 
     # Reaching the assertions at all proves read raised no SystemExit on the bad row.
     with caplog.at_level(logging.DEBUG):
@@ -227,7 +222,7 @@ def test_read_is_pure(caplog):
 
 
 def test_parsed_statement_is_frozen():
-    parsed = IbkrActivityStatementSource().read(_model([]))
+    parsed = IbkrActivityStatementSource().read(parse_model([]))
     with pytest.raises(FrozenInstanceError):
         # The assignment is the point of the test; mypy flags it statically, which is
         # exactly the guarantee being exercised at runtime here.

@@ -11,12 +11,12 @@ import datetime as dt
 import pytest
 
 from capitangains.errors import DataQualityError
-from capitangains.model import IbkrStatementCsvParser
 from capitangains.reporting.extract import (
     StatementMetadata,
     StatementPeriod,
     parse_statement_metadata,
 )
+from tests.support import parse_model
 
 # --- StatementPeriod.parse ------------------------------------------------------------
 
@@ -91,17 +91,12 @@ def test_overlaps_containment_and_symmetry():
 # --- parse_statement_metadata ---------------------------------------------------------
 
 
-def _model(rows):
-    model, _ = IbkrStatementCsvParser().parse_rows(rows)
-    return model
-
-
 _STATEMENT_HEADER = ["Statement", "Header", "Field Name", "Field Value"]
 _ACCOUNT_HEADER = ["Account Information", "Header", "Field Name", "Field Value"]
 
 
 def test_extracts_account_and_period():
-    model = _model(
+    model = parse_model(
         [
             _STATEMENT_HEADER,
             ["Statement", "Data", "Title", "Activity Statement"],
@@ -118,7 +113,7 @@ def test_extracts_account_and_period():
 
 
 def test_missing_account_raises():
-    model = _model(
+    model = parse_model(
         [
             _STATEMENT_HEADER,
             ["Statement", "Data", "Period", "January 1, 2024 - December 31, 2024"],
@@ -129,7 +124,7 @@ def test_missing_account_raises():
 
 
 def test_missing_period_raises():
-    model = _model(
+    model = parse_model(
         [
             _ACCOUNT_HEADER,
             ["Account Information", "Data", "Account", "U1234567"],
@@ -140,7 +135,7 @@ def test_missing_period_raises():
 
 
 def test_malformed_period_raises():
-    model = _model(
+    model = parse_model(
         [
             _ACCOUNT_HEADER,
             ["Account Information", "Data", "Account", "U1234567"],

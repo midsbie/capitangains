@@ -6,16 +6,8 @@ Test coverage for src/capitangains/reporting/extract.py::parse_withholding_tax
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_withholding_tax
-
-
-def _parse_rows(rows):
-    """Helper to parse CSV rows into IbkrModel."""
-    parser = IbkrStatementCsvParser()
-    model, _ = parser.parse_rows(rows)
-    return model
-
+from tests.support import parse_model
 
 # =============================================================================
 # Happy Path Tests
@@ -45,7 +37,7 @@ def test_parse_dividend_withholding_with_country():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -82,7 +74,7 @@ def test_parse_interest_withholding_with_country():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -114,7 +106,7 @@ def test_parse_generic_dividend_withholding():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -146,7 +138,7 @@ def test_parse_with_code_field_present():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -179,7 +171,7 @@ def test_type_classification_credit_interest():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -207,7 +199,7 @@ def test_type_classification_interest_without_dividend():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -235,7 +227,7 @@ def test_type_classification_cash_dividend():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -263,7 +255,7 @@ def test_type_classification_payment_in_lieu():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -291,7 +283,7 @@ def test_type_classification_empty_for_unrecognized():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -339,7 +331,7 @@ def test_type_classification_compound_terms():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 3
@@ -376,7 +368,7 @@ def test_country_extraction_us():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -404,7 +396,7 @@ def test_country_extraction_nl():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -432,7 +424,7 @@ def test_country_extraction_no_match():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -473,7 +465,7 @@ def test_skip_rows_with_empty_currency():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     # Only the first row should be parsed
@@ -510,7 +502,7 @@ def test_skip_rows_with_empty_date():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -546,7 +538,7 @@ def test_skip_rows_with_empty_description():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -574,7 +566,7 @@ def test_parse_without_code_column():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -602,7 +594,7 @@ def test_parse_amounts_with_thousand_separators():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 1
@@ -650,7 +642,7 @@ def test_parse_multiple_withholding_entries():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 3
@@ -685,7 +677,7 @@ def test_error_invalid_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, defects = parse_withholding_tax(model)
     assert defects
     assert not withholding
@@ -712,7 +704,7 @@ def test_error_empty_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     withholding, defects = parse_withholding_tax(model)
     assert defects
     assert "empty string" in defects[0].reason

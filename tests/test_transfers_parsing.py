@@ -6,16 +6,8 @@ Test coverage for src/capitangains/reporting/extract.py::parse_transfers
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_transfers
-
-
-def _parse_rows(rows):
-    """Helper to parse CSV rows into IbkrModel."""
-    parser = IbkrStatementCsvParser()
-    model, _ = parser.parse_rows(rows)
-    return model
-
+from tests.support import parse_model
 
 # =============================================================================
 # Happy Path Tests
@@ -63,7 +55,7 @@ def test_parse_basic_incoming_transfer():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
@@ -108,7 +100,7 @@ def test_parse_outgoing_transfer():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
@@ -148,7 +140,7 @@ def test_parse_outgoing_transfer_without_market_value():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
@@ -213,7 +205,7 @@ def test_parse_multiple_transfers_sorted_by_date():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 3
@@ -255,7 +247,7 @@ def test_parse_quantity_with_commas():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
@@ -340,7 +332,7 @@ def test_parse_different_asset_categories():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 5
@@ -416,7 +408,7 @@ def test_parse_case_insensitive_direction():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 4
@@ -452,7 +444,7 @@ def test_parse_with_quantity_column_alternative():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
@@ -488,7 +480,7 @@ def test_parse_with_cost_basis_column():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     assert len(transfers) == 1
@@ -565,7 +557,7 @@ def test_skip_non_stock_asset_categories():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     # Only the Stocks transfer should be included
@@ -605,7 +597,7 @@ def test_skip_total_rows():
         ["Transfers", "Data", "Total in EUR", "", "", "", "", "", "4868.757858", ""],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     # Total rows should be skipped
@@ -647,7 +639,7 @@ def test_error_missing_symbol():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Invalid transfer row: missing" in defects[0].reason
@@ -683,7 +675,7 @@ def test_error_missing_currency():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Invalid transfer row: missing" in defects[0].reason
@@ -719,7 +711,7 @@ def test_error_missing_date():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Invalid transfer row: missing" in defects[0].reason
@@ -755,7 +747,7 @@ def test_error_missing_direction():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Invalid transfer row: missing" in defects[0].reason
@@ -791,7 +783,7 @@ def test_error_missing_quantity():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Invalid transfer row: missing" in defects[0].reason
@@ -827,7 +819,7 @@ def test_error_invalid_direction():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Unsupported transfer direction" in defects[0].reason
@@ -863,7 +855,7 @@ def test_error_zero_quantity():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Transfer quantity must be positive" in defects[0].reason
@@ -899,7 +891,7 @@ def test_error_negative_quantity():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "Transfer quantity must be positive" in defects[0].reason
@@ -935,7 +927,7 @@ def test_error_incoming_transfer_missing_market_value():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, defects = parse_transfers(model)
     assert defects
     assert "is missing Market Value" in defects[0].reason
@@ -971,7 +963,7 @@ def test_error_incoming_transfer_invalid_market_value():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     # "--" market value on an IN transfer is rejected as a defect, not silently zeroed
     transfers, defects = parse_transfers(model)
     assert defects
@@ -1168,7 +1160,7 @@ def test_parse_real_world_data():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     transfers, _ = parse_transfers(model)
 
     # Should parse 5 stock transfers and skip 4 "Total" rows

@@ -6,16 +6,8 @@ Test coverage for src/capitangains/reporting/extract.py::parse_interest
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import parse_interest
-
-
-def _parse_rows(rows):
-    """Helper to parse CSV rows into IbkrModel."""
-    parser = IbkrStatementCsvParser()
-    model, _ = parser.parse_rows(rows)
-    return model
-
+from tests.support import parse_model
 
 # =============================================================================
 # Happy Path Tests
@@ -43,7 +35,7 @@ def test_parse_regular_credit_interest():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -76,7 +68,7 @@ def test_parse_debit_interest():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -104,7 +96,7 @@ def test_parse_syep_summary_row():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -150,7 +142,7 @@ def test_parse_multiple_interest_entries():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 3
@@ -193,7 +185,7 @@ def test_skip_total_rows_empty_currency():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     # Total row should be skipped
@@ -230,7 +222,7 @@ def test_skip_total_in_eur_rows():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     # Total in EUR row should be skipped (starts with "total")
@@ -266,7 +258,7 @@ def test_skip_rows_with_total_prefix():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -302,7 +294,7 @@ def test_skip_rows_with_empty_date():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -338,7 +330,7 @@ def test_skip_rows_with_empty_description():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -371,7 +363,7 @@ def test_error_invalid_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, defects = parse_interest(model)
     assert defects
     assert not interest
@@ -398,7 +390,7 @@ def test_error_empty_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, defects = parse_interest(model)
     assert defects
     assert "empty string" in defects[0].reason
@@ -426,7 +418,7 @@ def test_parse_amount_with_thousand_separators():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
@@ -454,7 +446,7 @@ def test_parse_high_precision_amount():
         ],
     ]
 
-    model = _parse_rows(rows)
+    model = parse_model(rows)
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
