@@ -216,21 +216,20 @@ def run(options: RunOptions) -> None:
     # Soft reconciliation: cross-check our realized P/L against IBKR's own per-trade
     # `Realized P/L`, per symbol, in each instrument's trade currency. No FX stands
     # between the two sides, so a disagreement beyond cent rounding is a real accounting
-    # gap rather than a rate artifact. Single-file only: IBKR's per-statement realized
-    # column cannot be meaningfully summed across periods.
-    if len(inputs) == 1:
-        try:
-            report = reconcile_realized_against_ibkr(
-                parsed.trades, rb.realized_lines, options.year
-            )
-            report_reconciliation(report, logger)
-        except Exception:
-            logger.exception("Reconciliation failed; continuing without it.")
-    else:
-        logger.info(
-            "Skipping IBKR realized-P/L reconciliation for multi-file input "
-            "(spans multiple periods)."
+    # gap rather than a rate artifact. reconcile_realized_against_ibkr filters both
+    # sides to the reporting year, and report_statement_input_conflicts (above) has
+    # already proven any multi-file set single-account and non-overlapping, so each
+    # year's trades are counted once whatever the file count. Multi-file is in fact
+    # the stronger check: prior-year files seed FIFO with the real opening lots a
+    # cross-year sale's basis depends on, where single-file would have only a
+    # synthesized (tautological) or absent basis.
+    try:
+        report = reconcile_realized_against_ibkr(
+            parsed.trades, rb.realized_lines, options.year
         )
+        report_reconciliation(report, logger)
+    except Exception:
+        logger.exception("Reconciliation failed; continuing without it.")
 
     # Determine output path
     out_path = (

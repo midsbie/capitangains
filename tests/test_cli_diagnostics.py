@@ -948,9 +948,15 @@ def _statement_meta_rows(account, period):
     ]
 
 
-def _write_full_statement(path, *, account, period, year, currency="EUR"):
-    # A matched BUY(10)/SELL(10) in `year` plus the Account/Statement metadata the
+def _write_full_statement(
+    path, *, account, period, year, currency="EUR", legs="both", realized="99"
+):
+    # A BUY(10) and/or SELL(10) in `year` plus the Account/Statement metadata the
     # multi-file overlap gate reads. EUR converts by identity, so no FX table is needed.
+    # `legs` selects which trade legs to emit: "both" (matched buy then sell), "open"
+    # (a lone buy, e.g. a prior-year seeding lot), or "close" (a lone sell). `realized`
+    # sets the sell's IBKR Realized P/L, so a test can plant an obviously wrong value
+    # to drive a reconciliation mismatch. The defaults reproduce the original pair.
     buy = _trade("AAPL", currency, date=f"{year}-02-10, 10:00:00")
     sell = [
         "Trades",
@@ -966,9 +972,10 @@ def _write_full_statement(path, *, account, period, year, currency="EUR"):
         "-1",
         "C",
         "-1001",
-        "99",
+        realized,
     ]
-    rows = _statement_meta_rows(account, period) + [_TRADES_HEADER, buy, sell]
+    legs_rows = {"both": [buy, sell], "open": [buy], "close": [sell]}[legs]
+    rows = _statement_meta_rows(account, period) + [_TRADES_HEADER, *legs_rows]
     with open(path, "w", newline="", encoding="utf-8") as fp:
         csv.writer(fp).writerows(rows)
 
@@ -1014,6 +1021,53 @@ def test_process_files_exits_2_on_overlapping_statements(tmp_path, caplog):
     assert exc.value.code == 2
     assert not out.exists()
     assert any("overlapping periods" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_multifile_runs_reconciliation(tmp_path, caplog):
+    # The reconciliation now runs for multi-file input: the old single-file guard is
+    # gone. Two disjoint self-contained years (mirroring the disjoint-write test)
+    # reconcile, so the per-symbol DEBUG trace appears and the "Skipping..." line never
+    # does. The check is purely diagnostic, so the workbook is still written.
+    a = tmp_path / "2023.csv"
+    b = tmp_path / "2024.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(a, account="U1", period=_Y2023, year=2023)
+    _write_full_statement(b, account="U1", period=_Y2024, year=2024)
+
+    with caplog.at_level(logging.DEBUG):
+        run(_args_multi([a, b], out))
+
+    assert out.exists()
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("Skipping IBKR realized-P/L reconciliation" in m for m in messages)
+    assert any(
+        r.levelno == logging.DEBUG and r.getMessage().startswith("Reconciliation:")
+        for r in caplog.records
+    )
+
+
+def test_process_files_multifile_reconciles_cross_year_lot(tmp_path, caplog):
+    # The case the old guard suppressed: a 2024 sell whose opening lot lives in a
+    # 2023 file. Multi-file mode seeds FIFO with the real 2023 buy, so the 2024 sell
+    # matches a genuine lot -- no gap, no --auto-fix-sell-gaps, no synthesized basis --
+    # and its basis is independent of IBKR. With IBKR's Realized P/L planted at an
+    # obviously wrong value, the cross-check a single-file run could never make now
+    # catches the disagreement.
+    prior = tmp_path / "2023.csv"
+    current = tmp_path / "2024.csv"
+    out = tmp_path / "out.xlsx"
+    _write_full_statement(prior, account="U1", period=_Y2023, year=2023, legs="open")
+    _write_full_statement(
+        current, account="U1", period=_Y2024, year=2024, legs="close", realized="9999"
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        run(_args_multi([prior, current], out))
+
+    assert out.exists()
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("synthesized basis" in m for m in messages)
+    assert any("disagree with IBKR realized P/L beyond rounding" in m for m in messages)
 
 
 # --- format_reconciliation_sample ----------------------------------------------------
