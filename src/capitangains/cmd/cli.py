@@ -16,6 +16,11 @@ Usage
     capitangains --year 2024 --output ./out.xlsx --fx-table ./fx_rates.csv \
         /path/ActivityStatement_2023.csv /path/ActivityStatement_2024.csv
 
+    # Auto-discover statements in a directory (selects this year's and prior years',
+    # ignores non-statement csv); mutually exclusive with positional path(s)
+    capitangains --year 2024 --output ./out.xlsx --fx-table ./fx_rates.csv \
+        --statements-dir /path/to/statements
+
     # Dry run: validate everything, write nothing (leaves any existing report intact)
     capitangains --year 2024 --dry-run --fx-table ./fx_rates.csv \
         /path/to/ActivityStatement_2024.csv
@@ -32,7 +37,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 
+from capitangains.cmd.discovery import (
+    DiscoveredStatement,
+    DiscoveryResult,
+    discover_statements,
+)
 from capitangains.logging import configure_logging
 from capitangains.pipeline import RunOptions, run
 
@@ -47,8 +58,23 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "input",
         type=str,
-        nargs="+",
-        help="One or more Activity Statement CSV paths (include prior years for FIFO)",
+        nargs="*",
+        help=(
+            "Activity Statement CSV path(s) (include prior years for FIFO). Omit when "
+            "using --statements-dir."
+        ),
+    )
+    p.add_argument(
+        "--statements-dir",
+        type=str,
+        default=None,
+        metavar="DIR",
+        help=(
+            "Directory to auto-discover IBKR Activity Statement CSVs in, selecting "
+            "those whose reporting period starts in --year or earlier (so FIFO has the "
+            "prior-year buys). Non-statement csv files are ignored. Mutually exclusive "
+            "with positional path(s)."
+        ),
     )
     p.add_argument(
         "--fx-table",
@@ -107,6 +133,74 @@ def build_argparser() -> argparse.ArgumentParser:
     return p
 
 
+def _period_label(statement: DiscoveredStatement) -> str:
+    """Render a discovered statement's period for the manifest, or flag unreadable."""
+    period = statement.period
+    if period is None:
+        return "identity unreadable"
+    return f"{period.start} to {period.end}"
+
+
+def _print_manifest(result: DiscoveryResult) -> None:
+    """Print the discovery manifest to stdout: the three buckets, each with its count.
+
+    All three headers are printed even at count zero, so the operator always sees what
+    was and was not picked up. Plain ASCII and deterministic. This is a primary output
+    of --statements-dir, so it goes to stdout via print (unconditional; there is no
+    quiet flag) -- deliberately separate from the verbosity-gated diagnostic logger.
+    """
+    print(f"Selected {len(result.selected)} statement(s) to report on:")
+    for s in result.selected:
+        print(f"  {s.path} ({_period_label(s)})")
+
+    print(f"Excluded {len(result.excluded_future)} statement(s) as future:")
+    for s in result.excluded_future:
+        print(f"  {s.path} ({_period_label(s)})")
+
+    print(f"Ignored {len(result.ignored)} non-statement file(s):")
+    for path in result.ignored:
+        print(f"  {path}")
+
+
+def resolve_inputs(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> list[str]:
+    """Resolve the run's input paths from positional args or --statements-dir.
+
+    Exactly one source must be given. The two are hand-validated rather than placed in
+    an argparse mutually-exclusive group: a nargs="*" positional defaults to [] (it is
+    never "absent"), which defeats the group's presence test. Every violation exits 2
+    via ``parser.error``.
+
+    With --statements-dir, the directory is discovered, the manifest is printed to
+    stdout, and the selected statements' paths are returned for the pipeline. An empty
+    selection is fatal -- there is nothing to report on. Discovery includes any
+    identity-unreadable statement (period unknown); the pipeline's identity gate, not
+    this resolver, reports it.
+    """
+    if args.statements_dir is not None and args.input:
+        parser.error("pass either statement path(s) or --statements-dir, not both.")
+    if args.statements_dir is None and not args.input:
+        parser.error(
+            "no input: pass one or more statement path(s), or --statements-dir DIR."
+        )
+
+    if args.statements_dir is None:
+        return list(args.input)
+
+    directory = Path(args.statements_dir)
+    if not directory.is_dir():
+        parser.error(f"--statements-dir is not a directory: {directory}")
+
+    result = discover_statements(directory, args.year)
+    _print_manifest(result)
+    if not result.selected:
+        parser.error(
+            f"no IBKR statements found in {directory} for {args.year} or earlier."
+        )
+    return [str(s.path) for s in result.selected]
+
+
 def main() -> None:
     parser = build_argparser()
     args = parser.parse_args()
@@ -120,9 +214,11 @@ def main() -> None:
     level = verbosity_map.get(min(args.verbose, 2), logging.WARNING)
     configure_logging(level=level)
 
+    inputs = resolve_inputs(args, parser)
+
     run(
         RunOptions(
-            inputs=args.input,
+            inputs=inputs,
             year=args.year,
             fx_table=args.fx_table,
             locale=args.locale,
