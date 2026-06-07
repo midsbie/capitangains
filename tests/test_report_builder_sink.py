@@ -10,23 +10,13 @@ from capitangains.reporting.extract import (
     DividendRow,
     InterestRow,
     SyepInterestRow,
-    TradeRow,
     WithholdingRow,
 )
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
-from capitangains.reporting.fx import FxTable
 from capitangains.reporting.i18n import LABELS, labels_for
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink, _gap_status
-
-
-def _make_fx(rates):
-    table = FxTable()
-    for (ccy, date), value in rates.items():
-        table.data[ccy][dt.date.fromisoformat(date)] = value
-    for ccy, m in table.data.items():
-        table.date_index[ccy] = sorted(m.keys())
-    return table
+from tests.support import make_fx, realized_line, trade_row
 
 
 def _realized(
@@ -38,29 +28,11 @@ def _realized(
     has_gap: bool = False,
     gap_fixed: bool = False,
 ):
-    leg_objs = [
-        SellMatchLeg(
-            buy_date=leg["buy_date"],
-            qty=leg["qty"],
-            lot_qty_before=leg.get("lot_qty_before", leg["qty"]),
-            alloc_cost_ccy=leg["alloc_cost_ccy"],
-        )
-        for leg in legs
-    ]
-    sell_qty = sum((leg.qty for leg in leg_objs), Decimal("0"))
-    sell_net = Decimal("100")
-    sell_gross = sell_net
-    return RealizedLine(
+    return realized_line(
         symbol=symbol,
         currency=currency,
         sell_date=sell_date,
-        sell_qty=sell_qty,
-        sell_gross_ccy=sell_gross,
-        sell_comm_ccy=Decimal("0"),
-        sell_net_ccy=sell_net,
-        legs=leg_objs,
-        realized_pl_ccy=sell_net
-        - sum((leg.alloc_cost_ccy for leg in leg_objs), Decimal("0")),
+        legs=legs,
         has_gap=has_gap,
         gap_fixed=gap_fixed,
     )
@@ -86,25 +58,12 @@ def test_report_builder_add_realized_accumulates_symbol_totals():
     assert usd.proceeds == rl1.sell_net_ccy + rl2.sell_net_ccy
 
 
-def _trade_row(symbol: str, currency: str) -> TradeRow:
-    return TradeRow(
-        section="Trades",
-        asset_category="Stocks",
-        currency=currency,
-        symbol=symbol,
-        datetime_str="2024-01-01, 10:00:00",
-        date=dt.date(2024, 1, 1),
-        quantity=Decimal("10"),
-        t_price=Decimal("100"),
-        proceeds=Decimal("-1000"),
-        comm_fee=Decimal("-1"),
-        code="O",
-    )
-
-
 def test_multi_currency_same_symbol_detected():
     """Same symbol in multiple currencies is a detected violation."""
-    trades = [_trade_row("ABC", "USD"), _trade_row("ABC", "EUR")]
+    trades = [
+        trade_row(symbol="ABC", currency="USD"),
+        trade_row(symbol="ABC", currency="EUR"),
+    ]
     assert detect_symbol_currency_violations(trades, []) == {
         "ABC": frozenset({"USD", "EUR"})
     }
@@ -140,7 +99,7 @@ def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
     rb.add_realized(rl_usd)
     rb.add_realized(rl_gbp)
 
-    rb.convert_eur(_make_fx({("USD", "2024-03-01"): Decimal("0.9")}))
+    rb.convert_eur(make_fx({("USD", "2024-03-01"): Decimal("0.9")}))
 
     # USD line left wholly unconverted because one leg's buy-date rate is missing,
     # even though the sell-date rate was available.
@@ -177,7 +136,7 @@ def test_convert_eur_zero_sell_qty_skips_proceeds_allocation():
         realized_pl_ccy=Decimal("0"),
     )
     rb.add_realized(zero_qty_rl)
-    rb.convert_eur(_make_fx({("USD", "2024-04-01"): Decimal("0.9")}))
+    rb.convert_eur(make_fx({("USD", "2024-04-01"): Decimal("0.9")}))
     assert not rb.fx_missing
     assert zero_qty_rl.legs[0].proceeds_share_eur is None
 
@@ -230,7 +189,7 @@ def test_report_builder_income_conversion():
         ]
     )
 
-    fx = _make_fx({("USD", "2024-01-01"): Decimal("0.9")})
+    fx = make_fx({("USD", "2024-01-01"): Decimal("0.9")})
     rb.convert_eur(fx)
 
     assert rb.dividends[0].amount_eur == Decimal("9.00")
@@ -262,7 +221,7 @@ def test_excel_report_sink_serializes_legs(tmp_path):
     }
     rl = _realized("ABC", "USD", dt.date(2024, 1, 1), [leg])
     rb.add_realized(rl)
-    rb.convert_eur(_make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
+    rb.convert_eur(make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
 
     out_path = tmp_path / "report_with_leg.xlsx"
     sink = ExcelReportSink(out_path=out_path, locale="EN")
@@ -303,7 +262,7 @@ def test_realized_sheet_flags_synthesized_basis(tmp_path):
             "SYN", "USD", dt.date(2024, 1, 1), [leg], has_gap=True, gap_fixed=True
         )
     )
-    rb.convert_eur(_make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
+    rb.convert_eur(make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
 
     out_path = tmp_path / "synth.xlsx"
     ExcelReportSink(out_path=out_path, locale="EN").write(rb)
@@ -405,7 +364,7 @@ def test_proceeds_allocation_sums_to_sell_net_eur(currency, fx_rates):
 
     rb = ReportBuilder(year=2024)
     rb.add_realized(rl)
-    fx = _make_fx(fx_rates) if fx_rates else None
+    fx = make_fx(fx_rates) if fx_rates else None
     rb.convert_eur(fx)
 
     shares = [leg.proceeds_share_eur for leg in rl.legs]

@@ -5,18 +5,9 @@ from openpyxl import load_workbook
 
 from capitangains.reporting.fifo import RealizedLine
 from capitangains.reporting.fifo_domain import SellMatchLeg
-from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
-
-
-def make_fx() -> FxTable:
-    ft = FxTable()
-    # EUR identity is handled internally; add USD for a couple dates
-    ft.data["USD"][dt.date(2024, 1, 10)] = Decimal("0.9")
-    ft.data["USD"][dt.date(2024, 1, 5)] = Decimal("0.9")
-    ft.date_index["USD"] = sorted(ft.data["USD"].keys())
-    return ft
+from tests.support import make_fx
 
 
 def build_rb_for_summary():
@@ -64,7 +55,14 @@ def build_rb_for_summary():
     rb.add_realized(rl_usd)
 
     # Convert to EUR
-    rb.convert_eur(make_fx())
+    rb.convert_eur(
+        make_fx(
+            {
+                ("USD", "2024-01-10"): Decimal("0.9"),
+                ("USD", "2024-01-05"): Decimal("0.9"),
+            }
+        )
+    )
     return rb
 
 

@@ -12,20 +12,9 @@ from capitangains.reporting.extract import (
     parse_syep_interest_details,
 )
 from capitangains.reporting.fifo import RealizedLine
-from capitangains.reporting.fx import FxTable
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
-
-
-def make_fx(rates: dict[tuple[str, str], Decimal]) -> FxTable:
-    ft = FxTable()
-    # rates: {(currency, yyyy-mm-dd): eur_per_unit}
-    for (ccy, d), v in rates.items():
-        c = ccy.upper()
-        ft.data[c][dt.date.fromisoformat(d)] = v
-    for c, m in ft.data.items():
-        ft.date_index[c] = sorted(m.keys())
-    return ft
+from tests.support import make_fx
 
 
 def test_syep_interest_parsing_excludes_totals():

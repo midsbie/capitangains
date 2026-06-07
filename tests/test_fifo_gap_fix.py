@@ -3,83 +3,18 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from capitangains.reporting.extract import TradeRow
-from capitangains.reporting.fifo import FifoMatcher
-from capitangains.reporting.fifo_domain import GapKey, GapResolution
-from capitangains.reporting.fx import FxTable
-from capitangains.reporting.gap_policy import build_gap_policy
+from capitangains.reporting.fifo_domain import GapResolution
 from capitangains.reporting.report_builder import ReportBuilder
-
-
-def _make_fx(rates: dict[tuple[str, str], Decimal]) -> FxTable:
-    ft = FxTable()
-    for (ccy, d), v in rates.items():
-        c = ccy.upper()
-        ft.data[c][dt.date.fromisoformat(d)] = v
-    for c, m in ft.data.items():
-        ft.date_index[c] = sorted(m.keys())
-    return ft
-
-
-def _buy(
-    symbol: str, date: dt.date, qty: str, proceeds: str, comm: str, ccy: str = "USD"
-) -> TradeRow:
-    # For buys, proceeds negative; comm negative.  Basis allocation computed from these
-    # by matcher
-    return TradeRow(
-        section="Trades",
-        asset_category="Stocks",
-        currency=ccy,
-        symbol=symbol,
-        datetime_str=date.isoformat(),
-        date=date,
-        quantity=Decimal(qty),
-        t_price=Decimal("0"),
-        proceeds=Decimal(proceeds),
-        comm_fee=Decimal(comm),
-        code="P",
-    )
-
-
-def _sell(
-    symbol: str,
-    date: dt.date,
-    qty: str,
-    proceeds: str,
-    comm: str,
-    basis: str | None,
-    ccy: str = "USD",
-) -> TradeRow:
-    # For sells, proceeds positive; comm typically negative; basis in IBKR is negative
-    return TradeRow(
-        section="Trades",
-        asset_category="Stocks",
-        currency=ccy,
-        symbol=symbol,
-        datetime_str=date.isoformat(),
-        date=date,
-        quantity=Decimal(qty),
-        t_price=Decimal("0"),
-        proceeds=Decimal(proceeds),
-        comm_fee=Decimal(comm),
-        code="P",
-        basis_ccy=(Decimal(basis) if basis is not None else None),
-        realized_pl_ccy=None,
-    )
-
-
-def _matcher(acknowledged: frozenset[GapKey] = frozenset()) -> FifoMatcher:
-    """A matcher whose gap policy acknowledges exactly `acknowledged`."""
-    return FifoMatcher(gap_policy=build_gap_policy(acknowledged))
+from tests.support import buy, make_fx, make_matcher, sell
 
 
 def test_fifo_no_fix_records_gap_and_zero_cost():
-    m = _matcher()
+    m = make_matcher()
     # Buy 100 cost 1000
-    m.ingest_trade(_buy("ABC", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
+    m.ingest_trade(buy("ABC", dt.date(2024, 1, 1), "100", "-1000", "0", ccy="USD"))
     # Sell 120 proceeds 1200, basis -1200 (not used when no fix)
     rl = m.ingest_trade(
-        _sell("ABC", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+        sell("ABC", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD")
     )
 
     assert rl is not None
@@ -99,11 +34,11 @@ def test_fifo_no_fix_records_gap_and_zero_cost():
 
 
 def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
-    m = _matcher(frozenset({("XYZ", dt.date(2024, 2, 1))}))
-    m.ingest_trade(_buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
+    m = make_matcher(frozenset({("XYZ", dt.date(2024, 2, 1))}))
+    m.ingest_trade(buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", ccy="USD"))
     # SELL 120, proceeds 1200, IBKR Basis -1200 -> target alloc 1200
     rl = m.ingest_trade(
-        _sell("XYZ", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+        sell("XYZ", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD")
     )
     assert rl is not None
     assert rl.has_gap is True
@@ -122,11 +57,11 @@ def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
 
 
 def test_fifo_auto_fix_missing_basis_is_defective():
-    m = _matcher(frozenset({("DEF", dt.date(2024, 2, 1))}))
-    m.ingest_trade(_buy("DEF", dt.date(2024, 1, 1), "50", "-500", "0", "USD"))
+    m = make_matcher(frozenset({("DEF", dt.date(2024, 2, 1))}))
+    m.ingest_trade(buy("DEF", dt.date(2024, 1, 1), "50", "-500", "0", ccy="USD"))
     # SELL 60, proceeds 600, Basis missing
     rl = m.ingest_trade(
-        _sell("DEF", dt.date(2024, 2, 1), "-60", "600", "0", None, "USD")
+        sell("DEF", dt.date(2024, 2, 1), "-60", "600", "0", basis=None, ccy="USD")
     )
     assert rl is not None
     assert rl.has_gap is True
@@ -139,13 +74,15 @@ def test_fifo_auto_fix_missing_basis_is_defective():
 
 def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     # The default synthesis tolerance (0.02) is what makes residual -0.01 clamp below.
-    m = _matcher(frozenset({("CLP", dt.date(2024, 2, 1))}))
+    m = make_matcher(frozenset({("CLP", dt.date(2024, 2, 1))}))
     # Buy 90 cost 900
-    m.ingest_trade(_buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
+    m.ingest_trade(buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", ccy="USD"))
     # SELL 100 with IBKR Basis slightly less than matched alloc
     # (residual = -0.01 -> clamp to 0)
     rl = m.ingest_trade(
-        _sell("CLP", dt.date(2024, 2, 1), "-100", "1000", "0", "-899.99", "USD")
+        sell(
+            "CLP", dt.date(2024, 2, 1), "-100", "1000", "0", basis="-899.99", ccy="USD"
+        )
     )
     assert rl is not None
     assert rl.has_gap is True
@@ -156,12 +93,12 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
 
 def test_fifo_auto_fix_negative_residual_beyond_tolerance_is_defective():
     # The default synthesis tolerance (0.02) is what makes residual -5 DEFECTIVE below.
-    m = _matcher(frozenset({("FLT", dt.date(2024, 2, 1))}))
+    m = make_matcher(frozenset({("FLT", dt.date(2024, 2, 1))}))
     # Buy 90 cost 900
-    m.ingest_trade(_buy("FLT", dt.date(2024, 1, 1), "90", "-900", "0", "USD"))
+    m.ingest_trade(buy("FLT", dt.date(2024, 1, 1), "90", "-900", "0", ccy="USD"))
     # SELL 100 with IBKR Basis much less than matched alloc (residual = -5 -> fallback)
     rl = m.ingest_trade(
-        _sell("FLT", dt.date(2024, 2, 1), "-100", "1000", "0", "-895", "USD")
+        sell("FLT", dt.date(2024, 2, 1), "-100", "1000", "0", basis="-895", ccy="USD")
     )
     assert rl is not None
     assert rl.has_gap is True
@@ -172,19 +109,19 @@ def test_fifo_auto_fix_negative_residual_beyond_tolerance_is_defective():
 
 
 def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
-    m = _matcher(frozenset({("EURX", dt.date(2024, 2, 1))}))
+    m = make_matcher(frozenset({("EURX", dt.date(2024, 2, 1))}))
     # Buy 100 cost 1000 USD on 2024-01-01
-    m.ingest_trade(_buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", "USD"))
+    m.ingest_trade(buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", ccy="USD"))
     # Sell 120 on 2024-02-01, proceeds 1200, Basis -1200 so residual = 200
     rl = m.ingest_trade(
-        _sell("EURX", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
+        sell("EURX", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD")
     )
     assert rl is not None and rl.gap_fixed is True
 
     rb = ReportBuilder(year=2024)
     rb.add_realized(rl)
 
-    fx = _make_fx(
+    fx = make_fx(
         {
             ("USD", "2024-01-01"): Decimal("0.9"),
             ("USD", "2024-02-01"): Decimal("0.8"),
@@ -203,25 +140,29 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
 
 
 def test_fifo_auto_fix_rejects_basis_inconsistent_with_realized():
-    m = _matcher(frozenset({("BAD", dt.date(2024, 2, 1))}))
+    m = make_matcher(frozenset({("BAD", dt.date(2024, 2, 1))}))
     # No buy history: the whole 120 is a gap. IBKR Basis -1200 would synthesize a 1200
     # cost, but IBKR's own Realized P/L (999) contradicts the identity (1200 + 0 - 1200
     # = 0), so the Basis cell is corrupt: synthesis flags it DEFECTIVE (the boundary
     # then aborts) instead of fabricating a cost.
-    sell = _sell("BAD", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
-    sell.realized_pl_ccy = Decimal("999")
-    rl = m.ingest_trade(sell)
+    closing = sell(
+        "BAD", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD"
+    )
+    closing.realized_pl_ccy = Decimal("999")
+    rl = m.ingest_trade(closing)
     assert rl is not None and rl.gap_fixed is False
     assert m.gap_events[0].outcome is GapResolution.DEFECTIVE
     assert "Basis" in m.gap_events[0].message
 
 
 def test_fifo_auto_fix_accepts_synthesis_when_realized_confirms_basis():
-    m = _matcher(frozenset({("OKAY", dt.date(2024, 2, 1))}))
+    m = make_matcher(frozenset({("OKAY", dt.date(2024, 2, 1))}))
     # IBKR Basis -1200 and Realized 0 are mutually consistent (1200 + 0 - 1200 = 0), so
     # synthesis proceeds: the realized_getter wiring must not reject a valid Basis.
-    sell = _sell("OKAY", dt.date(2024, 2, 1), "-120", "1200", "0", "-1200", "USD")
-    sell.realized_pl_ccy = Decimal("0")
-    rl = m.ingest_trade(sell)
+    closing = sell(
+        "OKAY", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD"
+    )
+    closing.realized_pl_ccy = Decimal("0")
+    rl = m.ingest_trade(closing)
     assert rl is not None and rl.gap_fixed is True
     assert rl.legs[-1].synthetic is True

@@ -22,7 +22,6 @@ from decimal import Decimal
 
 import pytest
 from openpyxl import load_workbook
-from test_report_builder_sink import _make_fx, _realized
 
 from capitangains.reporting.extract import (
     DividendRow,
@@ -34,6 +33,7 @@ from capitangains.reporting.extract import (
 from capitangains.reporting.i18n import NumberFormats
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
+from tests.support import make_fx, realized_line
 
 
 def _build_report() -> ReportBuilder:
@@ -52,11 +52,11 @@ def _build_report() -> ReportBuilder:
 
     # Realized lines in non-sorted insertion order so realized/anexo_j (insertion order)
     # are distinguishable from per_symbol (sorted by symbol).
-    mlt = _realized(
-        "MLT",
-        "USD",
-        dt.date(2024, 6, 15),
-        [
+    mlt = realized_line(
+        symbol="MLT",
+        currency="USD",
+        sell_date=dt.date(2024, 6, 15),
+        legs=[
             {
                 "buy_date": dt.date(2023, 1, 1),
                 "qty": Decimal("7"),
@@ -74,20 +74,22 @@ def _build_report() -> ReportBuilder:
     rb.add_realized(mlt)
 
     rb.add_realized(
-        _realized(
-            "GAP",
-            "USD",
-            dt.date(2024, 6, 20),
-            [{"buy_date": None, "qty": Decimal("5"), "alloc_cost_ccy": Decimal("0")}],
+        realized_line(
+            symbol="GAP",
+            currency="USD",
+            sell_date=dt.date(2024, 6, 20),
+            legs=[
+                {"buy_date": None, "qty": Decimal("5"), "alloc_cost_ccy": Decimal("0")}
+            ],
             has_gap=True,
         )
     )
     rb.add_realized(
-        _realized(
-            "NOC",
-            "GBP",
-            dt.date(2024, 6, 30),
-            [
+        realized_line(
+            symbol="NOC",
+            currency="GBP",
+            sell_date=dt.date(2024, 6, 30),
+            legs=[
                 {
                     "buy_date": dt.date(2023, 5, 1),
                     "qty": Decimal("2"),
@@ -195,7 +197,7 @@ def _build_report() -> ReportBuilder:
     # USD rates for every USD date in play; GBP deliberately absent (leaves NOC and the
     # GBP cash-flow rows unconverted); EUR is identity inside the converter.
     rb.convert_eur(
-        _make_fx(
+        make_fx(
             {
                 ("USD", "2023-01-01"): Decimal("0.9"),
                 ("USD", "2023-02-01"): Decimal("0.9"),
@@ -1015,11 +1017,11 @@ def test_optional_sheets_omitted_when_source_empty(tmp_path):
     """
     rb = ReportBuilder(year=2024)
     rb.add_realized(
-        _realized(
-            "ONLY",
-            "USD",
-            dt.date(2024, 6, 1),
-            [
+        realized_line(
+            symbol="ONLY",
+            currency="USD",
+            sell_date=dt.date(2024, 6, 1),
+            legs=[
                 {
                     "buy_date": dt.date(2023, 1, 1),
                     "qty": Decimal("1"),

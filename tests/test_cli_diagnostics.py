@@ -46,21 +46,16 @@ from capitangains.reporting import (
     detect_transfer_ordering_collisions,
     partition_statements_by_metadata,
 )
-from capitangains.reporting.extract import (
-    StatementMetadata,
-    StatementPeriod,
-    TradeRow,
-    TransferRow,
-)
-from capitangains.reporting.fifo_domain import GapEvent, GapResolution
+from capitangains.reporting.extract import StatementMetadata, StatementPeriod
+from capitangains.reporting.fifo_domain import GapResolution
+from tests.support import make_gap_event, trade_row, transfer_row
 
 
 def _gap(*, outcome, symbol="AAPL", date=dt.date(2024, 1, 1), message="no buy history"):
-    return GapEvent(
+    return make_gap_event(
         symbol=symbol,
         date=date,
-        remaining_qty=Decimal("5"),
-        currency="USD",
+        remaining_qty="5",
         message=message,
         outcome=outcome,
     )
@@ -201,33 +196,17 @@ def test_report_symbol_currency_violations_lists_and_exits(caplog):
 
 
 def _trade_row(symbol, currency, date, qty="10"):
-    quantity = Decimal(qty)
-    return TradeRow(
-        section="Trades",
-        asset_category="Stocks",
-        currency=currency,
-        symbol=symbol,
-        datetime_str=f"{date}, 10:00:00",
-        date=dt.date.fromisoformat(date),
-        quantity=quantity,
-        t_price=Decimal("100"),
-        proceeds=Decimal("-1000") if quantity > 0 else Decimal("1000"),
-        comm_fee=Decimal("-1"),
-        code="O",
-    )
+    return trade_row(symbol=symbol, currency=currency, date=date, quantity=qty)
 
 
 def _transfer_row(symbol, currency, date, direction="In"):
-    return TransferRow(
-        section="Transfers",
-        asset_category="Stocks",
-        currency=currency,
+    return transfer_row(
         symbol=symbol,
-        date=dt.date.fromisoformat(date),
+        currency=currency,
+        date=date,
         direction=direction,
-        quantity=Decimal("10"),
-        market_value=Decimal("1000"),
-        code="",
+        quantity="10",
+        market_value="1000",
     )
 
 

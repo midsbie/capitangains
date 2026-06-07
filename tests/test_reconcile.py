@@ -2,26 +2,24 @@ import datetime as dt
 import logging
 from decimal import Decimal
 
-from capitangains.reporting.extract import TradeRow
 from capitangains.reporting.fifo_domain import RealizedLine
 from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
+from tests.support import realized_line, trade_row
 
 
 def _trade(symbol, currency, quantity, realized, *, year=2024, month=6, day=1):
     """A minimal stock TradeRow carrying IBKR's per-trade `Realized P/L` (trade ccy)."""
-    return TradeRow(
-        section="Trades",
-        asset_category="Stocks",
-        currency=currency,
+    return trade_row(
         symbol=symbol,
-        datetime_str=f"{year}-{month:02d}-{day:02d}, 10:00:00",
-        date=dt.date(year, month, day),
-        quantity=Decimal(quantity),
-        t_price=Decimal("1"),
-        proceeds=Decimal("0"),
-        comm_fee=Decimal("0"),
+        currency=currency,
+        quantity=quantity,
+        t_price="1",
+        proceeds="0",
+        comm_fee="0",
         code="",
-        realized_pl_ccy=None if realized is None else Decimal(realized),
+        date=dt.date(year, month, day),
+        datetime_str=f"{year}-{month:02d}-{day:02d}, 10:00:00",
+        realized_pl_ccy=realized,
     )
 
 
@@ -31,16 +29,13 @@ def _line(symbol, ccy, realized, *, gap_fixed=False, year=2024):
     The reconciler keys off ``symbol``/``currency``, sums ``realized_pl_ccy``, filters
     on ``sell_date.year`` and partitions on ``gap_fixed``; other fields are zeroed.
     """
-    return RealizedLine(
+    return realized_line(
         symbol=symbol,
         currency=ccy,
         sell_date=dt.date(year, 6, 1),
-        sell_qty=Decimal("0"),
-        sell_gross_ccy=Decimal("0"),
-        sell_comm_ccy=Decimal("0"),
-        sell_net_ccy=Decimal("0"),
         legs=[],
-        realized_pl_ccy=Decimal(realized),
+        sell_gross_ccy="0",
+        realized_pl_ccy=realized,
         has_gap=gap_fixed,  # synthesis only happens on a gap; keep the pair consistent
         gap_fixed=gap_fixed,
     )
