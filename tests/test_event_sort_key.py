@@ -39,10 +39,10 @@ def test_transfers_order_by_date_relative_to_trades():
     """A transfer carries no intraday time, so it sorts on date alone.
 
     A same-day, same-symbol transfer/trade collision can no longer reach this sort: it
-    is rejected upstream by report_transfer_ordering_collisions, since IBKR provides no
+    is rejected upstream by report_ordering_collisions, since IBKR provides no
     transfer timestamp to order it. The only same-day pairings that survive to the sort
     are in independent symbols (immaterial to FIFO), so the key needs no fabricated
-    transfer-vs-trade tie-break -- date ordering is sufficient.
+    transfer-vs-trade tie-break; date ordering is sufficient.
     """
     prior_xfer = transfer_row(date=dt.date(2024, 6, 14), direction="In")
     day_trade = _trade("2024-06-15, 12:00:00", "100")

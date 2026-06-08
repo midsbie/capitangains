@@ -29,21 +29,21 @@ from capitangains.diagnostics import (
     parse_acknowledged_gaps,
     report_gap_acknowledgments,
     report_invalid_statements,
+    report_ordering_collisions,
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
-    report_transfer_ordering_collisions,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser
 from capitangains.pipeline import RunOptions, run
 from capitangains.reporting import (
+    OrderingCollision,
     ReconciliationReport,
     StatementInput,
     SymbolReconciliation,
-    TransferOrderingCollision,
+    detect_ordering_collisions,
     detect_statement_input_conflicts,
-    detect_transfer_ordering_collisions,
     partition_statements_by_metadata,
 )
 from capitangains.reporting.extract import StatementMetadata, StatementPeriod
@@ -204,7 +204,7 @@ def test_report_symbol_currency_violations_lists_and_exits(caplog):
     assert any("symbol-currency uniqueness" in m for m in messages)
 
 
-# --- transfer ordering: detector -----------------------------------------------------
+# --- same-day event ordering: detector ----------------------------------------------
 
 
 def _trade_row(symbol, currency, date, qty="10"):
@@ -222,7 +222,7 @@ def _transfer_row(symbol, currency, date, direction="In"):
     )
 
 
-def test_detect_transfer_ordering_collisions_silent_without_collision():
+def test_detect_ordering_collisions_silent_without_collision():
     # A transfer on a different day from the trade (same symbol), and a transfer sharing
     # the trade's day but in a different symbol, are both independent for FIFO. The
     # check is scoped to (symbol, currency, date), so neither is a collision.
@@ -231,29 +231,31 @@ def test_detect_transfer_ordering_collisions_silent_without_collision():
         _transfer_row("AAPL", "USD", "2024-03-15"),
         _transfer_row("MSFT", "USD", "2024-06-10"),
     ]
-    assert detect_transfer_ordering_collisions(trades, transfers) == []
+    assert detect_ordering_collisions(trades, transfers) == []
 
 
-def test_detect_transfer_ordering_collisions_two_same_day_transfers():
+def test_detect_ordering_collisions_two_same_day_transfers():
     # Two transfers of the same symbol on the same day are equally unorderable -- IBKR
     # timestamps neither -- even with no trade that day.
     transfers = [
         _transfer_row("AAPL", "USD", "2024-06-10", "In"),
         _transfer_row("AAPL", "USD", "2024-06-10", "Out"),
     ]
-    assert detect_transfer_ordering_collisions([], transfers) == [
-        TransferOrderingCollision(
+    assert detect_ordering_collisions([], transfers) == [
+        OrderingCollision(
             symbol="AAPL",
             currency="USD",
             date=dt.date(2024, 6, 10),
-            n_transfers=2,
             n_trades=0,
+            n_untimed_trades=0,
+            n_transfers=2,
         )
     ]
 
 
-def test_detect_transfer_ordering_collisions_lists_every_collision():
-    # Two distinct symbol-days collide; both are returned, sorted deterministically.
+def test_detect_ordering_collisions_lists_every_collision():
+    # Two distinct symbol-days collide (a transfer sharing a timed trade's day in each);
+    # both are returned, sorted deterministically.
     trades = [
         _trade_row("AAPL", "USD", "2024-06-10"),
         _trade_row("VOD", "GBP", "2024-07-01"),
@@ -262,32 +264,95 @@ def test_detect_transfer_ordering_collisions_lists_every_collision():
         _transfer_row("AAPL", "USD", "2024-06-10"),
         _transfer_row("VOD", "GBP", "2024-07-01"),
     ]
-    collisions = detect_transfer_ordering_collisions(trades, transfers)
-    assert [(c.symbol, c.n_transfers, c.n_trades) for c in collisions] == [
+    collisions = detect_ordering_collisions(trades, transfers)
+    assert [(c.symbol, c.n_trades, c.n_transfers) for c in collisions] == [
         ("AAPL", 1, 1),
         ("VOD", 1, 1),
     ]
 
 
-# --- transfer ordering: reporter -----------------------------------------------------
+def test_detect_ordering_collisions_date_only_trade_collides_with_timed_trade():
+    # A date-only trade (no intraday time) shares a symbol-day with a timestamped trade.
+    # Their FIFO order is not in the data, so it is a collision with no transfer at all.
+    trades = [
+        _trade_row("AAPL", "USD", "2024-06-15"),  # builder stamps an intraday time
+        trade_row(
+            symbol="AAPL",
+            currency="USD",
+            date="2024-06-15",
+            datetime_str="2024-06-15",
+            quantity="-10",
+        ),
+    ]
+    assert detect_ordering_collisions(trades, []) == [
+        OrderingCollision(
+            symbol="AAPL",
+            currency="USD",
+            date=dt.date(2024, 6, 15),
+            n_trades=2,
+            n_untimed_trades=1,
+            n_transfers=0,
+        )
+    ]
 
 
-def test_report_transfer_ordering_collisions_silent_when_empty(caplog):
-    logger = logging.getLogger("xfer_report_none")
+def test_detect_ordering_collisions_two_timed_trades_are_orderable():
+    # Two fully timestamped trades on the same symbol-day are ordered by their times, so
+    # this is NOT a collision: the detector must not over-abort an ordinary trading day.
+    trades = [
+        trade_row(
+            symbol="AAPL",
+            currency="USD",
+            date="2024-06-15",
+            datetime_str="2024-06-15, 09:30:00",
+            quantity="10",
+        ),
+        trade_row(
+            symbol="AAPL",
+            currency="USD",
+            date="2024-06-15",
+            datetime_str="2024-06-15, 15:00:00",
+            quantity="-10",
+        ),
+    ]
+    assert detect_ordering_collisions(trades, []) == []
+
+
+def test_detect_ordering_collisions_lone_date_only_trade_is_silent():
+    # A single date-only trade has nothing to be ordered against, so it is orderable.
+    trades = [
+        trade_row(
+            symbol="AAPL",
+            currency="USD",
+            date="2024-06-15",
+            datetime_str="2024-06-15",
+            quantity="-10",
+        )
+    ]
+    assert detect_ordering_collisions(trades, []) == []
+
+
+# --- same-day event ordering: reporter -----------------------------------------------
+
+
+def test_report_ordering_collisions_silent_when_empty(caplog):
+    logger = logging.getLogger("ordering_report_none")
     with caplog.at_level(logging.ERROR):
-        report_transfer_ordering_collisions([], logger)
+        report_ordering_collisions([], logger)
     assert caplog.records == []
 
 
-def test_report_transfer_ordering_collisions_lists_and_exits(caplog):
+def test_report_ordering_collisions_lists_and_exits(caplog):
     # Every collision is named, then a single summary, and one exit 2 -- no fail-fast.
-    logger = logging.getLogger("xfer_report_fatal")
+    # First is a transfer sharing a timed trade's day; second is a date-only trade
+    # sharing a day with another trade -- both reported through the one mechanism.
+    logger = logging.getLogger("ordering_report_fatal")
     collisions = [
-        TransferOrderingCollision("AAPL", "USD", dt.date(2024, 6, 10), 1, 1),
-        TransferOrderingCollision("VOD", "GBP", dt.date(2024, 7, 1), 2, 0),
+        OrderingCollision("AAPL", "USD", dt.date(2024, 6, 10), 1, 0, 1),
+        OrderingCollision("VOD", "GBP", dt.date(2024, 7, 1), 2, 1, 0),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
-        report_transfer_ordering_collisions(collisions, logger)
+        report_ordering_collisions(collisions, logger)
 
     assert exc.value.code == 2
     messages = [r.getMessage() for r in caplog.records]

@@ -24,11 +24,11 @@ from .report_builder import ReportBuilder
 from .report_sink import ExcelReportSink
 from .source import IbkrActivityStatementSource, ParsedStatement
 from .validation import (
+    OrderingCollision,
     StatementInput,
-    TransferOrderingCollision,
+    detect_ordering_collisions,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
-    detect_transfer_ordering_collisions,
     partition_statements_by_metadata,
 )
 
@@ -57,10 +57,10 @@ __all__ = [
     "ExcelReportSink",
     "IbkrActivityStatementSource",
     "ParsedStatement",
-    "TransferOrderingCollision",
+    "OrderingCollision",
     "StatementInput",
     "detect_symbol_currency_violations",
-    "detect_transfer_ordering_collisions",
+    "detect_ordering_collisions",
     "detect_statement_input_conflicts",
     "partition_statements_by_metadata",
 ]

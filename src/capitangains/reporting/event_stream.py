@@ -13,13 +13,14 @@ def _event_sort_key(
 ) -> tuple[dt.date, str, int]:
     """Order the merged trade/transfer stream for FIFO ingestion.
 
-    Trades sort by their real intraday timestamp (IBKR's Date/Time), with buys before
-    sells only as a tie-break for an identical timestamp. Transfers carry no intraday
-    time, so they sort by date alone. That is sufficient because
-    report_transfer_ordering_collisions has already aborted the run if any transfer
-    shared a (symbol, currency) day with other order-sensitive activity. The only
-    same-day pairings that can still reach this sort are in independent symbols, whose
-    relative order does not affect FIFO (consumption is keyed per symbol).
+    Trades sort by IBKR's Date/Time, with buys before sells only as a tie-break for an
+    identical timestamp; transfers carry no intraday time, so they sort by date alone.
+    That is sound because report_ordering_collisions has already aborted the run if any
+    untimed event, such as a transfer, or a trade with a date-only Date/Time, shared a
+    (symbol, currency) day with other order-sensitive activity. The only same-day
+    pairings that can still reach this sort are either fully timestamped (ordered by
+    their times) or in independent symbols, whose relative order does not affect FIFO
+    (consumption is keyed per symbol).
     """
     if isinstance(event, TransferRow):
         return (event.date, "", 0)
@@ -45,10 +46,11 @@ class EventStream:
     deliberately omits because matching never uses it -- only ordering does. Binding to
     the concrete extract rows here keeps the matcher decoupled from the extract layer.
 
-    Upstream precondition (the caller's): same-day same-symbol transfer/trade collisions
-    must already be rejected (diagnostics.report_transfer_ordering_collisions). That
-    guarantee makes ordering transfers by date alone against intraday-stamped trades
-    sound; _event_sort_key carries the full rationale.
+    Upstream precondition (the caller's): same-day same-symbol ordering collisions must
+    already be rejected (diagnostics.report_ordering_collisions) -- an untimed transfer
+    or a date-only trade sharing a day with other same-symbol activity. That guarantee
+    makes ordering by date/timestamp alone sound; _event_sort_key carries the full
+    rationale.
     """
 
     def __init__(

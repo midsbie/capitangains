@@ -22,9 +22,9 @@ from capitangains.conv import parse_date
 from capitangains.errors import DataQualityError
 from capitangains.reporting import (
     ExtractionDefect,
+    OrderingCollision,
     ReconciliationReport,
     SymbolReconciliation,
-    TransferOrderingCollision,
 )
 from capitangains.reporting.fifo_domain import GapEvent, GapKey, GapResolution
 
@@ -238,45 +238,45 @@ def report_symbol_currency_violations(
     raise SystemExit(2)
 
 
-def report_transfer_ordering_collisions(
-    collisions: Sequence[TransferOrderingCollision], logger: logging.Logger
+def report_ordering_collisions(
+    collisions: Sequence[OrderingCollision], logger: logging.Logger
 ) -> None:
-    """Abort if any transfer's FIFO order against same-day activity is undetermined.
+    """Abort if any same-day event group's intraday FIFO order is undetermined.
 
-    The detector (reporting.validation.detect_transfer_ordering_collisions) owns the
+    The detector (reporting.validation.detect_ordering_collisions) owns the
     why-unorderable rationale and the scope. The boundary policy lives here: rather than
-    fabricate a convention (transfer-in before all same-day trades, transfer-out after)
-    and silently risk a wrong cost basis on exactly the figures this tool exists to get
-    right, we refuse to assume an order IBKR did not provide. A tax figure must be
-    correct rather than plausibly guessed (the stance already taken for a missing FX
-    rate or an unmatched sell), so every collision is listed, then a single
-    SystemExit(2), and no workbook is written. The collision is a rare edge case (a
-    position migration normally migrates-then-holds, and settlement windows push
-    transfer and same-symbol trading apart), so no override mechanism is built; an empty
-    list is silent.
+    fabricate an order IBKR did not provide, whether for an untimed transfer or a
+    date-only trade, and silently risk a wrong cost basis on exactly the figures this
+    tool exists to get right, we refuse to guess. A tax figure must be correct rather
+    than plausibly guessed (the stance already taken for a missing FX rate or an
+    unmatched sell), so every collision is listed, then a single SystemExit(2), and no
+    workbook is written. These collisions are rare (settlement windows push transfers
+    and same-symbol trading apart, and trade rows are normally timestamped), so no
+    override mechanism is built; an empty list is silent.
     """
     if not collisions:
         return
 
     for c in collisions:
         logger.error(
-            "Unorderable same-day events for %s (%s) on %s: %d transfer(s) and %d "
-            "trade(s) share the date, but IBKR gives transfers no intraday time, so "
-            "their FIFO order cannot be determined.",
+            "Unorderable same-day events for %s (%s) on %s: %d trade(s) (%d without an "
+            "intraday time) and %d transfer(s) share the date, and an event with no "
+            "intraday time cannot be ordered for FIFO.",
             c.symbol,
             c.currency,
             c.date,
-            c.n_transfers,
             c.n_trades,
+            c.n_untimed_trades,
+            c.n_transfers,
         )
 
     logger.error(
-        "Transfer ordering is ambiguous for %d symbol-day(s); no workbook written. "
-        "IBKR does not timestamp transfers, so a transfer landing on the same day as "
-        "other activity in the same symbol cannot be ordered against it, and the cost "
-        "basis would depend on an assumption the data does not support. Resolve the "
-        "affected symbol(s) by hand, or adjust the inputs so the transfer and the "
-        "same-day activity do not coincide.",
+        "Same-day event ordering is ambiguous for %d symbol-day(s); no workbook "
+        "written. IBKR does not timestamp transfers, and some trade rows carry a "
+        "date-only Date/Time; either way an event landing on the same day as other "
+        "activity in the same symbol cannot be ordered against it, and the cost basis "
+        "would depend on an assumption the data does not support. Resolve the affected "
+        "symbol(s) by hand, or adjust the inputs so the events do not coincide.",
         len(collisions),
     )
     raise SystemExit(2)

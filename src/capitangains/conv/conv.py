@@ -82,10 +82,21 @@ def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
         raise ValueError(f"Invalid decimal format: {s!r}") from e
 
 
+def has_intraday_time(d: str) -> bool:
+    """Whether an IBKR Date/Time string carries a time after its date.
+
+    IBKR renders a date-only value as 'YYYY-MM-DD' and a timestamped one as
+    'YYYY-MM-DD, HH:MM:SS' (or '..., HH:MM'). The comma is the date/time separator, so
+    its presence is exactly the presence of an intraday time. This is the single home
+    for that format fact; parse_date and the ordering-collision detector defer here.
+    """
+    return "," in d
+
+
 def parse_date(d: str) -> dt.date:
     """Parse date-like strings.
     Handles 'YYYY-MM-DD' or 'YYYY-MM-DD, HH:MM:SS' or 'YYYY-MM-DD, HH:MM' etc.
     """
-    if "," in d:
+    if has_intraday_time(d):
         d = d.split(",")[0].strip()
     return dt.date.fromisoformat(d)

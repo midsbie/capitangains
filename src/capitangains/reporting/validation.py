@@ -6,11 +6,11 @@ into user-facing ERROR lines and an exit code is the boundary's job (see
 capitangains.diagnostics); keeping detection pure makes every invariant unit-testable
 without capturing logs or trapping SystemExit.
 
-Two scopes live here, both pure detection: invariants over extracted trade/transfer rows
-(symbol-currency uniqueness, transfer ordering) and the identity and coherence of a
-statement input set. Each file's account/period identity is validated unconditionally as
-a fail-closed precondition before its contents are trusted, then the cross-file
-coherence of the set (single account, non-overlapping periods) is enforced.
+Two scopes live here, both pure detection: invariants over extracted trade/transfer
+rows (symbol-currency uniqueness, same-day event ordering) and the identity and
+coherence of a statement input set. Each file's account/period identity is validated
+unconditionally as a fail-closed precondition before its contents are trusted, then the
+cross-file coherence of the set (single account, non-overlapping periods) is enforced.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from capitangains.conv import has_intraday_time
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -50,71 +51,85 @@ def detect_symbol_currency_violations(
 
 
 @dataclass(frozen=True, order=True)
-class TransferOrderingCollision:
+class OrderingCollision:
     """One (symbol, currency, day) whose intraday FIFO order is undetermined.
 
-    n_transfers transfers and n_trades trades of the same symbol and currency fall on
-    date. Because IBKR gives transfers no intraday time, their order against same-day
-    same-symbol activity (or against a second same-day transfer) cannot be deduced from
-    the data. order=True compares fields in definition order, and (symbol, currency,
-    date) is unique per collision, so that triple alone determines the sort. A report
+    A group of order-sensitive events of the same symbol and currency falls on date, and
+    at least one of them carries no intraday time: IBKR gives transfers only a date, and
+    some trade rows carry a date-only Date/Time. An event with no time cannot be placed
+    relative to the others, so the group's FIFO sequence, and therefore the cost basis
+    it produces, is not in the data. n_trades counts all same-day trades,
+    n_untimed_trades the date-only subset, and n_transfers the transfers (each itself
+    untimed). order=True compares fields in definition order, and (symbol, currency,
+    date) is unique per collision, so that triple alone determines the sort; a report
     over a set of collisions is therefore deterministic.
     """
 
     symbol: str
     currency: str
     date: dt.date
-    n_transfers: int
     n_trades: int
+    n_untimed_trades: int
+    n_transfers: int
 
 
-def detect_transfer_ordering_collisions(
+def detect_ordering_collisions(
     trades: Sequence[TradeRow], transfers: Sequence[TransferRow]
-) -> list[TransferOrderingCollision]:
-    """Find transfers whose FIFO order against same-day activity is undetermined.
+) -> list[OrderingCollision]:
+    """Find (symbol, currency, day) groups whose intraday FIFO order is undetermined.
 
     FIFO lot creation and consumption are order-sensitive and keyed by (symbol,
     currency): the sequence in which buys, sells, transfer-ins (which seed a lot) and
     transfer-outs (which consume lots) are ingested decides which lots a disposal
-    matches, and thus its cost basis and realized P/L. IBKR's Trades section carries a
-    full intraday timestamp (Date/Time), but its Transfers section carries only a Date
-    lacking a time component (and the Code does not encode one) so when a transfer lands
-    on the same day as other order-sensitive activity in the same symbol, their true
-    intraday order is simply not in the data. Consequently, there is no honest way to
-    deduce it.
+    matches, and thus its cost basis and realized P/L. That sequence is recoverable only
+    from intraday timestamps. IBKR's Transfers section carries only a Date (no time,
+    and the Code encodes none), and some Trades rows carry a date-only Date/Time, so an
+    untimed event sharing a day with other same-symbol activity has no order in the
+    data.
 
-    Scope. Only same (symbol, currency) matters, since consumption is keyed that way; a
-    transfer sharing a day with unrelated symbols is independent and is not reported. A
-    transfer colliding with another transfer of the same symbol on the same day is
-    equally unorderable and is reported too.
+    Scope. Only same (symbol, currency, date) matters, since consumption is keyed that
+    way; an untimed event sharing a day with unrelated symbols is independent and is not
+    reported. A group collides when it holds at least two order-sensitive events and
+    at least one is untimed (a transfer or a date-only trade): two fully timestamped
+    trades remain orderable by their times and are not a collision.
 
-    Returns every collision (sorted); an empty list means every transfer is orderable.
-    The decision to halt rather than fabricate an order is the boundary's (see
-    diagnostics.report_transfer_ordering_collisions).
-
+    Returns every collision (sorted); an empty list means every event is orderable. The
+    decision to halt rather than fabricate an order is the boundary's (see
+    diagnostics.report_ordering_collisions).
     """
     trades_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
+    untimed_trades_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
     for t in trades:
-        trades_by_key[(t.symbol, t.currency, t.date)] += 1
+        key = (t.symbol, t.currency, t.date)
+        trades_by_key[key] += 1
+        if not has_intraday_time(t.datetime_str):
+            untimed_trades_by_key[key] += 1
 
     transfers_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
     for tr in transfers:
         transfers_by_key[(tr.symbol, tr.currency, tr.date)] += 1
 
-    # A transfer collides when its (symbol, currency, date) also holds a trade, or a
-    # second transfer of the same symbol that day -- either way the intraday order is
-    # undetermined.
-    collisions = [
-        TransferOrderingCollision(
-            symbol=symbol,
-            currency=currency,
-            date=date,
-            n_transfers=n_xfer,
-            n_trades=trades_by_key.get((symbol, currency, date), 0),
-        )
-        for (symbol, currency, date), n_xfer in transfers_by_key.items()
-        if trades_by_key.get((symbol, currency, date), 0) > 0 or n_xfer > 1
-    ]
+    collisions: list[OrderingCollision] = []
+    for key in set(trades_by_key) | set(transfers_by_key):
+        symbol, currency, date = key
+        n_trades = trades_by_key.get(key, 0)
+        n_untimed = untimed_trades_by_key.get(key, 0)
+        n_transfers = transfers_by_key.get(key, 0)
+        # Undetermined only when more than one event shares the day AND at least one
+        # carries no time (every transfer, plus any date-only trade). Two timestamped
+        # trades are orderable, so a trades-only timed day is not a collision.
+        if n_trades + n_transfers >= 2 and n_untimed + n_transfers >= 1:
+            collisions.append(
+                OrderingCollision(
+                    symbol=symbol,
+                    currency=currency,
+                    date=date,
+                    n_trades=n_trades,
+                    n_untimed_trades=n_untimed,
+                    n_transfers=n_transfers,
+                )
+            )
+
     return sorted(collisions)
 
 

@@ -35,10 +35,10 @@ from capitangains.diagnostics import (
     report_gap_acknowledgments,
     report_invalid_statements,
     report_missing_fx,
+    report_ordering_collisions,
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
-    report_transfer_ordering_collisions,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
@@ -48,9 +48,9 @@ from capitangains.reporting import (
     FxTable,
     IbkrActivityStatementSource,
     ReportBuilder,
+    detect_ordering_collisions,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
-    detect_transfer_ordering_collisions,
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
 )
@@ -148,12 +148,12 @@ def run(options: RunOptions) -> None:
     violations = detect_symbol_currency_violations(parsed.trades, parsed.transfers)
     report_symbol_currency_violations(violations, logger)
 
-    # A transfer carries only a date (IBKR gives transfers no intraday time), so a
-    # transfer sharing a symbol's day with other order-sensitive activity cannot be
-    # ordered for FIFO. Detect and halt rather than guess -- see the detector's
-    # rationale.
-    collisions = detect_transfer_ordering_collisions(parsed.trades, parsed.transfers)
-    report_transfer_ordering_collisions(collisions, logger)
+    # An untimed event, such as a transfer (IBKR never timestamps transfers) or a trade
+    # row with a date-only Date/Time, sharing a symbol's day with other order-sensitive
+    # activity cannot be ordered for FIFO. Detect and halt rather than guess -- refer to
+    # the detector's rationale.
+    collisions = detect_ordering_collisions(parsed.trades, parsed.transfers)
+    report_ordering_collisions(collisions, logger)
 
     # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
     # itself stays agnostic of how gaps are resolved.
@@ -163,7 +163,7 @@ def run(options: RunOptions) -> None:
     # FIFO lot creation/consumption respects actual event ordering. EventStream owns
     # that ordering (it sorts at construction), so the matcher's ingestion precondition
     # is an invariant of the type rather than a contract this call site must honor.
-    # Same-day same-symbol transfer collisions were already rejected above.
+    # Same-day same-symbol ordering collisions were already rejected above.
     realized = EventStream(parsed.trades, parsed.transfers).replay(matcher)
 
     logger.info(

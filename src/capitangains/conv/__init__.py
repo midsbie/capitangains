@@ -1,3 +1,3 @@
-from .conv import parse_date, to_dec, to_dec_strict
+from .conv import has_intraday_time, parse_date, to_dec, to_dec_strict
 
-__all__ = ["to_dec", "to_dec_strict", "parse_date"]
+__all__ = ["to_dec", "to_dec_strict", "parse_date", "has_intraday_time"]
