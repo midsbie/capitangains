@@ -1242,6 +1242,155 @@ def test_parse_elided_basis_and_realized_pl_treated_as_none():
     assert trades[0].realized_pl_ccy is None
 
 
+def test_elided_basis_realized_placeholders_and_blanks_map_to_none():
+    """Every legitimate elision keeps mapping Basis/Realized P/L to None, silently.
+
+    Guards the malformed-field rejection from over-correcting: a known placeholder
+    ('-', '--', 'N/A', 'n/a') or a blank cell is a real "IBKR reported no value" and
+    must stay None with no defect; only a genuinely malformed cell becomes a defect.
+    """
+    header = [
+        "Trades",
+        "Header",
+        "Asset Category",
+        "Currency",
+        "Symbol",
+        "Date/Time",
+        "Quantity",
+        "T. Price",
+        "Proceeds",
+        "Comm/Fee",
+        "Code",
+        "Basis",
+        "Realized P/L",
+    ]
+    elisions = [("AAA", "-", "--"), ("BBB", "N/A", "n/a"), ("CCC", "", "")]
+    rows = [header]
+    for i, (symbol, basis, realized) in enumerate(elisions):
+        rows.append(
+            [
+                "Trades",
+                "Data",
+                "Stocks",
+                "USD",
+                symbol,
+                f"2024-01-1{i}, 10:00:00",
+                "-100",
+                "155.00",
+                "15500.00",
+                "-2.00",
+                "P",
+                basis,
+                realized,
+            ]
+        )
+
+    model = parse_model(rows)
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert not defects
+    assert len(trades) == 3
+    assert all(t.basis_ccy is None and t.realized_pl_ccy is None for t in trades)
+
+
+def test_malformed_basis_is_rejected_not_treated_as_elided():
+    """A corrupt Basis must surface as a defect, not be silently nulled as "elided".
+
+    Only the known placeholder set ('...', '-', etc.) means "IBKR reported no basis"
+    (-> None, which legitimately feeds gap synthesis). A genuinely malformed value --
+    here a column-shift artifact that survives comma-stripping but is not a number -- is
+    corruption, and like every other strict trade field it must be rejected so the
+    boundary halts. Realized P/L below is valid, so only Basis can trigger the defect.
+    """
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+            "Basis",
+            "Realized P/L",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "USD",
+            "AAPL",
+            "2024-01-15, 10:00:00",
+            "-100",
+            "155.00",
+            "15500.00",
+            "-2.00",
+            "P",
+            "19,8X7.919",  # malformed: not a placeholder, not a number
+            "498.00",
+        ],
+    ]
+
+    model = parse_model(rows)
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert not trades  # rejected, not extracted with basis_ccy=None
+    assert defects
+    assert "Basis" in defects[0].reason
+
+
+def test_malformed_realized_pl_is_rejected_not_treated_as_elided():
+    """A corrupt Realized P/L must surface as a defect, mirroring the Basis path.
+
+    Realized P/L uses the same strict parse; a malformed value is currently swallowed to
+    None (treated as elided), which then drives the reconciliation and gap paths on
+    corrupt data. Basis above is valid, so only Realized P/L can trigger the defect.
+    """
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+            "Basis",
+            "Realized P/L",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "USD",
+            "AAPL",
+            "2024-01-15, 10:00:00",
+            "-100",
+            "155.00",
+            "15500.00",
+            "-2.00",
+            "P",
+            "-15000.00",
+            "C;P",  # malformed: a Code value column-shifted into Realized P/L
+        ],
+    ]
+
+    model = parse_model(rows)
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert not trades
+    assert defects
+    assert "Realized P/L" in defects[0].reason
+
+
 def test_filter_non_stock_asset_by_scope():
     """Test that non-matching asset categories are filtered by scope."""
     rows = [

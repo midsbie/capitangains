@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypeVar
 
-from capitangains.conv import parse_date, to_dec_strict
+from capitangains.conv import ELISION_PLACEHOLDERS, parse_date, to_dec_strict
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -52,6 +52,27 @@ def _require_decimal(label: str, field: str, value: str) -> Decimal:
         return to_dec_strict(value)
     except ValueError as e:
         raise DataQualityError(f"Invalid {label}: bad {field} {value!r} ({e})") from e
+
+
+def _optional_decimal(label: str, field: str, value: str | None) -> Decimal | None:
+    """Parse an optional numeric field, yielding None only for a genuine elision.
+
+    Basis and Realized P/L are optional IBKR columns where None is a meaningful signal:
+    gap synthesis reads it as "no basis to synthesize from" (and refuses to fabricate a
+    cost), and reconciliation excludes the trade. So an absent cell (None or empty) or
+    a known elision placeholder maps to None.
+
+    A genuinely malformed cell, by contrast, is corruption (a column-shifted 'C;P', a
+    typo'd '19,8X7.919') and must not be relabelled as elision, or it would enter those
+    same paths as if IBKR had reported nothing. It surfaces as a DataQualityError (exit
+    2 at the boundary), like _require_decimal, rather than being swallowed to None.
+    """
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped or stripped in ELISION_PLACEHOLDERS:
+        return None
+    return _require_decimal(label, field, value)
 
 
 def _require_date(label: str, field: str, value: str) -> dt.date:

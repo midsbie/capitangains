@@ -8,11 +8,16 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
-from capitangains.conv import to_dec_strict
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
-from ._common import ExtractionDefect, _require_date, _require_decimal, _require_fields
+from ._common import (
+    ExtractionDefect,
+    _optional_decimal,
+    _require_date,
+    _require_decimal,
+    _require_fields,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,19 +109,6 @@ def parse_trades_stocklike_row(
     )
     comm_s = r.get(comm_col, "").strip()
 
-    # Placeholders like "..." must map to None (missing), not Decimal("0"), because
-    # downstream gap synthesis treats 0 as a real value and would falsely mark gaps
-    # as fixed with zero cost.
-    try:
-        basis_opt: Decimal | None = to_dec_strict(r.get("Basis"))
-    except ValueError:
-        basis_opt = None
-
-    try:
-        realized_opt: Decimal | None = to_dec_strict(r.get("Realized P/L"))
-    except ValueError:
-        realized_opt = None
-
     trade = TradeRow(
         section="Trades",
         asset_category=asset_category,
@@ -129,8 +121,10 @@ def parse_trades_stocklike_row(
         proceeds=_require_decimal("trade row", "Proceeds", proceeds_s),
         comm_fee=_require_decimal("trade row", comm_col, comm_s),
         code=code,
-        basis_ccy=basis_opt,
-        realized_pl_ccy=realized_opt,
+        basis_ccy=_optional_decimal("trade row", "Basis", r.get("Basis")),
+        realized_pl_ccy=_optional_decimal(
+            "trade row", "Realized P/L", r.get("Realized P/L")
+        ),
     )
 
     # Only track non-zero quantity

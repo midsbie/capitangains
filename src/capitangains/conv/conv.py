@@ -7,6 +7,10 @@ from decimal import Decimal, InvalidOperation
 
 NUM_CLEAN_RE = re.compile(r"[,\s]")  # remove thousands separators, spaces
 
+# The strings IBKR uses for an absent or elided numeric cell. One home for "what counts
+# as elision", shared by to_dec_strict and _optional_decimal (extract._common).
+ELISION_PLACEHOLDERS = frozenset({"-", "--", "...", "N/A", "n/a"})
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +76,7 @@ def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
     if not s_stripped:
         raise ValueError("Value is empty string")
 
-    if s_stripped in {"-", "--", "...", "N/A", "n/a"}:
+    if s_stripped in ELISION_PLACEHOLDERS:
         raise ValueError(f"Value is a placeholder: {s_stripped!r}")
 
     try:
