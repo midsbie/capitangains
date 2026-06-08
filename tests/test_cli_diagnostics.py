@@ -570,6 +570,47 @@ def test_process_files_exits_2_when_fx_table_incomplete(tmp_path, out_path, capl
     assert any("Missing FX rate" in r.getMessage() for r in caplog.records)
 
 
+def test_run_exits_2_on_unorderable_same_day_trades(tmp_path, out_path, caplog):
+    # Two EUR trades for the same symbol on the same day -- one stamped date-only (no
+    # intraday time), one timestamped -- have no FIFO order in the data. As with a
+    # same-day transfer collision, the run must abort (exit 2, no workbook) rather than
+    # fabricate an order from the raw Date/Time string. EUR converts by identity, so the
+    # run reaches the ordering stage without needing an FX table.
+    stmt = tmp_path / "stmt.csv"
+    rows = _statement_meta_rows("U1", Y2024) + [
+        _TRADES_HEADER,
+        trade_data(
+            symbol="AAA",
+            currency="EUR",
+            datetime_str="2024-06-15",
+            quantity="10",
+            proceeds="-1000",
+            comm_fee="0",
+            code="O",
+        ),
+        trade_data(
+            symbol="AAA",
+            currency="EUR",
+            datetime_str="2024-06-15, 09:30:00",
+            quantity="-10",
+            t_price="110",
+            proceeds="1100",
+            comm_fee="0",
+            code="C",
+            basis="-1000",
+            realized="100",
+        ),
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out_path))
+
+    assert exc.value.code == 2
+    assert not out_path.exists()
+
+
 def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, out_path, caplog):
     # A missing or unparseable --fx-table file is a setup failure, not a statement-data
     # defect, so it halts with exit 1 -- a class apart from the curated gates' exit 2 --
