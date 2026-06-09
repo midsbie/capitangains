@@ -44,9 +44,8 @@ def _build_report() -> ReportBuilder:
     multi-leg realized line (two anexo_j rows + a proceeds split) with one transferred
     and one synthetic leg; a gap line (gap_status + per_symbol has_gap) whose single leg
     has a None buy date (a nullable date in anexo_j); a line left unconverted because
-    its currency has no FX rate (nullable EUR cells in realized + anexo_j); nullable
-    cash-flow EUR amounts (GBP dividend/withholding with no rate); and a SYEP row with
-    null value/start dates (nullable dates + nullable interest_paid_eur).
+    its currency has no FX rate (nullable EUR cells in realized + anexo_j); and nullable
+    cash-flow EUR amounts (GBP dividend/withholding with no rate).
     """
     rb = ReportBuilder(year=2024)
 
@@ -141,18 +140,6 @@ def _build_report() -> ReportBuilder:
                 customer_rate_pct=Decimal("2.5"),
                 interest_paid=Decimal("3"),
                 code="",
-            ),
-            SyepInterestRow(
-                currency="USD",
-                value_date=None,
-                symbol="NODT",
-                start_date=None,
-                quantity=Decimal("-5"),
-                collateral_amount=Decimal("500"),
-                market_rate_pct=Decimal("4"),
-                customer_rate_pct=Decimal("1.5"),
-                interest_paid=Decimal("1"),
-                code="Po",
             ),
         ]
     )
@@ -513,19 +500,6 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 (2.7, "\u20ac#,##0.00"),
                 (None, "General"),
             ],
-            [
-                (None, "YYYY-MM-DD"),
-                ("USD", "General"),
-                ("NODT", "General"),
-                (None, "YYYY-MM-DD"),
-                (-5, "0.########"),
-                (500, "$#,##0.00"),
-                (4, "0.00####"),
-                (1.5, "0.00####"),
-                (1, "$#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                ("Po", "General"),
-            ],
         ],
         "Withholding Tax": [
             [
@@ -882,19 +856,6 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 (3, "$#,##0.00"),
                 (2.7, '#,##0.00 "\u20ac"'),
                 (None, "General"),
-            ],
-            [
-                (None, "DD/MM/YYYY"),
-                ("USD", "General"),
-                ("NODT", "General"),
-                (None, "DD/MM/YYYY"),
-                (-5, "0.########"),
-                (500, "$#,##0.00"),
-                (4, "0.00####"),
-                (1.5, "0.00####"),
-                (1, "$#,##0.00"),
-                (None, '#,##0.00 "\u20ac"'),
-                ("Po", "General"),
             ],
         ],
         "Reten\xe7\xe3o na Fonte": [

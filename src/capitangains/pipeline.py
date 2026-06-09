@@ -3,8 +3,8 @@
 run is the composition root: given a RunOptions it wires the statement parser, the
 activity-statement source, the FIFO matcher (with its gap policy), FX conversion, the
 soft IBKR reconciliation, and the Excel sink into one chronological pipeline and drives
-them in order. It is framework-agnostic -- it depends on an explicit options value,
-never on argparse -- so the same pipeline can be exercised from a test or any other
+them in order. It is framework-agnostic, as it depends on an explicit options value,
+never on argparse, and the same pipeline can be exercised from a test or any other
 front-end, not only the CLI.
 
 Every stage that can reject the input is a fail-closed gate: the run aborts (exit 2, no
@@ -180,31 +180,18 @@ def run(options: RunOptions) -> None:
 
     report_gap_acknowledgments(matcher.gap_events, acknowledged, logger)
 
-    # Build report
+    # Build the year-scoped report. ReportBuilder owns its year invariant: each ingest
+    # method retains only rows dated in options.year, so the full multi-file parse
+    # (needed upstream to seed FIFO) is handed over whole and the builder does the
+    # scoping. See ReportBuilder.set_transfers for why scoping transfers is display-only
+    # and cannot move a tax figure.
     rb = ReportBuilder(year=options.year)
-    for rl in realized:
-        if rl.sell_date.year == options.year:
-            rb.add_realized(rl)
-    rb.set_dividends([d for d in parsed.dividends if d.date.year == options.year])
-    rb.set_withholding([w for w in parsed.withholding if w.date.year == options.year])
-
-    # Keep only rows with a value date in the selected year (drop CSV 'Total' lines)
-    rb.set_syep_interest(
-        [
-            r
-            for r in parsed.syep_interest
-            if r.value_date and r.value_date.year == options.year
-        ]
-    )
-    rb.set_interest([i for i in parsed.interest if i.date.year == options.year])
-    # Display only this year's transfers, like every other category above. The full
-    # multi-file set (prior years included) was needed to seed FIFO, but that ingestion
-    # is already complete (the matching loop above); ReportBuilder.transfers feeds only
-    # the Stock Transfers sheet, never any computed figure. So scoping it to
-    # options.year is display-only -- it cannot move a tax number -- and keeps a
-    # prior-year seeding transfer from masquerading as a current-year event on a
-    # single-year report.
-    rb.set_transfers([t for t in parsed.transfers if t.date.year == options.year])
+    rb.add_realized_lines(realized)
+    rb.set_dividends(parsed.dividends)
+    rb.set_withholding(parsed.withholding)
+    rb.set_syep_interest(parsed.syep_interest)
+    rb.set_interest(parsed.interest)
+    rb.set_transfers(parsed.transfers)
 
     logger.info(
         "Report built: %d realized lines, %d dividend lines, %d withholding lines",
@@ -213,7 +200,6 @@ def run(options: RunOptions) -> None:
         len(rb.withholding),
     )
 
-    # FX conversion if provided
     fx: FxTable | None = None
     if options.fx_table:
         try:
@@ -236,10 +222,10 @@ def run(options: RunOptions) -> None:
     # gap rather than a rate artifact. reconcile_realized_against_ibkr filters both
     # sides to the reporting year, and report_statement_input_conflicts (above) has
     # already proven any multi-file set single-account and non-overlapping, so each
-    # year's trades are counted once whatever the file count. Multi-file is in fact
-    # the stronger check: prior-year files seed FIFO with the real opening lots a
-    # cross-year sale's basis depends on, where single-file would have only a
-    # synthesized (tautological) or absent basis.
+    # year's trades are counted once whatever the file count. Multi-file is in fact the
+    # stronger check: prior-year files seed FIFO with the real opening lots a cross-year
+    # sale's basis depends on, where single-file would have only a synthesized
+    # (tautological) or absent basis.
     try:
         report = reconcile_realized_against_ibkr(
             parsed.trades, rb.realized_lines, options.year
@@ -248,16 +234,10 @@ def run(options: RunOptions) -> None:
     except Exception:
         logger.exception("Reconciliation failed; continuing without it.")
 
-    # Determine output path
     out_path = (
         Path(options.output) if options.output else Path(f"report_{options.year}.xlsx")
     )
 
-    # The workbook write is this program's only side effect; everything above is pure
-    # validation and computation, and every abort path precedes it. A dry run performs
-    # that full preflight and stops here, so an existing report at out_path is left
-    # untouched. (It cannot exercise the write stage itself -- serialization, path
-    # permissions, disk.)
     if options.dry_run:
         logger.info(
             "Dry run: all checks passed; no workbook written (would write to %s).",
@@ -265,7 +245,6 @@ def run(options: RunOptions) -> None:
         )
         return
 
-    # Write outputs via sink
     sink = ExcelReportSink(out_path=out_path, locale=options.locale)
     out_path = sink.write(rb)
     logger.info("Wrote workbook to %s", out_path)

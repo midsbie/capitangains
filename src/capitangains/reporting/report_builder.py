@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import TypeVar
 
 from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
 from .fifo_domain import SellMatchLeg, TransferProtocol
 from .fx import FxTable
 from .money import quantize_money
+
+_RowT = TypeVar("_RowT")
 
 
 @dataclass
@@ -32,11 +35,21 @@ class SymbolTotals:
         """Get or create currency totals."""
         if currency not in self.by_currency:
             self.by_currency[currency] = CurrencyTotals()
+
         return self.by_currency[currency]
 
 
 @dataclass
 class ReportBuilder:
+    """Accumulate one tax year's reportable rows and aggregates for the sink.
+
+    Scoped to a single ``year``: the bulk ingest methods (``add_realized_lines`` and
+    the ``set_*`` setters) retain only rows dated in that year, so a caller may hand
+    over an unscoped multi-year parse and trust the builder to keep just its year.
+    ``add_realized`` is the unscoped per-line primitive that the ingest path and the
+    tests build on.
+    """
+
     year: int
     # Collections
     realized_lines: list[RealizedLine] = field(default_factory=list)
@@ -62,20 +75,47 @@ class ReportBuilder:
         ccy.proceeds += rl.sell_net_ccy
         ccy.alloc_cost += sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
 
-    def set_dividends(self, rows: list[DividendRow]) -> None:
-        self.dividends = rows
+    def add_realized_lines(self, lines: Iterable[RealizedLine]) -> None:
+        """Aggregate every realized line whose sell date falls in this report's year."""
+        for line in self._in_year(lines, key=lambda rl: rl.sell_date):
+            self.add_realized(line)
 
-    def set_withholding(self, rows: list[WithholdingRow]) -> None:
-        self.withholding = rows
+    def set_dividends(self, rows: Iterable[DividendRow]) -> None:
+        self.dividends = self._in_year(rows, key=lambda r: r.date)
 
-    def set_syep_interest(self, rows: list[SyepInterestRow]) -> None:
-        self.syep_interest = rows
+    def set_withholding(self, rows: Iterable[WithholdingRow]) -> None:
+        self.withholding = self._in_year(rows, key=lambda r: r.date)
 
-    def set_interest(self, rows: list[InterestRow]) -> None:
-        self.interest = rows
+    def set_syep_interest(self, rows: Iterable[SyepInterestRow]) -> None:
+        self.syep_interest = self._in_year(rows, key=lambda r: r.value_date)
 
-    def set_transfers(self, transfers: Sequence[TransferProtocol]) -> None:
-        self.transfers = list(transfers)
+    def set_interest(self, rows: Iterable[InterestRow]) -> None:
+        self.interest = self._in_year(rows, key=lambda r: r.date)
+
+    def set_transfers(self, transfers: Iterable[TransferProtocol]) -> None:
+        """Retain only this year's transfers for the Stock Transfers sheet.
+
+        The full multi-file transfer set (prior years included) is needed upstream to
+        seed FIFO, but that ingestion is already complete before the report is built;
+        transfers here feed only the Stock Transfers sheet, never a computed figure.
+        Scoping to the report year is therefore display-only -- it cannot move a tax
+        number -- and keeps a prior-year seeding transfer from masquerading as a
+        current-year event on a single-year report.
+        """
+        self.transfers = self._in_year(transfers, key=lambda t: t.date)
+
+    def _in_year(
+        self, rows: Iterable[_RowT], key: Callable[[_RowT], dt.date | None]
+    ) -> list[_RowT]:
+        """Keep only rows whose scoping date falls in this report's ``year``.
+
+        Each row type carries its membership date on a different attribute (realized
+        lines: sell_date, cash flows: date, SYEP: an optional value_date), so the
+        caller injects the accessor. A None date is out of scope: only SYEP rows can
+        lack a value_date, and a dateless row cannot be placed in any year (this also
+        drops the CSV 'Total' line the SYEP extractor leaves undated).
+        """
+        return [r for r in rows if (d := key(r)) is not None and d.year == self.year]
 
     def convert_eur(self, fx: FxTable | None) -> None:
         """Convert realized lines to EUR using per-date FX if available.
@@ -150,9 +190,11 @@ class ReportBuilder:
         cur = currency.upper()
         if cur == "EUR":
             return Decimal("1")
+
         rate = fx.get_rate(date, cur) if fx is not None else None
         if rate is None:
             self.fx_missing.add((date, cur))
+
         return rate
 
     @staticmethod
@@ -167,15 +209,18 @@ class ReportBuilder:
         """
         if sell_qty == 0 or sell_net_eur is None or not legs:
             return
+
         allocated = Decimal("0")
         for leg in legs[:-1]:
             leg.proceeds_share_eur = quantize_money(sell_net_eur * leg.qty / sell_qty)
             allocated += leg.proceeds_share_eur
+
         legs[-1].proceeds_share_eur = sell_net_eur - allocated
 
     def _convert_syep_interest(self, fx: FxTable | None) -> None:
         if not self.syep_interest:
             return
+
         for row in self.syep_interest:
             row.interest_paid_eur = self._convert_amount_to_eur(
                 row.currency, row.value_date, row.interest_paid, fx
@@ -184,6 +229,7 @@ class ReportBuilder:
     def _convert_withholding(self, fx: FxTable | None) -> None:
         if not self.withholding:
             return
+
         for row in self.withholding:
             row.amount_eur = self._convert_amount_to_eur(
                 row.currency, row.date, row.amount, fx
@@ -192,6 +238,7 @@ class ReportBuilder:
     def _convert_dividends(self, fx: FxTable | None) -> None:
         if not self.dividends:
             return
+
         for row in self.dividends:
             row.amount_eur = self._convert_amount_to_eur(
                 row.currency, row.date, row.amount, fx
@@ -200,6 +247,7 @@ class ReportBuilder:
     def _convert_interest(self, fx: FxTable | None) -> None:
         if not self.interest:
             return
+
         for row in self.interest:
             row.amount_eur = self._convert_amount_to_eur(
                 row.currency, row.date, row.amount, fx
@@ -214,17 +262,20 @@ class ReportBuilder:
     ) -> Decimal | None:
         """Convert a single amount to EUR, or None when no rate is available.
 
-        A non-EUR amount with no date cannot be priced; the CLI's year filter already
-        drops SYEP rows lacking a value date, so this returns None without recording an
+        A non-EUR amount with no date cannot be priced; set_syep_interest already drops
+        SYEP rows lacking a value date, so this returns None without recording an
         FX-table gap (the absence is a source-data issue, not a missing rate).
         """
         if currency.upper() == "EUR":
             return quantize_money(amount)
+
         if date is None:
             return None
+
         rate = self._rate_or_record(date, currency, fx)
         if rate is None:
             return None
+
         return quantize_money(amount * rate)
 
     def _recompute_aggregates(self) -> None:
@@ -236,6 +287,7 @@ class ReportBuilder:
         for rl in self.realized_lines:
             if rl.symbol not in self.symbol_totals:
                 self.symbol_totals[rl.symbol] = SymbolTotals()
+
             t = self.symbol_totals[rl.symbol]
             if rl.realized_pl_eur is not None:
                 t.eur.realized += rl.realized_pl_eur
