@@ -101,7 +101,8 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
     policy = BasisSynthesisPolicy(
         tolerance=Decimal("0.02"),
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
-        realized_getter=lambda t: None,
+        # Realized (1200 + 0 - 1200) vouches for the Basis so synthesis is not refused.
+        realized_getter=lambda t: Decimal("0"),
     )
     result = policy.resolve(trade, Decimal("20"), Decimal("1200.01000000"))
     assert result.event is not None
@@ -168,7 +169,8 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
     policy = BasisSynthesisPolicy(
         tolerance=Decimal("0.02"),
         basis_getter=lambda t: getattr(t, "basis_ccy", None),
-        realized_getter=lambda t: None,
+        # Realized (1000 + 0 - 1000) vouches for the Basis so synthesis is not refused.
+        realized_getter=lambda t: Decimal("0"),
     )
     result = policy.resolve(trade, Decimal("10"), Decimal("1000.02000000"))
     assert result.event is not None
@@ -226,8 +228,11 @@ def test_basis_synthesis_policy_accepts_near_total_loss_satisfying_identity():
     assert result.alloc_cost == Decimal("550.45000000")
 
 
-def test_basis_synthesis_policy_skips_identity_check_without_realized():
-    # No IBKR Realized P/L -> nothing to check the Basis against -> synthesize.
+def test_basis_synthesis_policy_refuses_when_realized_absent():
+    # A real IBKR sell carrying a Basis always carries the derived Realized P/L, so an
+    # absent Realized beside a present Basis is a corrupt/shifted row, not a gap to
+    # synthesize. With no Realized to validate the (here corrupt) Basis, synthesis must
+    # refuse -- DEFECTIVE -- rather than fabricate a 9999 cost and merely warn (CG-03).
     trade = Trade(
         symbol="NOR",
         date=dt.date(2024, 3, 7),
@@ -235,7 +240,7 @@ def test_basis_synthesis_policy_skips_identity_check_without_realized():
         quantity=Decimal("-10"),
         proceeds=Decimal("1200"),
         comm_fee=Decimal("0"),
-        basis_ccy=Decimal("-9999"),  # inconsistent, but no Realized to catch it
+        basis_ccy=Decimal("-9999"),
     )
     policy = BasisSynthesisPolicy(
         tolerance=Decimal("0.02"),
@@ -243,10 +248,10 @@ def test_basis_synthesis_policy_skips_identity_check_without_realized():
         realized_getter=lambda t: None,
     )
     result = policy.resolve(trade, Decimal("10"), Decimal("0"))
-    # No Realized P/L -> the identity check cannot fire -> synthesize.
     assert result.event is not None
-    assert result.event.outcome is GapResolution.SYNTHESIZED
-    assert result.alloc_cost == Decimal("9999.00000000")
+    assert result.event.outcome is GapResolution.DEFECTIVE
+    assert "Realized P/L" in result.event.message
+    assert result.alloc_cost == Decimal("0")
 
 
 def test_realized_line_builder_rounds_realized_pl():

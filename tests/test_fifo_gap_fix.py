@@ -36,9 +36,19 @@ def test_fifo_no_fix_records_gap_and_zero_cost():
 def test_fifo_auto_fix_creates_synthetic_leg_and_matches_basis():
     m = make_matcher(frozenset({("XYZ", dt.date(2024, 2, 1))}))
     m.ingest_trade(buy("XYZ", dt.date(2024, 1, 1), "100", "-1000", "0", ccy="USD"))
-    # SELL 120, proceeds 1200, IBKR Basis -1200 -> target alloc 1200
+    # SELL 120, proceeds 1200, IBKR Basis -1200 -> target alloc 1200. Realized (1200 + 0
+    # - 1200 = 0) vouches for the Basis, the precondition for synthesis.
     rl = m.ingest_trade(
-        sell("XYZ", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD")
+        sell(
+            "XYZ",
+            dt.date(2024, 2, 1),
+            "-120",
+            "1200",
+            "0",
+            basis="-1200",
+            realized="0",
+            ccy="USD",
+        )
     )
     assert rl is not None
     assert rl.has_gap is True
@@ -78,10 +88,18 @@ def test_fifo_auto_fix_negative_residual_within_tolerance_clamps():
     # Buy 90 cost 900
     m.ingest_trade(buy("CLP", dt.date(2024, 1, 1), "90", "-900", "0", ccy="USD"))
     # SELL 100 with IBKR Basis slightly less than matched alloc
-    # (residual = -0.01 -> clamp to 0)
+    # (residual = -0.01 -> clamp to 0). Realized (1000 + 0 - 899.99) vouches for the
+    # Basis so synthesis is not refused.
     rl = m.ingest_trade(
         sell(
-            "CLP", dt.date(2024, 2, 1), "-100", "1000", "0", basis="-899.99", ccy="USD"
+            "CLP",
+            dt.date(2024, 2, 1),
+            "-100",
+            "1000",
+            "0",
+            basis="-899.99",
+            realized="100.01",
+            ccy="USD",
         )
     )
     assert rl is not None
@@ -112,9 +130,19 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
     m = make_matcher(frozenset({("EURX", dt.date(2024, 2, 1))}))
     # Buy 100 cost 1000 USD on 2024-01-01
     m.ingest_trade(buy("EURX", dt.date(2024, 1, 1), "100", "-1000", "0", ccy="USD"))
-    # Sell 120 on 2024-02-01, proceeds 1200, Basis -1200 so residual = 200
+    # Sell 120 on 2024-02-01, proceeds 1200, Basis -1200 so residual = 200. Realized
+    # (1200 + 0 - 1200 = 0) vouches for the Basis, the precondition for synthesis.
     rl = m.ingest_trade(
-        sell("EURX", dt.date(2024, 2, 1), "-120", "1200", "0", basis="-1200", ccy="USD")
+        sell(
+            "EURX",
+            dt.date(2024, 2, 1),
+            "-120",
+            "1200",
+            "0",
+            basis="-1200",
+            realized="0",
+            ccy="USD",
+        )
     )
     assert rl is not None and rl.gap_fixed is True
 
