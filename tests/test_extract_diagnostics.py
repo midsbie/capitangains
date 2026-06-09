@@ -215,9 +215,7 @@ def test_withholding_missing_date_is_a_defect(caplog):
         out, defects = parse_withholding_tax(model)
 
     assert len(out) == 1
-    assert [d.reason for d in defects] == [
-        "Invalid Withholding Tax row: missing Date"
-    ]
+    assert [d.reason for d in defects] == ["Invalid Withholding Tax row: missing Date"]
     assert not any("skipped" in r.getMessage() for r in caplog.records)
 
 

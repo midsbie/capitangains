@@ -16,6 +16,7 @@ from ._common import (
     _require_date,
     _require_decimal,
 )
+from .sections import SEC_INTEREST
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ def parse_interest(
     """
     out, defects = _extract_cashflow_section(
         model,
-        section="Interest",
+        section=SEC_INTEREST,
         logger=logger,
         build=_build_interest_row,
     )

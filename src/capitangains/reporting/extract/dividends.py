@@ -16,6 +16,7 @@ from ._common import (
     _require_date,
     _require_decimal,
 )
+from .sections import SEC_DIVIDENDS
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def parse_dividends(
 ) -> tuple[list[DividendRow], list[ExtractionDefect]]:
     out, defects = _extract_cashflow_section(
         model,
-        section="Dividends",
+        section=SEC_DIVIDENDS,
         logger=logger,
         build=_build_dividend_row,
     )

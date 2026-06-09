@@ -12,6 +12,7 @@ from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 from ._common import ExtractionDefect, _require_date, _require_decimal, _require_fields
+from .sections import SEC_TRANSFERS
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def parse_transfers(
     defects: list[ExtractionDefect] = []
     skipped_non_stock = 0
 
-    for sub in model.get_subtables("Transfers"):
+    for sub in model.get_subtables(SEC_TRANSFERS):
         rows = sub.rows
 
         # Column-variant fallbacks are applied per row below; surface which alternate a
@@ -136,7 +137,7 @@ def parse_transfers(
 
                 out.append(
                     TransferRow(
-                        section="Transfers",
+                        section=SEC_TRANSFERS,
                         asset_category=asset_cat,
                         currency=currency,
                         symbol=symbol,
@@ -150,7 +151,7 @@ def parse_transfers(
             except DataQualityError as e:
                 defects.append(
                     ExtractionDefect(
-                        "Transfers",
+                        SEC_TRANSFERS,
                         r.get("Symbol", "").strip() or None,
                         r.get("Date", "").strip() or None,
                         str(e),

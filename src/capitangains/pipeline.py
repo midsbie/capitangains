@@ -39,6 +39,7 @@ from capitangains.diagnostics import (
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_unrecognized_sections,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
@@ -51,6 +52,7 @@ from capitangains.reporting import (
     detect_ordering_collisions,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
+    detect_unrecognized_sections,
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
 )
@@ -125,6 +127,10 @@ def run(options: RunOptions) -> None:
     report_statement_input_conflicts(input_conflicts, logger)
 
     model = merge_models(models)
+
+    # Section-level coverage sweep: WARN on any merged section neither consumed by an
+    # extractor nor allow-listed.
+    report_unrecognized_sections(detect_unrecognized_sections(model), logger)
 
     # The source runs every section extractor, each of which accumulates its row-level
     # data-quality defects rather than failing on the first bad row, so a single run

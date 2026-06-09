@@ -25,6 +25,7 @@ from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 from .extract import StatementMetadata, TradeRow, TransferRow, parse_statement_metadata
+from .extract.sections import CONSUMED_SECTIONS, IGNORED_SECTIONS
 
 
 def detect_symbol_currency_violations(
@@ -131,6 +132,40 @@ def detect_ordering_collisions(
             )
 
     return sorted(collisions)
+
+
+@dataclass(frozen=True, order=True)
+class UnrecognizedSection:
+    """One section present in the merged statement that no extractor consumes.
+
+    Neither consumed (CONSUMED_SECTIONS) nor allow-listed (IGNORED_SECTIONS). A soft
+    signal, not a defect: IBKR adds and renames sections over time and we cannot tell a
+    renamed data-bearing section (silent data loss) from a benign new one. name leads
+    the fields so order=True sorts deterministically; the counts quantify what is going
+    unconsumed so a maintainer can judge whether real data is being dropped.
+    """
+
+    name: str
+    subtable_count: int
+    row_count: int
+
+
+def detect_unrecognized_sections(model: IbkrModel) -> list[UnrecognizedSection]:
+    """Sections present in the model that no extractor consumes and aren't ignored.
+
+    Present keys minus CONSUMED_SECTIONS minus IGNORED_SECTIONS, with subtable and row
+    counts, sorted by name. Pure detection (empty list == full coverage); the boundary
+    only WARNs, see diagnostics.report_unrecognized_sections.
+    """
+    unknown = set(model.sections) - CONSUMED_SECTIONS - IGNORED_SECTIONS
+    return sorted(
+        UnrecognizedSection(
+            name=name,
+            subtable_count=len(model.sections[name]),
+            row_count=sum(len(sub.rows) for sub in model.sections[name]),
+        )
+        for name in unknown
+    )
 
 
 @dataclass(frozen=True)

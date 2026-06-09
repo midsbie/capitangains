@@ -18,6 +18,7 @@ from ._common import (
     _require_date,
     _require_decimal,
 )
+from .sections import SEC_WITHHOLDING
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def parse_withholding_tax(
 ) -> tuple[list[WithholdingRow], list[ExtractionDefect]]:
     out, defects = _extract_cashflow_section(
         model,
-        section="Withholding Tax",
+        section=SEC_WITHHOLDING,
         logger=logger,
         build=_build_withholding_row,
     )

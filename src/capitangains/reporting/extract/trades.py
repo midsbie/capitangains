@@ -18,6 +18,7 @@ from ._common import (
     _require_decimal,
     _require_fields,
 )
+from .sections import SEC_TRADES
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def parse_trades_stocklike_row(
     # realized), which is why only those map elision to None via _optional_decimal (a
     # malformed cell there is still rejected as a defect; CG-07).
     trade = TradeRow(
-        section="Trades",
+        section=SEC_TRADES,
         asset_category=asset_category,
         currency=currency,
         symbol=symbol,
@@ -155,7 +156,7 @@ def parse_trades_stocklike(
     defects: list[ExtractionDefect] = []
     skipped_rows = 0
 
-    for sub in model.get_subtables("Trades"):
+    for sub in model.get_subtables(SEC_TRADES):
         header = [h.strip() for h in sub.header]
         rows = sub.rows
 
@@ -201,7 +202,7 @@ def parse_trades_stocklike(
             except DataQualityError as e:
                 defects.append(
                     ExtractionDefect(
-                        "Trades",
+                        SEC_TRADES,
                         r.get("Symbol", "").strip() or None,
                         r.get("Date/Time", "").strip() or None,
                         str(e),

@@ -33,6 +33,7 @@ from capitangains.diagnostics import (
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_unrecognized_sections,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser
@@ -42,19 +43,35 @@ from capitangains.reporting import (
     ReconciliationReport,
     StatementInput,
     SymbolReconciliation,
+    UnrecognizedSection,
     detect_ordering_collisions,
     detect_statement_input_conflicts,
+    detect_unrecognized_sections,
     partition_statements_by_metadata,
 )
 from capitangains.reporting.extract import StatementMetadata, StatementPeriod
+from capitangains.reporting.extract.sections import (
+    CONSUMED_SECTIONS,
+    IGNORED_SECTIONS,
+    SEC_DIVIDENDS,
+    SEC_INTEREST,
+    SEC_SYEP,
+    SEC_TRADES,
+    SEC_TRANSFERS,
+    SEC_WITHHOLDING,
+)
 from capitangains.reporting.fifo_domain import GapResolution
 from tests.support import (
+    SYEP_SECTION,
     TRADES_COLUMNS,
     TRANSFERS_COLUMNS,
+    WITHHOLDING_COLUMNS,
     Y2023,
     Y2024,
     header_row,
     make_gap_event,
+    parse_model,
+    section_table,
     statement_meta_rows,
     trade_data,
     trade_row,
@@ -1287,4 +1304,163 @@ def test_report_reconciliation_separates_classes_by_severity(caplog):
     assert any(
         lvl == logging.INFO and "synthesized basis" in m and "SYN" in m
         for lvl, m in leveled
+    )
+
+
+# --- unrecognized-section coverage sweep: detector -----------------------------------
+
+
+def test_detect_unrecognized_sections_flags_unknown_alongside_consumed():
+    # A "Mystery" section (1 subtable, 2 rows) sits next to a consumed "Trades":
+    # only the unknown one surfaces, carrying its subtable and row counts.
+    model = parse_model(
+        section_table("Mystery", ["Col1", "Col2"], ["a", "b"], ["c", "d"])
+        + [header_row(SEC_TRADES, TRADES_COLUMNS)]
+    )
+    assert detect_unrecognized_sections(model) == [UnrecognizedSection("Mystery", 1, 2)]
+
+
+def test_detect_unrecognized_sections_silent_for_consumed_and_ignored():
+    # Trades is consumed; "Open Positions" is allow-listed. Neither is drift, so the
+    # sweep returns nothing.
+    model = parse_model(
+        [
+            header_row(SEC_TRADES, TRADES_COLUMNS),
+            header_row("Open Positions", ["A", "B"]),
+        ]
+    )
+    assert detect_unrecognized_sections(model) == []
+
+
+def test_detect_unrecognized_sections_surfaces_a_rename():
+    # A renamed consumed section ("Withholding Tax" -> "Withholding Tax Foobar")
+    # presents under a key no extractor consumes and no allow-list entry covers, so the
+    # new name is exactly what the sweep returns -- the drift a rename would hide.
+    model = parse_model(
+        section_table(
+            "Withholding Tax Foobar",
+            WITHHOLDING_COLUMNS,
+            ["USD", "2024-01-15", "AAPL Cash Dividend - US Tax", "-1.50", ""],
+        )
+    )
+    assert detect_unrecognized_sections(model) == [
+        UnrecognizedSection("Withholding Tax Foobar", 1, 1)
+    ]
+
+
+def test_detect_unrecognized_sections_includes_header_only_section():
+    # An unknown section with a header but no data rows is still drift; it is returned
+    # with row_count == 0 rather than dropped for being empty.
+    model = parse_model([header_row("Mystery", ["Col1", "Col2"])])
+    assert detect_unrecognized_sections(model) == [UnrecognizedSection("Mystery", 1, 0)]
+
+
+def test_detect_unrecognized_sections_sums_rows_across_subtables():
+    # Two subtables of one unknown section (as a multi-file merge would union) collapse
+    # to a single finding whose subtable_count is 2 and row_count sums both (1 + 2).
+    model = parse_model(
+        section_table("Mystery", ["C"], ["a"])
+        + section_table("Mystery", ["C"], ["b"], ["c"])
+    )
+    assert detect_unrecognized_sections(model) == [UnrecognizedSection("Mystery", 2, 3)]
+
+
+def test_detect_unrecognized_sections_returns_names_sorted():
+    # Two unknown sections come back ordered by name (order=True, name leads), so a
+    # report over them is deterministic regardless of statement order.
+    model = parse_model([header_row("Zebra", ["C"]), header_row("Alpha", ["C"])])
+    assert [s.name for s in detect_unrecognized_sections(model)] == ["Alpha", "Zebra"]
+
+
+# --- unrecognized-section coverage sweep: reporter -----------------------------------
+
+
+def test_report_unrecognized_sections_silent_when_empty(caplog):
+    logger = logging.getLogger("unrecognized_report_none")
+    with caplog.at_level(logging.WARNING):
+        report_unrecognized_sections([], logger)
+    assert caplog.records == []
+
+
+def test_report_unrecognized_sections_warns_without_exiting(caplog):
+    # The contract that separates this from every other reporter here: it WARNs and
+    # returns, never raises SystemExit. One WARNING names the section and its counts
+    # with the "renamed or added" guidance, followed by the summary WARNING.
+    logger = logging.getLogger("unrecognized_report_warn")
+    with caplog.at_level(logging.WARNING):
+        report_unrecognized_sections([UnrecognizedSection("Mystery", 1, 2)], logger)
+
+    assert all(r.levelno == logging.WARNING for r in caplog.records)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "Mystery" in m
+        and "1 subtable(s)" in m
+        and "2 row(s)" in m
+        and "renamed or added" in m
+        for m in messages
+    )
+    assert any("1 statement section(s) present" in m for m in messages)
+
+
+# --- unrecognized-section coverage sweep: sync guards --------------------------------
+
+
+def test_consumed_sections_matches_the_six_extractor_constants():
+    # CONSUMED_SECTIONS is built from the per-extractor constants; pin the membership
+    # so a seventh extractor (or a dropped one) cannot silently desync the set.
+    assert {
+        SEC_TRADES,
+        SEC_DIVIDENDS,
+        SEC_INTEREST,
+        SEC_WITHHOLDING,
+        SEC_TRANSFERS,
+        SEC_SYEP,
+    } == CONSUMED_SECTIONS
+
+
+def test_syep_section_constant_matches_fixture():
+    # The SYEP section name is long and exact; tie the production constant to the
+    # fixture column-set's section so a typo in either is caught.
+    assert SEC_SYEP == SYEP_SECTION
+
+
+def test_consumed_and_ignored_sections_are_disjoint():
+    # A name cannot be both consumed and allow-listed; an overlap would make the sweep's
+    # partition incoherent.
+    assert CONSUMED_SECTIONS.isdisjoint(IGNORED_SECTIONS)
+
+
+def test_run_warns_on_unrecognized_section_and_still_writes(
+    write_statement, out_path, caplog
+):
+    # End to end: a clean, matched EUR statement that also carries an unrecognized
+    # "Mystery" section. The sweep is warn-only, so the workbook is still written and a
+    # WARNING names the section -- it never gates the run.
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRADES_HEADER,
+            _trade("AAPL", "EUR"),
+            trade_data(
+                currency="EUR",
+                datetime_str="2024-06-10, 10:00:00",
+                quantity="-10",
+                t_price="110",
+                proceeds="1100",
+                comm_fee="-1",
+                code="C",
+                basis="-1001",
+                realized="99",
+            ),
+        ]
+        + section_table("Mystery", ["Col1", "Col2"], ["a", "b"])
+    )
+
+    with caplog.at_level(logging.WARNING):
+        run(_args(stmt, out_path))
+
+    assert out_path.exists()
+    assert any(
+        r.levelno == logging.WARNING and "Mystery" in r.getMessage()
+        for r in caplog.records
     )

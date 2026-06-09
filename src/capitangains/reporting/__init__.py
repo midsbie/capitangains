@@ -26,9 +26,11 @@ from .source import IbkrActivityStatementSource, ParsedStatement
 from .validation import (
     OrderingCollision,
     StatementInput,
+    UnrecognizedSection,
     detect_ordering_collisions,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
+    detect_unrecognized_sections,
     partition_statements_by_metadata,
 )
 
@@ -59,8 +61,10 @@ __all__ = [
     "ParsedStatement",
     "OrderingCollision",
     "StatementInput",
+    "UnrecognizedSection",
     "detect_symbol_currency_violations",
     "detect_ordering_collisions",
     "detect_statement_input_conflicts",
+    "detect_unrecognized_sections",
     "partition_statements_by_metadata",
 ]

@@ -16,6 +16,7 @@ from ._common import (
     _require_date,
     _require_decimal,
 )
+from .sections import SEC_SYEP
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def parse_syep_interest_details(
     """
     out: list[SyepInterestRow] = []
     defects: list[ExtractionDefect] = []
-    section = "Stock Yield Enhancement Program Securities Lent Interest Details"
+    section = SEC_SYEP
     for r in model.iter_rows(section):
         cur = r.get("Currency", "").strip()
         value_date_s = r.get("Value Date", "").strip()

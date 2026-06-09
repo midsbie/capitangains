@@ -25,6 +25,7 @@ from capitangains.reporting import (
     OrderingCollision,
     ReconciliationReport,
     SymbolReconciliation,
+    UnrecognizedSection,
 )
 from capitangains.reporting.fifo_domain import GapEvent, GapKey, GapResolution
 
@@ -280,6 +281,35 @@ def report_ordering_collisions(
         len(collisions),
     )
     raise SystemExit(2)
+
+
+def report_unrecognized_sections(
+    findings: Sequence[UnrecognizedSection], logger: logging.Logger
+) -> None:
+    """Warn (do NOT abort) on sections no extractor consumed.
+
+    Unlike the fail-closed reporters here, this never raises: a present-but-unconsumed
+    section may be a renamed data-bearing section or a benign new one, and we cannot
+    tell which, so we surface it rather than refuse the report (mirroring the parser's
+    unknown-kind warning). One WARNING per section plus a summary; empty == silent.
+    """
+    if not findings:
+        return
+    for f in findings:
+        logger.warning(
+            "Unrecognized statement section %r (%d subtable(s), %d row(s)) is "
+            "consumed by no extractor. IBKR may have renamed or added a section; "
+            "verify it carries no taxable data this report must include.",
+            f.name,
+            f.subtable_count,
+            f.row_count,
+        )
+    logger.warning(
+        "%d statement section(s) present but consumed by no extractor. "
+        "Not fatal, but if any carries taxable data, add an extractor or an "
+        "allow-list entry.",
+        len(findings),
+    )
 
 
 def report_invalid_statements(problems: Sequence[str], logger: logging.Logger) -> None:
