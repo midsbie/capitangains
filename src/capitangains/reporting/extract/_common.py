@@ -1,7 +1,7 @@
 """Shared extraction helpers and the row-level defect record.
 
-Package-internal: the outside world imports the public ``ExtractionDefect`` via the
-``extract`` package root, not from here.
+Package-internal: the outside world imports the public ExtractionDefect via the extract
+package root, not from here.
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ def _require_fields(label: str, **fields: str) -> None:
 def _require_decimal(label: str, field: str, value: str) -> Decimal:
     """Strictly parse a required numeric field, reporting failures as data errors.
 
-    Wraps ``to_dec_strict`` so a missing/placeholder/malformed value surfaces as a
-    structured ``DataQualityError`` (exit 2 at the CLI boundary) instead of an
-    uncaught ``ValueError`` traceback. The original cause text is preserved.
+    Wraps to_dec_strict so a missing/placeholder/malformed value surfaces as a
+    structured DataQualityError (exit 2 at the CLI boundary) instead of an uncaught
+    ValueError traceback. The original cause text is preserved.
     """
     try:
         return to_dec_strict(value)
@@ -57,10 +57,12 @@ def _require_decimal(label: str, field: str, value: str) -> Decimal:
 def _optional_decimal(label: str, field: str, value: str | None) -> Decimal | None:
     """Parse an optional numeric field, yielding None only for a genuine elision.
 
-    Basis and Realized P/L are optional IBKR columns where None is a meaningful signal:
-    gap synthesis reads it as "no basis to synthesize from" (and refuses to fabricate a
-    cost), and reconciliation excludes the trade. So an absent cell (None or empty) or
-    a known elision placeholder maps to None.
+    Basis and Realized P/L are the only optional columns of the IBKR Trades section:
+    IBKR leaves them blank on Forex conversion rows (an FX leg has no cost basis or
+    realized P/L). None is therefore a meaningful signal: gap synthesis reads it as "no
+    basis to synthesize from" (and refuses to fabricate a cost), and reconciliation
+    excludes the trade. So an absent cell (None or empty) or a known elision placeholder
+    maps to None.
 
     A genuinely malformed cell, by contrast, is corruption (a column-shifted 'C;P', a
     typo'd '19,8X7.919') and must not be relabelled as elision, or it would enter those
@@ -91,7 +93,7 @@ class ExtractionDefect:
     operator sees every defect in one pass (the CLI logs each, then exits 2 -- mirroring
     the FX and gap-acknowledgment reports). Identity is the semantic locator (section,
     symbol, date), read from the row dict at the catch site so it survives even when one
-    of those fields is itself the malformed value. ``reason`` is the DataQualityError
+    of those fields is itself the malformed value. reason is the DataQualityError
     text, which already names the first offending field and its bad value; the catch is
     per-row, so no separate field locator is needed.
     """
@@ -111,8 +113,8 @@ class CashFlowFields:
 
     Date and Amount stay as raw strings: each builder parses them via the _require_*
     helpers (so a failure names the field) and controls the parse order that decides
-    which defect is reported first. ``raw`` is the escape hatch for section-specific
-    columns (e.g. withholding's 'Code').
+    which defect is reported first. raw is the escape hatch for section-specific columns
+    (e.g. withholding's 'Code').
     """
 
     currency: str
@@ -137,13 +139,13 @@ def _extract_cashflow_section(
     These sections share one shape: iterate the rows, drop summary/incomplete lines
     (counting the incomplete ones for a single boundary log), and build one typed row
     per data line, collecting any per-row DataQualityError as an ExtractionDefect rather
-    than raising. ``build`` owns the section-specific construction and is the only thing
+    than raising. build owns the section-specific construction and is the only thing
     that may raise; everything around it is this scaffolding.
 
-    ``section`` keys both iter_rows and the defect locator. ``skip_totals`` silently
-    drops 'Total'/empty-currency trailers before the data-row gate (interest only).
-    ``incomplete_label``/``incomplete_detail`` word the one skipped-row summary, logged
-    on the caller-supplied ``logger`` so it surfaces under that section's logger name.
+    section keys both iter_rows and the defect locator. skip_totals silently drops
+    'Total'/empty-currency trailers before the data-row gate (interest only).
+    incomplete_label/incomplete_detail word the one skipped-row summary, logged on the
+    caller-supplied logger so it surfaces under that section's logger name.
     """
     out: list[_CashFlowRowT] = []
     defects: list[ExtractionDefect] = []

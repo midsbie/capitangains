@@ -73,7 +73,7 @@ class TradeRow:
     datetime_str: str
     date: dt.date
     quantity: Decimal  # positive buy, negative sell
-    t_price: Decimal  # strict-parsed as an integrity check; not consumed downstream
+    t_price: Decimal   # mandatory per IBKR spec; strict gate, not read by valuation
     proceeds: Decimal  # signed: negative buy cash, positive sell cash
     comm_fee: Decimal  # signed: negative fee/commission, rarely positive rebates
     code: str
@@ -100,7 +100,7 @@ def parse_trades_stocklike_row(
 
     # Commission is 'Comm/Fee' in stock trades; 'Comm in EUR' appears in some Forex
     # tables. Track which label was resolved so a strict-parse failure names it. It is
-    # parsed strictly below (like Basis/Realized, which map elision to None): commission
+    # parsed strictly below: commission
     # feeds basis on buys and net proceeds on sells, so a silently-zeroed placeholder
     # ('...', '--', '') would bias the filed gain. A commission-free trade reports '0',
     # which to_dec_strict parses fine.
@@ -109,6 +109,16 @@ def parse_trades_stocklike_row(
     )
     comm_s = r.get(comm_col, "").strip()
 
+    # Strict vs optional here mirrors the IBKR Trades spec (for more info, consult
+    # doc/IBKR-reporting_guide.txt) and the sample statements. Quantity, T. Price,
+    # Proceeds and Comm/Fee are mandatory transaction columns: every Trades row carries
+    # them for both Stocks and Forex, so a blank or unparseable value is corruption that
+    # must fail closed. Do NOT relax T. Price just because valuation ignores it: a blank
+    # T. Price never occurs in valid input, so the strict parse is a correct integrity
+    # gate, not a spurious abort. Basis and Realized P/L are the only genuinely optional
+    # columns: IBKR leaves them blank on Forex rows (an FX leg has no cost basis or
+    # realized), which is why only those map elision to None via _optional_decimal (a
+    # malformed cell there is still rejected as a defect; CG-07).
     trade = TradeRow(
         section="Trades",
         asset_category=asset_category,
