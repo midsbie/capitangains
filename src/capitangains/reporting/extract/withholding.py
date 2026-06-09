@@ -84,8 +84,6 @@ def parse_withholding_tax(
         section="Withholding Tax",
         logger=logger,
         build=_build_withholding_row,
-        incomplete_label="Withholding tax",
-        incomplete_detail="missing currency/date/description",
     )
     if logger.isEnabledFor(logging.DEBUG):
         counts = Counter(w.type for w in out)

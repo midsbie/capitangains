@@ -54,9 +54,6 @@ def parse_interest(
         section="Interest",
         logger=logger,
         build=_build_interest_row,
-        incomplete_label="Interest",
-        incomplete_detail="missing date/description",
-        skip_totals=True,
     )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d interest entries", len(out))

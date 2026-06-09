@@ -47,8 +47,6 @@ def parse_dividends(
         section="Dividends",
         logger=logger,
         build=_build_dividend_row,
-        incomplete_label="Dividends",
-        incomplete_detail="missing currency/date/description",
     )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d dividend entries", len(out))

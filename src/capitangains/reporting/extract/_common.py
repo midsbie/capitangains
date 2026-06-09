@@ -23,17 +23,6 @@ def _is_total_or_empty(value: str) -> bool:
     return not value or value.lower().startswith("total")
 
 
-def _is_data_row(currency: str, date: str, description: str) -> bool:
-    """Return True if a cash-flow row carries the core fields of a data line.
-
-    A row is a data line only when currency, date, and description are all present;
-    rows failing this are typically Total/summary or otherwise non-data lines. Genuine
-    structural anomalies are already surfaced by IbkrStatementCsvParser, so callers skip
-    these quietly (aggregating a count) rather than re-logging per row.
-    """
-    return bool(currency and date and description)
-
-
 def _require_fields(label: str, **fields: str) -> None:
     """Raise DataQualityError naming every empty required field."""
     missing = [k for k, v in fields.items() if not v]
@@ -93,8 +82,8 @@ class ExtractionDefect:
     operator sees every defect in one pass (the CLI logs each, then exits 2 -- mirroring
     the FX and gap-acknowledgment reports). Identity is the semantic locator (section,
     symbol, date), read from the row dict at the catch site so it survives even when one
-    of those fields is itself the malformed value. reason is the DataQualityError
-    text, which already names the first offending field and its bad value; the catch is
+    of those fields is itself the malformed value. reason is the DataQualityError text,
+    which already names the first offending field and its bad value; the catch is
     per-row, so no separate field locator is needed.
     """
 
@@ -130,47 +119,52 @@ def _extract_cashflow_section(
     section: str,
     logger: logging.Logger,
     build: Callable[[CashFlowFields], _CashFlowRowT],
-    incomplete_label: str,
-    incomplete_detail: str,
-    skip_totals: bool = False,
 ) -> tuple[list[_CashFlowRowT], list[ExtractionDefect]]:
     """Drive the shared flat cash-flow extraction for dividends/interest/withholding.
 
-    These sections share one shape: iterate the rows, drop summary/incomplete lines
-    (counting the incomplete ones for a single boundary log), and build one typed row
-    per data line, collecting any per-row DataQualityError as an ExtractionDefect rather
-    than raising. build owns the section-specific construction and is the only thing
-    that may raise; everything around it is this scaffolding.
+    Two dispositions. The only date-less rows IBKR emits are non-data trailers: a
+    total/subtotal labelled in the Currency cell ('Total', 'Total in EUR'), and the
+    fully blank separator row between subtables. Being expected, redundant aggregates,
+    they are dropped under one DEBUG line, never fully silent yet adding no
+    default-level noise. Every other row is a transaction and must carry all of Date,
+    Currency and Description (Date sets the tax year, FX rate and FIFO order; Currency
+    selects the rate; Description identifies the flow). A blank in any of them is
+    surfaced as a defect (exit 2 at the boundary), not tolerated; a date-less row that
+    is neither a labelled total nor fully blank (an amount that lost its Date and
+    Currency, say) is corruption or an unrecognized format that breaks our assumptions,
+    so it fails closed rather than being skipped. build owns section-specific parsing
+    (Date format, Amount); it and the shared field gate are the only things that may
+    raise, both caught here per-row as an ExtractionDefect.
 
-    section keys both iter_rows and the defect locator. skip_totals silently drops
-    'Total'/empty-currency trailers before the data-row gate (interest only).
-    incomplete_label/incomplete_detail word the one skipped-row summary, logged on the
-    caller-supplied logger so it surfaces under that section's logger name.
+    section keys iter_rows, the defect locator, and the DEBUG summary prefix.
     """
     out: list[_CashFlowRowT] = []
     defects: list[ExtractionDefect] = []
-    skipped_incomplete = 0
+    skipped_totals = 0
     for r in model.iter_rows(section):
         cur = r.get("Currency", "").strip()
-        if skip_totals and _is_total_or_empty(cur):
-            continue
         date_s = r.get("Date", "").strip()
         desc = r.get("Description", "").strip()
         amount_s = r.get("Amount", "").strip()
-        if not _is_data_row(cur, date_s, desc):
-            skipped_incomplete += 1
+
+        # A non-data trailer is the only date-less row IBKR emits: a Total/subtotal
+        # labelled in the Currency cell, or the fully blank separator between subtables.
+        # A date-less row carrying any other content (an amount that lost its Date and
+        # Currency) is not a trailer; it falls through to the field gate as a defect.
+        is_trailer = cur.lower().startswith("total") or not (cur or desc or amount_s)
+        if not date_s and is_trailer:
+            skipped_totals += 1
             continue
 
         try:
+            _require_fields(
+                f"{section} row", Date=date_s, Currency=cur, Description=desc
+            )
             out.append(build(CashFlowFields(cur, date_s, desc, amount_s, r)))
         except DataQualityError as e:
             defects.append(ExtractionDefect(section, None, date_s or None, str(e)))
 
-    if skipped_incomplete:
-        logger.info(
-            "%s: skipped %d incomplete row(s) (%s)",
-            incomplete_label,
-            skipped_incomplete,
-            incomplete_detail,
-        )
+    if skipped_totals:
+        logger.debug("%s: skipped %d summary/total row(s)", section, skipped_totals)
+
     return out, defects
