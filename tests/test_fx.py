@@ -47,6 +47,61 @@ def test_fx_from_csv_rejects_zero_rate(tmp_path):
         FxTable.from_csv(path)
 
 
+def test_fx_from_csv_rejects_conflicting_duplicate(tmp_path):
+    # A duplicate (currency, date) row with a different rate must not last-row-win
+    # silently; it aborts like the other table-level validations.
+    path = _write_csv(
+        tmp_path,
+        [
+            ["2024-03-15", "USD", "1.20"],
+            ["2024-03-15", "USD", "12.0"],
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate row for USD"):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_rejects_matching_duplicate(tmp_path):
+    # Even a duplicate that restates the identical rate is rejected: a process that
+    # double-emits a key is untrustworthy regardless of whether the values agree.
+    path = _write_csv(
+        tmp_path,
+        [
+            ["2024-03-15", "USD", "1.20"],
+            ["2024-03-15", "USD", "1.20"],
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate row for USD"):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_rejects_comma_in_rate(tmp_path):
+    # An operator-supplied rate with a comma is irrecoverably ambiguous (thousands
+    # separator vs decimal comma), so it is rejected rather than silently stripped into
+    # a ~10000x error.
+    path = _write_csv(tmp_path, [["2024-01-01", "USD", "1,0850"]])
+    with pytest.raises(ValueError, match="comma"):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_accepts_large_rate_without_separator(tmp_path):
+    # A rate may legitimately exceed 1000 (e.g. ~17000 IDR per EUR); a plain decimal
+    # with no grouping separator parses fine, so magnitude alone never implies a comma.
+    path = _write_csv(tmp_path, [["2024-01-01", "IDR", "17000"]])
+    table = FxTable.from_csv(path)
+    expected = Decimal("1") / Decimal("17000")
+    assert table.get_rate(dt.date(2024, 1, 1), "IDR") == expected
+
+
+def test_fx_from_csv_rejects_row_missing_rate(tmp_path):
+    # A short row leaves row["rate"] as None. It must surface as a clean ValueError (the
+    # same precondition failure as any other unparseable cell), not a raw TypeError from
+    # testing `"," in None`.
+    path = _write_csv(tmp_path, [["2024-01-01", "USD"]])
+    with pytest.raises(ValueError):
+        FxTable.from_csv(path)
+
+
 def test_fx_get_rate_weekend_fallback(tmp_path):
     path = _write_csv(
         tmp_path,

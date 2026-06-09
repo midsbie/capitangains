@@ -20,6 +20,34 @@ logger = logging.getLogger(__name__)
 _MAX_FX_LOOKBACK_DAYS = 7
 
 
+def _parse_fx_rate(raw: str | None, ccy: str, date: dt.date) -> Decimal:
+    """Parse one operator-supplied FX rate strictly, rejecting an ambiguous comma.
+
+    The --fx-table CSV declares no locale, so a comma in the rate is irrecoverably
+    ambiguous: "1,0850" could be 10850 (thousands separator) or 1.0850 (decimal comma),
+    readings that differ by ~10000x. Magnitude cannot disambiguate, since a rate may
+    legitimately exceed 1000 (e.g. ~17000 IDR per EUR). The rate multiplies every
+    foreign figure and a wrong-but-positive value trips no later guard, so guessing
+    would silently misprice the whole report. A rate is always expressible without a
+    comma, so reject one outright rather than pick an interpretation (re-interpreting it
+    as a decimal comma would just move the silent error onto US-formatted input). With
+    the comma excluded, to_dec_strict handles the rest (sign, decimal point, and the
+    missing/placeholder/malformed cases). This is why operator rates do not go through
+    the IBKR-grammar cleaner; see conv.NUM_CLEAN_RE.
+    """
+    # Guard the comma test on an actual string: a short CSV row leaves row["rate"] as
+    # None, which would make `"," in raw` raise a raw TypeError. The None, empty, and
+    # malformed cases are what to_dec_strict reports as a clean domain ValueError, so
+    # let them fall through to it.
+    if isinstance(raw, str) and "," in raw:
+        raise ValueError(
+            f"FX rate {raw!r} for {ccy} on {date} contains a comma; the FX table must "
+            f"use a plain decimal point (a comma is ambiguous between a thousands "
+            f"separator and a decimal comma)."
+        )
+    return to_dec_strict(raw)
+
+
 class FxTable:
     """Date-indexed FX table: (date, currency) -> EUR per 1 unit of currency.
 
@@ -63,20 +91,29 @@ class FxTable:
                 if not ccy:
                     raise ValueError(f"FX row missing currency for date {d}")
                 if ccy == "EUR":
-                    # Store identity explicitly for completeness
-                    inst.data[ccy][d] = Decimal("1")
-                    continue
+                    # Store identity explicitly for completeness.
+                    eur_per_unit = Decimal("1")
+                else:
+                    units_per_eur = _parse_fx_rate(row["rate"], ccy, d)
+                    if units_per_eur <= 0:
+                        raise ValueError(
+                            f"Encountered non-positive FX rate {units_per_eur} for "
+                            f"{ccy} on {d}"
+                        )
+                    try:
+                        eur_per_unit = Decimal("1") / units_per_eur
+                    except DivisionByZero as exc:  # defensive, though checked above
+                        raise ValueError(
+                            f"Invalid zero FX rate for {ccy} on {d}"
+                        ) from exc
 
-                units_per_eur = to_dec_strict(row["rate"])  # e.g., 1 EUR = 1.91 AUD
-                if units_per_eur <= 0:
-                    raise ValueError(
-                        f"Encountered non-positive FX rate {units_per_eur} for {ccy} "
-                        f"on {d}"
-                    )
-                try:
-                    eur_per_unit = Decimal("1") / units_per_eur
-                except DivisionByZero as exc:  # defensive, though checked above
-                    raise ValueError(f"Invalid zero FX rate for {ccy} on {d}") from exc
+                # Any duplicate (currency, date) row means the upstream process emitted
+                # the same key twice. A process that double-emits cannot be trusted to
+                # have faithfully represented the rest of the table and, as a
+                # consequence, we reject outright, like the loader's other per-row
+                # validations.
+                if d in inst.data[ccy]:
+                    raise ValueError(f"FX table has a duplicate row for {ccy} on {d}")
 
                 inst.data[ccy][d] = eur_per_unit
 

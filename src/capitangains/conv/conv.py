@@ -5,7 +5,16 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation
 
-NUM_CLEAN_RE = re.compile(r"[,\s]")  # remove thousands separators, spaces
+# Strip thousands separators and whitespace before Decimal parsing. This is safe ONLY
+# for IBKR statement numbers, where a comma is unambiguously a thousands separator (e.g.
+# Quantity "1,300", or "-29,252.67" where a comma and a decimal point coexist in one
+# cell), never a decimal comma. IBKR applies the grouping inconsistently (most values >=
+# 1000 are ungrouped, and a single row can mix the two, e.g. Quantity "1,300" beside
+# Proceeds -19838), but a comma's *meaning* is fixed, so stripping it is correct
+# regardless of that inconsistency. Operator-supplied numbers (the --fx-table CSV) carry
+# no such guarantee: there a comma could be a decimal comma, so they must NOT be parsed
+# through this cleaner. See fx._parse_fx_rate.
+NUM_CLEAN_RE = re.compile(r"[,\s]")
 
 # The strings IBKR uses for an absent or elided numeric cell. One home for "what counts
 # as elision", shared by to_dec_strict and _optional_decimal (extract._common).
@@ -60,10 +69,14 @@ def to_dec(
 
 
 def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
-    """Convert IBKR numeric strings to Decimal.
+    """Convert an IBKR numeric string to Decimal, raising on invalid/missing data.
 
-    Raises ValueError on invalid/missing data.
-    Use this for critical fields (Quantity, Proceeds) where 0 is not safe.
+    "Strict" is the missing-value policy, not the number grammar: unlike to_dec this
+    refuses to default a blank/placeholder/malformed cell to 0, raising ValueError
+    instead. Use it for critical fields (Quantity, Proceeds) where 0 is not safe. It
+    still assumes IBKR grammar (a comma is a thousands separator; see NUM_CLEAN_RE), so
+    it is not suitable for operator-supplied numbers of unknown locale; the --fx-table
+    rate is parsed strictly on both axes by fx._parse_fx_rate.
     """
     if s is None:
         raise ValueError("Value is None")
