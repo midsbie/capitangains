@@ -13,6 +13,12 @@ This software is experimental and *may produce inconsistent or invalid results*.
 - Optional EUR conversion per date using an external FX table.
 - Output sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, Stock Transfers, Lot-Level EUR Breakdown (Annex J helper).
 
+* Method
+
+IBKR reports realized P/L with its own lot matching and EUR conversion. Portuguese rules differ: FIFO lot order, acquisition cost converted to EUR at the buy date, proceeds at the sell date. The results rarely coincide, so CapitanGains recomputes gains from the trade ledger rather than copying IBKR's totals.
+
+Prior-year statements matter for the same reason: a sale's cost basis comes from its original buy lot, whose trade-currency cost is converted at its own buy-date rate. IBKR's per-trade realized P/L is still used, as a same-currency cross-check that needs no FX, not as a reported figure.
+
 * Installation
 
 1. Install [[https://docs.astral.sh/uv/][uv]]
@@ -71,6 +77,10 @@ You can also run the CLI module directly from the source checkout:
 ** Handling unmatched SELLs
 
 By default, the tool aborts on unmatched SELLs. With =--auto-fix-sell-gaps=, it synthesizes residual lots using IBKR per-trade /Basis/ values. Synthetic legs are marked in the Realized Trades sheet for auditability. If Basis is missing or inconsistent, zero-cost allocation is applied with logged warnings.
+
+** Handling transfers
+
+Transfers replay in the same chronological stream as trades: a transfer /in/ seeds a lot, a transfer /out/ consumes lots, so later sales match the correct basis. A transfer /in/ adopts the transfer market value as its cost basis, an approximation, since IBKR's CSV does not preserve the original acquisition cost. Gains on transferred-in shares may therefore differ from broker or tax figures.
 
 * FX Data
 
