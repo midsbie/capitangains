@@ -241,13 +241,16 @@ def run(options: RunOptions) -> None:
     # stronger check: prior-year files seed FIFO with the real opening lots a cross-year
     # sale's basis depends on, where single-file would have only a synthesized
     # (tautological) or absent basis.
-    try:
-        report = reconcile_realized_against_ibkr(
-            parsed.trades, rb.realized_lines, options.year
-        )
-        report_reconciliation(report, logger)
-    except Exception:
-        logger.exception("Reconciliation failed; continuing without it.")
+    #
+    # Reconciliation is *advisory* only in what it finds: a discrepancy warns, it never
+    # changes the exit code. But it must still *run*. The check failing to execute is
+    # not an advisory finding but the loss of our only independent cross-check.
+    # So an unexpected exception here propagates and halts the run like every other
+    # stage, rather than being swallowed into one log line under a workbook that ships.
+    report = reconcile_realized_against_ibkr(
+        parsed.trades, rb.realized_lines, options.year
+    )
+    report_reconciliation(report, logger)
 
     out_path = (
         Path(options.output) if options.output else Path(f"report_{options.year}.xlsx")

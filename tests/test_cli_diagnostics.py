@@ -699,6 +699,56 @@ def test_run_exits_2_on_unorderable_same_day_trades(tmp_path, out_path, caplog):
     assert not out_path.exists()
 
 
+def test_run_does_not_swallow_a_reconciliation_crash(
+    tmp_path, out_path, monkeypatch, caplog
+):
+    # Reconciliation is advisory in what it *finds* (a discrepancy only warns), but it
+    # must still *run*: it is the only independent cross-check on our own figures. An
+    # unexpected exception inside it is a programming error, not an advisory finding, so
+    # it propagates and halts the run (no workbook) rather than being swallowed into one
+    # log line under a report that ships unverified. A valid EUR buy+sell reaches the
+    # reconciliation stage (no FX table needed); the detector is forced to raise there.
+    stmt = tmp_path / "stmt.csv"
+    rows = _statement_meta_rows("U1", Y2024) + [
+        _TRADES_HEADER,
+        trade_data(
+            symbol="AAA",
+            currency="EUR",
+            datetime_str="2024-06-14, 09:30:00",
+            quantity="10",
+            proceeds="-1000",
+            comm_fee="0",
+            code="O",
+        ),
+        trade_data(
+            symbol="AAA",
+            currency="EUR",
+            datetime_str="2024-06-15, 09:30:00",
+            quantity="-10",
+            t_price="110",
+            proceeds="1100",
+            comm_fee="0",
+            code="C",
+            basis="-1000",
+            realized="100",
+        ),
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("reconciliation bug")
+
+    monkeypatch.setattr(
+        "capitangains.pipeline.reconcile_realized_against_ibkr", _boom
+    )
+
+    with pytest.raises(RuntimeError, match="reconciliation bug"):
+        run(_args(stmt, out_path))
+
+    assert not out_path.exists()
+
+
 def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, out_path, caplog):
     # A missing or unparseable --fx-table file is a setup failure, not a statement-data
     # defect, so it halts with exit 1 -- a class apart from the curated gates' exit 2 --
