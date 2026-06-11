@@ -36,9 +36,11 @@ from capitangains.diagnostics import (
     report_invalid_statements,
     report_missing_fx,
     report_ordering_collisions,
+    report_orphaned_foreign_tax,
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_unattributed_income,
     report_unrecognized_sections,
 )
 from capitangains.errors import DataQualityError
@@ -50,8 +52,10 @@ from capitangains.reporting import (
     IbkrActivityStatementSource,
     ReportBuilder,
     detect_ordering_collisions,
+    detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
+    detect_unattributed_income,
     detect_unrecognized_sections,
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
@@ -76,6 +80,7 @@ class RunOptions:
     output: str | None
     auto_fix_sell_gaps: str | None
     dry_run: bool
+    broker_country: str = "IE"
 
 
 def run(options: RunOptions) -> None:
@@ -185,7 +190,7 @@ def run(options: RunOptions) -> None:
     # (needed upstream to seed FIFO) is handed over whole and the builder does the
     # scoping. See ReportBuilder.set_transfers for why scoping transfers is display-only
     # and cannot move a tax figure.
-    rb = ReportBuilder(year=options.year)
+    rb = ReportBuilder(year=options.year, broker_country=options.broker_country)
     rb.add_realized_lines(realized)
     rb.set_dividends(parsed.dividends)
     rb.set_withholding(parsed.withholding)
@@ -215,6 +220,16 @@ def run(options: RunOptions) -> None:
 
     rb.convert_eur(fx)
     report_missing_fx(rb.fx_missing, logger)
+
+    # Soft coverage checks on the Quadro 8A income lines (warn, do not abort): income
+    # whose source country could not be identified, and foreign tax with no matching
+    # gross income. The figures are correct; only the attribution is incomplete, so the
+    # operator fills the gaps by hand rather than losing the whole report. Bound once so
+    # both detectors fold the rows a single time; the sink later recomputes the same
+    # deterministic fold when it writes the sheet.
+    quadro_8a = rb.quadro_8a
+    report_unattributed_income(detect_unattributed_income(quadro_8a), logger)
+    report_orphaned_foreign_tax(detect_orphaned_foreign_tax(quadro_8a), logger)
 
     # Soft reconciliation: cross-check our realized P/L against IBKR's own per-trade
     # `Realized P/L`, per symbol, in each instrument's trade currency. No FX stands

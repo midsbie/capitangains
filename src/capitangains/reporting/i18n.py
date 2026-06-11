@@ -25,6 +25,7 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
             "EN": "Lot-Level EUR Breakdown",
             "PT": "Operações por Lote (Anexo J)",
         },
+        "quadro_8a": {"EN": "Annex J Box 8A Income", "PT": "Anexo J Quadro 8A"},
         "syep_interest": {"EN": "SYEP Interest", "PT": "Juros SYEP"},
     },
     "summary": {
@@ -94,6 +95,21 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Mais/menos-valia (EUR)"},
         "transferred": {"EN": "Transferred", "PT": "Transferido"},
         "synthetic": {"EN": "Synthetic", "PT": "Sintético"},
+    },
+    "quadro_8a": {
+        "income_code": {"EN": "Income Code", "PT": "Código Rendimento"},
+        "kind": {"EN": "Type", "PT": "Tipo"},
+        "country": {"EN": "Source Country", "PT": "País da Fonte"},
+        "gross_eur": {"EN": "Gross Income (EUR)", "PT": "Rendimento Bruto (EUR)"},
+        "tax_eur": {
+            "EN": "Foreign Tax (EUR)",
+            "PT": "Imposto Pago no Estrangeiro (EUR)",
+        },
+        # Localized values for the Type column (row values, not a header), keyed by
+        # IncomeKind.label_key.
+        "kind_dividend": {"EN": "Dividend", "PT": "Dividendo"},
+        "kind_pil": {"EN": "Payment in Lieu", "PT": "Pagamento em Substituição"},
+        "kind_interest": {"EN": "Interest", "PT": "Juros"},
     },
     "per_symbol": {
         "ticker": {"EN": "Ticker", "PT": "Símbolo"},

@@ -14,6 +14,7 @@ from capitangains.reporting.extract import (
 )
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.i18n import LABELS, labels_for
+from capitangains.reporting.quadro_8a import IncomeKind, Quadro8ALine
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink, _gap_status
 from tests.support import make_fx, realized_line, trade_row
@@ -196,6 +197,118 @@ def test_report_builder_income_conversion():
     assert rb.dividends[1].amount_eur == Decimal("5.00")
     assert rb.withholding[0].amount_eur == Decimal("-1.80")
     assert rb.syep_interest[0].interest_paid_eur == Decimal("0.90")
+
+
+def _income_report(broker_country: str = "IE") -> ReportBuilder:
+    """A converted report carrying a US cash dividend (+US tax), a US payment in lieu,
+    and a EUR interest line, used by the Quadro 8A builder and sink tests.
+    """
+    rb = ReportBuilder(year=2024, broker_country=broker_country)
+    rb.set_dividends(
+        [
+            DividendRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="PACW(US6952631033) Cash Dividend",
+                amount=Decimal("10"),
+            ),
+            DividendRow(
+                currency="USD",
+                date=dt.date(2024, 1, 2),
+                description="PACW(US6952631033) Payment in Lieu of Dividend",
+                amount=Decimal("4"),
+            ),
+        ]
+    )
+    rb.set_interest(
+        [
+            InterestRow(
+                currency="EUR",
+                date=dt.date(2024, 1, 3),
+                description="EUR Credit Interest for Jan-2024",
+                amount=Decimal("2"),
+            ),
+        ]
+    )
+    rb.set_withholding(
+        [
+            WithholdingRow(
+                currency="USD",
+                date=dt.date(2024, 1, 1),
+                description="PACW(US6952631033) Cash Dividend",
+                amount=Decimal("-1.50"),
+                code="",
+                type="Dividend",
+                country="US",
+            ),
+        ]
+    )
+    rb.convert_eur(
+        make_fx(
+            {
+                ("USD", "2024-01-01"): Decimal("0.9"),
+                ("USD", "2024-01-02"): Decimal("0.9"),
+            }
+        )
+    )
+    return rb
+
+
+def test_report_builder_groups_quadro_8a_income():
+    rb = _income_report(broker_country="IE")
+    assert rb.quadro_8a == [
+        Quadro8ALine(IncomeKind.DIVIDEND, "US", Decimal("9.00"), Decimal("1.35")),
+        Quadro8ALine(IncomeKind.PIL, "US", Decimal("3.60"), Decimal("0.00")),
+        Quadro8ALine(IncomeKind.INTEREST, "IE", Decimal("2.00"), Decimal("0.00")),
+    ]
+
+    # The interest source country is the injected jurisdiction, not a constant.
+    rb_lu = _income_report(broker_country="LU")
+    interest = [line for line in rb_lu.quadro_8a if line.income_code == "E21"]
+    assert [line.country for line in interest] == ["LU"]
+
+
+def test_quadro_8a_sheet_round_trip(tmp_path):
+    rb = _income_report()
+    out_path = tmp_path / "quadro_8a.xlsx"
+    ExcelReportSink(out_path=out_path, locale="EN").write(rb)
+
+    ws = load_workbook(out_path)["Annex J Box 8A Income"]
+    grid = [
+        [(cell.value, cell.number_format) for cell in row] for row in ws.iter_rows()
+    ]
+
+    eur = "€#,##0.00"
+    assert grid == [
+        [
+            ("Income Code", "General"),
+            ("Type", "General"),
+            ("Source Country", "General"),
+            ("Gross Income (EUR)", "General"),
+            ("Foreign Tax (EUR)", "General"),
+        ],
+        [
+            ("E11", "General"),
+            ("Dividend", "General"),
+            ("US", "General"),
+            (9.0, eur),
+            (1.35, eur),
+        ],
+        [
+            ("E11", "General"),
+            ("Payment in Lieu", "General"),
+            ("US", "General"),
+            (3.6, eur),
+            (0, eur),
+        ],
+        [
+            ("E21", "General"),
+            ("Interest", "General"),
+            ("IE", "General"),
+            (2.0, eur),
+            (0, eur),
+        ],
+    ]
 
 
 def test_excel_report_sink_handles_empty_report(tmp_path):

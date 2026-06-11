@@ -23,6 +23,7 @@ from capitangains.errors import DataQualityError
 from capitangains.reporting import (
     ExtractionDefect,
     OrderingCollision,
+    Quadro8ALine,
     ReconciliationReport,
     SymbolReconciliation,
     UnrecognizedSection,
@@ -309,6 +310,67 @@ def report_unrecognized_sections(
         "Not fatal, but if any carries taxable data, add an extractor or an "
         "allow-list entry.",
         len(findings),
+    )
+
+
+def report_unattributed_income(
+    lines: Sequence[Quadro8ALine], logger: logging.Logger
+) -> None:
+    """Warn (do NOT abort) on Quadro 8A income with no identifiable source country.
+
+    The detector (reporting.validation.detect_unattributed_income) owns the rationale.
+    Unlike the fail-closed reporters here this never raises: the EUR gross and foreign
+    tax are correct, only the source-country label is missing, so the report is still
+    usable and the operator supplies the source country by hand on the form. One WARNING
+    per line plus a summary; empty == silent.
+    """
+    if not lines:
+        return
+    for line in lines:
+        logger.warning(
+            "Quadro 8A income with no identifiable source country: kind=%s code=%s "
+            "gross=%s EUR foreign_tax=%s EUR. The description carried no ISIN or "
+            "'- XX Tax' suffix; supply the source country by hand on Anexo J.",
+            line.kind.name,
+            line.income_code,
+            line.gross_eur,
+            line.tax_eur,
+        )
+    logger.warning(
+        "%d Quadro 8A line(s) carry income with no identifiable source country; not "
+        "fatal, but supply each source country by hand before filing.",
+        len(lines),
+    )
+
+
+def report_orphaned_foreign_tax(
+    lines: Sequence[Quadro8ALine], logger: logging.Logger
+) -> None:
+    """Warn (do NOT abort) on Quadro 8A foreign tax with no matching gross income.
+
+    The detector (reporting.validation.detect_orphaned_foreign_tax) owns the rationale.
+    Like report_unattributed_income this never raises: the tax figure is correct, it
+    just could not be attached to a gross income line (usually a dividend whose
+    description carried no ISIN, so its gross landed under a separate empty-country
+    line). The operator reconciles the two halves by hand on Anexo J. One WARNING per
+    line plus a summary; empty == silent.
+    """
+    if not lines:
+        return
+    for line in lines:
+        logger.warning(
+            "Quadro 8A foreign tax with no matching gross income: kind=%s code=%s "
+            "country=%s foreign_tax=%s EUR. The gross income could not be attributed "
+            "to this (kind, country); reconcile it by hand on Anexo J.",
+            line.kind.name,
+            line.income_code,
+            line.country,
+            line.tax_eur,
+        )
+    logger.warning(
+        "%d Quadro 8A line(s) carry foreign tax with no matching gross income; not "
+        "fatal, but reconcile each against its income by hand before filing.",
+        len(lines),
     )
 
 

@@ -15,6 +15,7 @@ from .extract import (
 )
 from .fifo import FifoMatcher, Lot, RealizedLine
 from .fx import FxTable
+from .quadro_8a import Quadro8ALine
 from .reconcile import (
     ReconciliationReport,
     SymbolReconciliation,
@@ -28,8 +29,10 @@ from .validation import (
     StatementInput,
     UnrecognizedSection,
     detect_ordering_collisions,
+    detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
+    detect_unattributed_income,
     detect_unrecognized_sections,
     partition_statements_by_metadata,
 )
@@ -57,6 +60,7 @@ __all__ = [
     "SymbolReconciliation",
     "ReportBuilder",
     "ExcelReportSink",
+    "Quadro8ALine",
     "IbkrActivityStatementSource",
     "ParsedStatement",
     "OrderingCollision",
@@ -65,6 +69,8 @@ __all__ = [
     "detect_symbol_currency_violations",
     "detect_ordering_collisions",
     "detect_statement_input_conflicts",
+    "detect_unattributed_income",
+    "detect_orphaned_foreign_tax",
     "detect_unrecognized_sections",
     "partition_statements_by_metadata",
 ]

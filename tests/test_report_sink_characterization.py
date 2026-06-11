@@ -209,6 +209,7 @@ _SHEET_ORDER: dict[str, list[str]] = {
         "Trading Totals",
         "Realized Trades",
         "Lot-Level EUR Breakdown",
+        "Annex J Box 8A Income",
         "Per Symbol Summary",
         "Dividends",
         "Account Interest",
@@ -220,6 +221,7 @@ _SHEET_ORDER: dict[str, list[str]] = {
         "Totais de Opera\xe7\xf5es",
         "Opera\xe7\xf5es Realizadas",
         "Opera\xe7\xf5es por Lote (Anexo J)",
+        "Anexo J Quadro 8A",
         "Resumo por S\xedmbolo",
         "Dividendos",
         "Juros da Conta",
@@ -372,6 +374,36 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 (None, "\u20ac#,##0.00"),
                 (None, "General"),
                 (None, "General"),
+            ],
+        ],
+        "Annex J Box 8A Income": [
+            [
+                ("Income Code", "General"),
+                ("Type", "General"),
+                ("Source Country", "General"),
+                ("Gross Income (EUR)", "General"),
+                ("Foreign Tax (EUR)", "General"),
+            ],
+            [
+                ("E11", "General"),
+                ("Dividend", "General"),
+                (None, "General"),
+                (7.2, "\u20ac#,##0.00"),
+                (1.5, "\u20ac#,##0.00"),
+            ],
+            [
+                ("E11", "General"),
+                ("Dividend", "General"),
+                ("US", "General"),
+                (0, "\u20ac#,##0.00"),
+                (1.8, "\u20ac#,##0.00"),
+            ],
+            [
+                ("E21", "General"),
+                ("Interest", "General"),
+                ("IE", "General"),
+                (2.7, "\u20ac#,##0.00"),
+                (1, "\u20ac#,##0.00"),
             ],
         ],
         "Per Symbol Summary": [
@@ -731,6 +763,36 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 (None, "General"),
             ],
         ],
+        "Anexo J Quadro 8A": [
+            [
+                ("C\xf3digo Rendimento", "General"),
+                ("Tipo", "General"),
+                ("Pa\xeds da Fonte", "General"),
+                ("Rendimento Bruto (EUR)", "General"),
+                ("Imposto Pago no Estrangeiro (EUR)", "General"),
+            ],
+            [
+                ("E11", "General"),
+                ("Dividendo", "General"),
+                (None, "General"),
+                (7.2, '#,##0.00 "\u20ac"'),
+                (1.5, '#,##0.00 "\u20ac"'),
+            ],
+            [
+                ("E11", "General"),
+                ("Dividendo", "General"),
+                ("US", "General"),
+                (0, '#,##0.00 "\u20ac"'),
+                (1.8, '#,##0.00 "\u20ac"'),
+            ],
+            [
+                ("E21", "General"),
+                ("Juros", "General"),
+                ("IE", "General"),
+                (2.7, '#,##0.00 "\u20ac"'),
+                (1, '#,##0.00 "\u20ac"'),
+            ],
+        ],
         "Resumo por S\xedmbolo": [
             [
                 ("S\xedmbolo", "General"),
@@ -973,8 +1035,9 @@ def test_table_sheets_characterization(tmp_path, locale):
 
 def test_optional_sheets_omitted_when_source_empty(tmp_path):
     """skip_if_empty: with every optional collection empty, only the four always-on
-    sheets are written (summary, realized, anexo_j, per_symbol), in order. The five
-    optional sheets (dividends, interest, syep, withholding, transfers) are absent.
+    sheets are written (summary, realized, anexo_j, per_symbol), in order. The six
+    optional sheets (quadro_8a, dividends, interest, syep, withholding, transfers) are
+    absent.
     """
     rb = ReportBuilder(year=2024)
     rb.add_realized(

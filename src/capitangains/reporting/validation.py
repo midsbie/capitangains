@@ -6,11 +6,12 @@ into user-facing ERROR lines and an exit code is the boundary's job (see
 capitangains.diagnostics); keeping detection pure makes every invariant unit-testable
 without capturing logs or trapping SystemExit.
 
-Two scopes live here, both pure detection: invariants over extracted trade/transfer
-rows (symbol-currency uniqueness, same-day event ordering) and the identity and
-coherence of a statement input set. Each file's account/period identity is validated
-unconditionally as a fail-closed precondition before its contents are trusted, then the
-cross-file coherence of the set (single account, non-overlapping periods) is enforced.
+Several scopes live here, all pure detection: invariants over extracted trade/transfer
+rows (symbol-currency uniqueness, same-day event ordering), the identity and coherence
+of a statement input set, and the built Anexo J Quadro 8A income lines (source-country
+attribution). Each file's account/period identity is validated unconditionally as a
+fail-closed precondition before its contents are trusted, then the cross-file coherence
+of the set (single account, non-overlapping periods) is enforced.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from capitangains.model import IbkrModel
 
 from .extract import StatementMetadata, TradeRow, TransferRow, parse_statement_metadata
 from .extract.sections import CONSUMED_SECTIONS, IGNORED_SECTIONS
+from .quadro_8a import Quadro8ALine
 
 
 def detect_symbol_currency_violations(
@@ -38,8 +40,8 @@ def detect_symbol_currency_violations(
     different currencies (e.g. "RY" on NYSE/USD and TSX/CAD), the CSV data must
     disambiguate them with distinct symbols.  Allowing multiple currencies per symbol
     would make the per-symbol summary incoherent -- trade-currency columns can only
-    represent one denomination, while EUR columns aggregate across all, producing
-    rows that cannot be reconciled.
+    represent one denomination, while EUR columns aggregate across all, producing rows
+    that cannot be reconciled.
 
     Returns each offending symbol mapped to the (>1) currencies seen for it; an empty
     mapping means the invariant holds.
@@ -83,16 +85,16 @@ def detect_ordering_collisions(
     currency): the sequence in which buys, sells, transfer-ins (which seed a lot) and
     transfer-outs (which consume lots) are ingested decides which lots a disposal
     matches, and thus its cost basis and realized P/L. That sequence is recoverable only
-    from intraday timestamps. IBKR's Transfers section carries only a Date (no time,
-    and the Code encodes none), and some Trades rows carry a date-only Date/Time, so an
+    from intraday timestamps. IBKR's Transfers section carries only a Date (no time, and
+    the Code encodes none), and some Trades rows carry a date-only Date/Time, so an
     untimed event sharing a day with other same-symbol activity has no order in the
     data.
 
     Scope. Only same (symbol, currency, date) matters, since consumption is keyed that
     way; an untimed event sharing a day with unrelated symbols is independent and is not
-    reported. A group collides when it holds at least two order-sensitive events and
-    at least one is untimed (a transfer or a date-only trade): two fully timestamped
-    trades remain orderable by their times and are not a collision.
+    reported. A group collides when it holds at least two order-sensitive events and at
+    least one is untimed (a transfer or a date-only trade): two fully timestamped trades
+    remain orderable by their times and are not a collision.
 
     Returns every collision (sorted); an empty list means every event is orderable. The
     decision to halt rather than fabricate an order is the boundary's (see
@@ -166,6 +168,38 @@ def detect_unrecognized_sections(model: IbkrModel) -> list[UnrecognizedSection]:
         )
         for name in unknown
     )
+
+
+def detect_unattributed_income(lines: Sequence[Quadro8ALine]) -> list[Quadro8ALine]:
+    """Quadro 8A income lines whose source country could not be identified.
+
+    A dividend or payment-in-lieu whose description has no parseable ISIN, or whose
+    withholding carries no " - XX Tax" suffix, folds into an empty-country group: the
+    EUR gross and foreign tax are correct, but the line cannot name the source country
+    the Anexo J form requires. Interest is always attributed to the injected broker
+    country, so only dividend-side lines can surface here. Returns the offending lines
+    in the builder's order; empty means every line names a source country. The boundary
+    only WARNs (the figures stand, only the label is missing), see
+    diagnostics.report_unattributed_income.
+    """
+    return [line for line in lines if not line.country]
+
+
+def detect_orphaned_foreign_tax(lines: Sequence[Quadro8ALine]) -> list[Quadro8ALine]:
+    """Quadro 8A lines carrying foreign tax with no matching gross income.
+
+    The gross and tax sides are grouped independently and merged by (kind, country), so
+    when a dividend's description has no parseable ISIN while its withholding carries a
+    " - XX Tax" suffix (or the reverse), the two split into a gross-only line under the
+    empty country and a tax-only line under "XX". detect_unattributed_income surfaces
+    the former; this surfaces the latter, so neither half of a split passes silently. A
+    tax-only line also legitimately arises from a cross-year timing mismatch (tax
+    withheld in a year whose income is reported elsewhere); either way the figure is
+    correct but the operator must reconcile it against its income by hand. Returns the
+    offending lines in the builder's order; empty means every taxed line has matching
+    gross. The boundary only WARNs (see diagnostics.report_orphaned_foreign_tax).
+    """
+    return [line for line in lines if line.gross_eur == 0 and line.tax_eur != 0]
 
 
 @dataclass(frozen=True)

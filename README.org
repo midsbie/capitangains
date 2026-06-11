@@ -1,7 +1,7 @@
 #+title: CapitanGains - Capital Gains Tool for IBKR Statements
 #+options: toc:t num:nil
 
-CapitanGains generates capital gains reports from broker annual statements. It is designed for Portuguese tax residents and currently supports Interactive Brokers (IBKR) Activity Statement CSV exports. The tool creates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account and SYEP interest, withholding tax, stock transfers, and an Annex-J helper sheet (lot-level EUR breakdown) in Portuguese or English.
+CapitanGains generates capital gains reports from broker annual statements. It is designed for Portuguese tax residents and currently supports Interactive Brokers (IBKR) Activity Statement CSV exports. The tool creates an XLSX workbook with realized trades (FIFO), per-symbol summaries, dividends, account and SYEP interest, withholding tax, stock transfers, an Annex-J helper sheet (lot-level EUR breakdown), and an Annex-J Box 8A income summary (dividends and interest grouped by source country) in Portuguese or English.
 
 * Disclaimer
 
@@ -11,7 +11,7 @@ This software is experimental and *may produce inconsistent or invalid results*.
 
 - FIFO realized gains with buy-lot audit trail.
 - Optional EUR conversion per date using an external FX table.
-- Output sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, Stock Transfers, Lot-Level EUR Breakdown (Annex J helper).
+- Output sheets: Trading Totals, Realized Trades, Per Symbol Summary, Dividends, Account Interest, SYEP Interest, Withholding Tax, Stock Transfers, Lot-Level EUR Breakdown (Annex J helper), Annex J Box 8A Income (dividends and interest grouped by source country).
 
 * Method
 
@@ -70,6 +70,7 @@ You can also run the CLI module directly from the source checkout:
 - =--year YYYY=: calendar year to report.
 - =--fx-table PATH=: FX rates CSV (see FX Data section).
 - =--locale {EN,PT}=: locale for sheet names and headers (default EN).
+- =--broker-country CC=: ISO 2-letter jurisdiction of the IBKR contracting entity; the source country for broker-paid interest (credit + SYEP) on the Annex J Box 8A sheet (default IE, IBKR Ireland).
 - =--output PATH=: output XLSX file path (default =report_<year>.xlsx=).
 - =--auto-fix-sell-gaps=: synthesize residual lots when SELLS exceed available buys.
 - =-v= / =-vv=: increase logging verbosity (INFO / DEBUG).

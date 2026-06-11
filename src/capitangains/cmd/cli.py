@@ -48,6 +48,22 @@ from capitangains.logging import configure_logging
 from capitangains.pipeline import RunOptions, run
 
 
+def _broker_country(value: str) -> str:
+    """Normalize and validate the --broker-country argument to an upper-case 2-letter
+    code, so a typo (e.g. a full country name) fails fast at the boundary rather than
+    surfacing as a malformed source country on the Quadro 8A interest line.
+    """
+    cc = value.strip().upper()
+    # isascii() guards isalpha()'s Unicode-awareness: a 2-letter accented input would
+    # otherwise pass and upper-case into a non-ASCII "country code". This mirrors the
+    # [A-Z]{2} the ISIN prefix accepts.
+    if len(cc) != 2 or not (cc.isascii() and cc.isalpha()):
+        raise argparse.ArgumentTypeError(
+            f"expected a 2-letter ISO country code, got {value!r}"
+        )
+    return cc
+
+
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Portugal Capital Gains Report from IBKR Activity Statement CSV"
@@ -91,6 +107,16 @@ def build_argparser() -> argparse.ArgumentParser:
         default="EN",
         choices=["EN", "PT"],
         help="Locale for headers and sheet names",
+    )
+    p.add_argument(
+        "--broker-country",
+        type=_broker_country,
+        default="IE",
+        metavar="CC",
+        help=(
+            "ISO 2-letter jurisdiction of the IBKR contracting entity; source country "
+            "for broker-paid interest (credit + SYEP). Default IE (IBKR Ireland)."
+        ),
     )
     p.add_argument(
         "--output",
@@ -225,6 +251,7 @@ def main() -> None:
             output=args.output,
             auto_fix_sell_gaps=args.auto_fix_sell_gaps,
             dry_run=args.dry_run,
+            broker_country=args.broker_country,
         )
     )
 

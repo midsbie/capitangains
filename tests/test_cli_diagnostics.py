@@ -30,9 +30,11 @@ from capitangains.diagnostics import (
     report_gap_acknowledgments,
     report_invalid_statements,
     report_ordering_collisions,
+    report_orphaned_foreign_tax,
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_unattributed_income,
     report_unrecognized_sections,
 )
 from capitangains.errors import DataQualityError
@@ -40,12 +42,15 @@ from capitangains.model import IbkrStatementCsvParser
 from capitangains.pipeline import RunOptions, run
 from capitangains.reporting import (
     OrderingCollision,
+    Quadro8ALine,
     ReconciliationReport,
     StatementInput,
     SymbolReconciliation,
     UnrecognizedSection,
     detect_ordering_collisions,
+    detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
+    detect_unattributed_income,
     detect_unrecognized_sections,
     partition_statements_by_metadata,
 )
@@ -61,6 +66,7 @@ from capitangains.reporting.extract.sections import (
     SEC_WITHHOLDING,
 )
 from capitangains.reporting.fifo_domain import GapResolution
+from capitangains.reporting.quadro_8a import IncomeKind
 from tests.support import (
     SYEP_SECTION,
     TRADES_COLUMNS,
@@ -1402,6 +1408,100 @@ def test_report_unrecognized_sections_warns_without_exiting(caplog):
     assert any("1 statement section(s) present" in m for m in messages)
 
 
+# --- Quadro 8A unattributed income: detector + reporter ------------------------------
+
+
+def _q8a(kind, country, gross="10.00", tax="1.50"):
+    return Quadro8ALine(kind, country, Decimal(gross), Decimal(tax))
+
+
+def test_detect_unattributed_income_flags_empty_country_lines():
+    lines = [
+        _q8a(IncomeKind.DIVIDEND, "US"),
+        _q8a(IncomeKind.DIVIDEND, ""),
+        _q8a(IncomeKind.PIL, ""),
+        _q8a(IncomeKind.INTEREST, "IE"),
+    ]
+    assert detect_unattributed_income(lines) == [
+        _q8a(IncomeKind.DIVIDEND, ""),
+        _q8a(IncomeKind.PIL, ""),
+    ]
+
+
+def test_detect_unattributed_income_silent_when_every_line_has_a_country():
+    lines = [_q8a(IncomeKind.DIVIDEND, "US"), _q8a(IncomeKind.INTEREST, "IE")]
+    assert detect_unattributed_income(lines) == []
+
+
+def test_report_unattributed_income_silent_when_empty(caplog):
+    logger = logging.getLogger("unattributed_report_none")
+    with caplog.at_level(logging.WARNING):
+        report_unattributed_income([], logger)
+    assert caplog.records == []
+
+
+def test_report_unattributed_income_warns_without_exiting(caplog):
+    # The contract that separates this from the fail-closed reporters: it WARNs and
+    # returns, never SystemExit. The gross/tax figures are correct; only the
+    # source-country label is missing. One WARNING names the line, then the summary.
+    logger = logging.getLogger("unattributed_report_warn")
+    line = Quadro8ALine(IncomeKind.DIVIDEND, "", Decimal("9.00"), Decimal("1.35"))
+    with caplog.at_level(logging.WARNING):
+        report_unattributed_income([line], logger)
+
+    assert all(r.levelno == logging.WARNING for r in caplog.records)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "DIVIDEND" in m and "E11" in m and "9.00" in m and "1.35" in m for m in messages
+    )
+    assert any("1 Quadro 8A line(s)" in m for m in messages)
+
+
+# --- Quadro 8A orphaned foreign tax: detector + reporter -----------------------------
+
+
+def test_detect_orphaned_foreign_tax_flags_tax_with_zero_gross():
+    lines = [
+        _q8a(IncomeKind.DIVIDEND, "US", gross="10.00", tax="1.50"),  # matched
+        _q8a(IncomeKind.DIVIDEND, "US", gross="0.00", tax="1.80"),  # orphaned tax
+        _q8a(IncomeKind.PIL, "US", gross="3.00", tax="0.00"),  # gross-only, fine
+    ]
+    assert detect_orphaned_foreign_tax(lines) == [
+        _q8a(IncomeKind.DIVIDEND, "US", gross="0.00", tax="1.80"),
+    ]
+
+
+def test_detect_orphaned_foreign_tax_silent_when_every_taxed_line_has_gross():
+    lines = [
+        _q8a(IncomeKind.DIVIDEND, "US", gross="10.00", tax="1.50"),
+        _q8a(IncomeKind.INTEREST, "IE", gross="2.00", tax="0.00"),
+    ]
+    assert detect_orphaned_foreign_tax(lines) == []
+
+
+def test_report_orphaned_foreign_tax_silent_when_empty(caplog):
+    logger = logging.getLogger("orphaned_tax_report_none")
+    with caplog.at_level(logging.WARNING):
+        report_orphaned_foreign_tax([], logger)
+    assert caplog.records == []
+
+
+def test_report_orphaned_foreign_tax_warns_without_exiting(caplog):
+    # Sibling contract to report_unattributed_income: WARNs and returns, never exits.
+    # The tax figure is correct; it just has no gross income line to sit against.
+    logger = logging.getLogger("orphaned_tax_report_warn")
+    line = Quadro8ALine(IncomeKind.DIVIDEND, "US", Decimal("0.00"), Decimal("1.80"))
+    with caplog.at_level(logging.WARNING):
+        report_orphaned_foreign_tax([line], logger)
+
+    assert all(r.levelno == logging.WARNING for r in caplog.records)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "DIVIDEND" in m and "E11" in m and "US" in m and "1.80" in m for m in messages
+    )
+    assert any("1 Quadro 8A line(s)" in m for m in messages)
+
+
 # --- unrecognized-section coverage sweep: sync guards --------------------------------
 
 
@@ -1462,5 +1562,44 @@ def test_run_warns_on_unrecognized_section_and_still_writes(
     assert out_path.exists()
     assert any(
         r.levelno == logging.WARNING and "Mystery" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_run_warns_on_uncountried_dividend_and_still_writes(
+    write_statement, out_path, caplog
+):
+    # End to end: a clean EUR statement (matched trade) plus an EUR dividend whose
+    # description carries no ISIN. The income folds into a Quadro 8A line with no source
+    # country; the check is warn-only, so the workbook is still written and a WARNING
+    # names it -- it never gates the run.
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRADES_HEADER,
+            _trade("AAPL", "EUR"),
+            trade_data(
+                currency="EUR",
+                datetime_str="2024-06-10, 10:00:00",
+                quantity="-10",
+                t_price="110",
+                proceeds="1100",
+                comm_fee="-1",
+                code="C",
+                basis="-1001",
+                realized="99",
+            ),
+            ["Dividends", "Header", "Currency", "Date", "Description", "Amount"],
+            ["Dividends", "Data", "EUR", "2024-03-15", "Mystery Dividend", "50"],
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        run(_args(stmt, out_path))
+
+    assert out_path.exists()
+    assert any(
+        r.levelno == logging.WARNING
+        and "no identifiable source country" in r.getMessage()
         for r in caplog.records
     )

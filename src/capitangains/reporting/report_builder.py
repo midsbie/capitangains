@@ -11,6 +11,7 @@ from .fifo import RealizedLine
 from .fifo_domain import SellMatchLeg, TransferProtocol
 from .fx import FxTable
 from .money import quantize_money
+from .quadro_8a import Quadro8ALine, aggregate_quadro_8a
 
 _RowT = TypeVar("_RowT")
 
@@ -51,6 +52,10 @@ class ReportBuilder:
     """
 
     year: int
+    # Source country for broker-paid interest (which carries no country in the data):
+    # the IBKR contracting entity's jurisdiction. Default IE (IBKR Ireland),
+    # CLI-overridable via --broker-country.
+    broker_country: str = "IE"
     # Collections
     realized_lines: list[RealizedLine] = field(default_factory=list)
     symbol_totals: dict[str, SymbolTotals] = field(default_factory=dict)
@@ -295,3 +300,17 @@ class ReportBuilder:
                 t.eur.proceeds += rl.sell_net_eur
             if rl.alloc_cost_eur is not None:
                 t.eur.alloc_cost += rl.alloc_cost_eur
+
+    @property
+    def quadro_8a(self) -> list[Quadro8ALine]:
+        """Anexo J Quadro 8A income lines grouped from the already-converted rows.
+
+        A plain property (not memoized in ``convert_eur``) keeps the data flow explicit
+        and free of any coupling to conversion order; the row counts are tiny.
+        """
+        return aggregate_quadro_8a(
+            dividends=self.dividends,
+            interest=self.interest,
+            withholding=self.withholding,
+            broker_country=self.broker_country,
+        )

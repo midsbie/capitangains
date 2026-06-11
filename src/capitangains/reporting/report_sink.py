@@ -17,6 +17,7 @@ from .extract import SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
 from .i18n import NumberFormats, labels_for
 from .money import quantize_money
+from .quadro_8a import Quadro8ALine
 from .report_builder import ReportBuilder
 
 
@@ -327,6 +328,39 @@ _ANEXO_J_SPEC: _SheetSpec[_AnexoJRow] = _SheetSpec(
 )
 
 
+def _quadro_8a_rows(report: ReportBuilder) -> Iterable[Quadro8ALine]:
+    return report.quadro_8a  # already sorted by (income code, kind, country)
+
+
+def _quadro_8a_spec(kind_labels: dict[str, str]) -> _SheetSpec[Quadro8ALine]:
+    """Build the Quadro 8A sheet spec for one locale.
+
+    Unlike the other specs (module constants), this one is constructed per write because
+    its Type column renders a localized row *value* (Dividend / Payment in Lieu /
+    Interest) resolved from the active locale's labels, not just a localized header. The
+    value lambda closes over those labels, keyed by IncomeKind.label_key.
+    """
+    return _SheetSpec(
+        sheet_key="quadro_8a",
+        label_section="quadro_8a",
+        skip_if_empty=True,
+        rows=_quadro_8a_rows,
+        columns=(
+            _TextColumn[Quadro8ALine]("income_code", value=lambda r: r.income_code),
+            _TextColumn[Quadro8ALine](
+                "kind", value=lambda r: kind_labels[r.kind.label_key]
+            ),
+            _TextColumn[Quadro8ALine]("country", value=lambda r: r.country),
+            _MoneyColumn[Quadro8ALine](
+                "gross_eur", value=lambda r: r.gross_eur, currency=lambda _r: "EUR"
+            ),
+            _MoneyColumn[Quadro8ALine](
+                "tax_eur", value=lambda r: r.tax_eur, currency=lambda _r: "EUR"
+            ),
+        ),
+    )
+
+
 _PER_SYMBOL_SPEC: _SheetSpec[_PerSymbolRow] = _SheetSpec(
     sheet_key="per_symbol",
     label_section="per_symbol",
@@ -613,10 +647,12 @@ class ExcelReportSink:
         if ws_default is not None:
             wb.remove(ws_default)
 
-        writer = _SheetWriter(wb, labels_for(self.locale), NumberFormats(self.locale))
+        labels = labels_for(self.locale)
+        writer = _SheetWriter(wb, labels, NumberFormats(self.locale))
         writer.write_summary(report)
         writer.write_table(_REALIZED_SPEC, report)
         writer.write_table(_ANEXO_J_SPEC, report)
+        writer.write_table(_quadro_8a_spec(labels["quadro_8a"]), report)
         writer.write_table(_PER_SYMBOL_SPEC, report)
         writer.write_table(_DIVIDENDS_SPEC, report)
         writer.write_table(_INTEREST_SPEC, report)
