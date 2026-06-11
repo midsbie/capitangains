@@ -7,11 +7,26 @@ from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
 from tests.support import realized_line, trade_row
 
 
-def _trade(symbol, currency, quantity, realized, *, year=2024, month=6, day=1):
-    """A minimal stock TradeRow carrying IBKR's per-trade `Realized P/L` (trade ccy)."""
+def _trade(
+    symbol,
+    currency,
+    quantity,
+    realized,
+    *,
+    category="Stocks",
+    year=2024,
+    month=6,
+    day=1,
+):
+    """A minimal TradeRow carrying IBKR's per-trade `Realized P/L` (trade ccy).
+
+    category is the IBKR asset class; it governs elision policy (only Forex omits
+    Realized legitimately), so an elided sell defaults to the anomalous Stocks case.
+    """
     return trade_row(
         symbol=symbol,
         currency=currency,
+        asset_category=category,
         quantity=quantity,
         t_price="1",
         proceeds="0",
@@ -23,11 +38,13 @@ def _trade(symbol, currency, quantity, realized, *, year=2024, month=6, day=1):
     )
 
 
-def _line(symbol, ccy, realized, *, gap_fixed=False, year=2024):
+def _line(symbol, ccy, realized, *, gap_fixed=False, elided=False, year=2024):
     """A minimal RealizedLine carrying only what the reconciler reads.
 
-    The reconciler keys off ``symbol``/``currency``, sums ``realized_pl_ccy``, filters
-    on ``sell_date.year`` and partitions on ``gap_fixed``; other fields are zeroed.
+    The reconciler keys off symbol/currency, sums realized_pl_ccy, filters on
+    sell_date.year, and partitions on gap_fixed/ibkr_realized_elided; the rest are
+    zeroed. elided mirrors the source sell's missing IBKR Realized P/L (set at replay in
+    production); keep it consistent with the paired _trade.
     """
     return realized_line(
         symbol=symbol,
@@ -38,6 +55,7 @@ def _line(symbol, ccy, realized, *, gap_fixed=False, year=2024):
         realized_pl_ccy=realized,
         has_gap=gap_fixed,  # synthesis only happens on a gap; keep the pair consistent
         gap_fixed=gap_fixed,
+        ibkr_realized_elided=elided,
     )
 
 
@@ -114,22 +132,100 @@ def test_rounding_tolerance_scales_with_sell_count():
     assert r.is_match
 
 
-def test_elided_ibkr_realized_skips_symbol(caplog):
+def test_elided_ibkr_realized_skips_forex_symbol_quietly(caplog):
+    # Forex legitimately carries no Realized P/L, so a fully-elided Forex symbol is the
+    # expected skip: it lands in `incomplete` (logged at INFO), not `anomalous_elision`.
     trades = [
-        _trade("ABC", "USD", "100", "0"),
-        _trade("ABC", "USD", "-100", None),  # closing trade, realized value elided
+        _trade("EUR.USD", "USD", "100", "0", category="Forex"),
+        _trade("EUR.USD", "USD", "-100", None, category="Forex"),  # realized elided
     ]
-    lines = [_line("ABC", "USD", "50.00")]
+    lines = [_line("EUR.USD", "USD", "50.00", elided=True)]  # mirrors the elided sell
 
     with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
         report = reconcile_realized_against_ibkr(trades, lines, 2024)
 
     assert report.reconciled == []  # IBKR total untrustworthy -> not reconciled
-    assert report.incomplete == [("ABC", "USD")]
+    assert report.incomplete == [("EUR.USD", "USD")]
+    assert report.anomalous_elision == []  # Forex elision is expected, not anomalous
     assert any(
-        "skipped" in rec.getMessage() and "ABC" in rec.getMessage()
+        "skipped" in rec.getMessage() and "EUR.USD" in rec.getMessage()
         for rec in caplog.records
     )
+
+
+def test_elided_realized_on_non_forex_sell_is_anomalous(caplog):
+    # A Stocks sell with no IBKR Realized P/L breaks the invariant (only Forex elides).
+    # It is flagged `anomalous_elision`, kept OUT of the quiet `incomplete` skip, and
+    # warned at the boundary, even though it still cannot be cross-checked.
+    trades = [
+        _trade("ABC", "USD", "100", "0"),  # Stocks buy
+        _trade("ABC", "USD", "-100", None),  # Stocks sell, realized unexpectedly blank
+    ]
+    lines = [_line("ABC", "USD", "50.00", elided=True)]
+
+    with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
+        report = reconcile_realized_against_ibkr(trades, lines, 2024)
+
+    assert report.anomalous_elision == [("ABC", "USD")]
+    assert report.incomplete == []  # not folded into the benign skip
+    assert report.reconciled == []  # still nothing comparable
+    # The anomaly is warned by the boundary reporter, not the detector: no INFO skip.
+    assert not any("skipped" in rec.getMessage() for rec in caplog.records)
+
+
+def test_sibling_elided_sell_does_not_drop_a_valid_sells_mismatch():
+    # CG-11. ABC/USD has two closing sells: one valid (IBKR realized 100.00) and one
+    # whose IBKR realized is elided. Our FIFO is wrong on the *valid* sell (999.00 vs
+    # 100.00), which is exactly the kind of error the cross-check exists to catch.
+    # Eliding one trade makes only that trade unverifiable; it must not poison the
+    # symbol's other, independently-checkable sells. The elided sell's own line drops
+    # from both sides, so the comparison is the valid sell alone: 999.00 vs 100.00.
+    trades = [
+        _trade("ABC", "USD", "200", "0", day=1),  # opening buy
+        _trade("ABC", "USD", "-100", "100.00", day=2),  # valid closing sell
+        _trade("ABC", "USD", "-100", None, day=3),  # closing sell, IBKR realized elided
+    ]
+    lines = [
+        _line("ABC", "USD", "999.00"),  # our FIFO for the valid sell; genuinely wrong
+        _line("ABC", "USD", "0.00", elided=True),  # our FIFO for the elided sell
+    ]
+
+    report = reconcile_realized_against_ibkr(trades, lines, 2024)
+
+    # The valid sell is cross-checked despite the elided sibling: a real mismatch
+    # surfaces instead of the whole symbol vanishing into `incomplete`.
+    assert ("ABC", "USD") not in report.incomplete
+    # The blank sell still alarms, orthogonally: being reconciled is no exemption.
+    assert report.anomalous_elision == [("ABC", "USD")]
+    [r] = report.value_diffs
+    assert (r.symbol, r.currency) == ("ABC", "USD")
+    assert r.computed == Decimal("999.00") and r.ibkr == Decimal("100.00")
+    assert r.n_sells == 1  # only the comparable sell counts toward tolerance
+
+
+def test_synthetic_symbol_with_sibling_elided_sell_is_surfaced(caplog):
+    # CG-14. SYN/USD carries a synthesized-basis sell (gap_fixed) AND a sibling elided
+    # sell. The synthetic line must still be surfaced as "not independently confirmed",
+    # not demoted to the silent `incomplete` skip just because the symbol also has an
+    # elided sell -- the operator explicitly asked the tool to fabricate that basis.
+    trades = [
+        _trade("SYN", "USD", "-100", "300.00", day=1),  # the synthesized gap sell
+        _trade("SYN", "USD", "-50", None, day=2),  # sibling sell, realized elided
+    ]
+    lines = [
+        _line("SYN", "USD", "300.00", gap_fixed=True),  # synthesized basis
+        _line("SYN", "USD", "20.00", elided=True),  # the elided sibling
+    ]
+
+    with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
+        report = reconcile_realized_against_ibkr(trades, lines, 2024)
+
+    assert ("SYN", "USD") in [(s.symbol, s.currency) for s in report.synthetic]
+    assert report.incomplete == []  # surfaced as unconfirmed, not silently skipped
+    assert report.reconciled == []  # the only comparable activity is tautological
+    # The non-Forex blank sibling alarms orthogonally, even on a surfaced synthetic key.
+    assert report.anomalous_elision == [("SYN", "USD")]
+    assert not any("skipped" in rec.getMessage() for rec in caplog.records)
 
 
 def test_year_filter_ignores_other_periods():

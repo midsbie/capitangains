@@ -455,7 +455,10 @@ def report_reconciliation(report: ReconciliationReport, logger: logging.Logger) 
     ahead of magnitude-only gaps, since it almost always marks a structural matching or
     basis bug rather than rounding. Synthesized-basis keys are reported apart at INFO:
     their agreement with IBKR is tautological, so a green reconciliation must not claim
-    them, though a large diff on one still flags a real gap in its genuine portion.
+    them, though a large diff on one still flags a real gap in its genuine portion. A
+    non-Forex disposal with no IBKR Realized P/L is warned apart: IBKR elides Realized
+    only for Forex, so a blank elsewhere is unexpected (corruption or an unmodeled
+    format), distinct from the expected Forex skips that are not surfaced here.
     """
     for r in report.reconciled:
         logger.debug(
@@ -467,6 +470,7 @@ def report_reconciliation(report: ReconciliationReport, logger: logging.Logger) 
             r.diff,
             "OK" if r.is_match else "MISMATCH",
         )
+
     sign_flips = report.sign_flips
     if sign_flips:
         logger.warning(
@@ -475,6 +479,7 @@ def report_reconciliation(report: ReconciliationReport, logger: logging.Logger) 
             len(sign_flips),
             format_reconciliation_sample(sign_flips),
         )
+
     value_diffs = report.value_diffs
     if value_diffs:
         logger.warning(
@@ -483,6 +488,15 @@ def report_reconciliation(report: ReconciliationReport, logger: logging.Logger) 
             len(value_diffs),
             format_reconciliation_sample(value_diffs),
         )
+
+    if report.anomalous_elision:
+        logger.warning(
+            "Reconciliation: %d non-Forex disposal(s) carry no IBKR Realized P/L "
+            "-- unexpected (IBKR elides it only for Forex); not cross-checked [%s]",
+            len(report.anomalous_elision),
+            ", ".join(f"{s} ({c})" for s, c in report.anomalous_elision),
+        )
+
     if report.synthetic:
         logger.info(
             "Reconciliation: %d symbol(s) carry synthesized basis -- not independently "

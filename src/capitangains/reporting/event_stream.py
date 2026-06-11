@@ -75,5 +75,11 @@ class EventStream:
             if isinstance(event, TransferRow):
                 matcher.ingest_transfer(event)
             elif (line := matcher.ingest_trade(event)) is not None:
+                # event is narrowed to TradeRow here (the transfer case took the branch
+                # above). Carry whether IBKR elided this sell's Realized P/L onto the
+                # line so the reconciler can drop an elided disposal per-trade, not the
+                # whole symbol. Set here rather than in the matcher because the
+                # matcher's TradeProtocol deliberately omits the Realized field.
+                line.ibkr_realized_elided = event.realized_pl_ccy is None
                 realized.append(line)
         return realized

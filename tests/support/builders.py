@@ -219,6 +219,7 @@ def realized_line(
     realized_pl_ccy: Decimal | str | None = None,
     has_gap: bool = False,
     gap_fixed: bool = False,
+    ibkr_realized_elided: bool = False,
 ) -> RealizedLine:
     """Build a RealizedLine. Derived defaults: sell_net == sell_gross; sell_qty == sum
     of leg qtys; realized_pl_ccy == sell_net minus sum of allocated costs."""
@@ -244,6 +245,7 @@ def realized_line(
         realized_pl_ccy=realized,
         has_gap=has_gap,
         gap_fixed=gap_fixed,
+        ibkr_realized_elided=ibkr_realized_elided,
     )
 
 

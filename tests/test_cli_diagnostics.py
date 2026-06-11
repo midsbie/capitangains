@@ -1363,6 +1363,28 @@ def test_report_reconciliation_separates_classes_by_severity(caplog):
     )
 
 
+def test_report_reconciliation_warns_on_anomalous_non_forex_elision(caplog):
+    # A non-Forex disposal with no IBKR Realized P/L is unexpected (IBKR elides Realized
+    # only for Forex), so the boundary reporter raises it as a WARNING. The expected
+    # Forex skips never reach here -- they are the detector's quiet INFO `incomplete`.
+    report = ReconciliationReport(
+        reconciled=[],
+        synthetic=[],
+        incomplete=[],
+        anomalous_elision=[("AAPL", "USD")],
+    )
+    logger = logging.getLogger("recon_render_anom")
+
+    with caplog.at_level(logging.DEBUG, logger="recon_render_anom"):
+        report_reconciliation(report, logger)
+
+    leveled = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert any(
+        lvl == logging.WARNING and "no IBKR Realized P/L" in m and "AAPL (USD)" in m
+        for lvl, m in leveled
+    )
+
+
 # --- unrecognized-section coverage sweep: detector -----------------------------------
 
 
