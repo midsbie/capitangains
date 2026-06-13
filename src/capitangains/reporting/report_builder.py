@@ -21,9 +21,10 @@ _RowT = TypeVar("_RowT")
 class _ConvertibleAmount(Protocol):
     """A dated, currency-tagged amount the EUR pass prices in place.
 
-    The structural shape shared by DividendRow, InterestRow, and WithholdingRow:
-    _convert_amounts reads (currency, date, amount) and writes amount_eur, so the three
-    income streams convert through one loop regardless of their other fields.
+    The structural shape shared by CashFlowRow (the dividend and interest base) and
+    WithholdingRow: _convert_amounts reads (currency, date, amount) and writes
+    amount_eur, so the three income streams convert through one loop regardless of their
+    other fields.
     """
 
     currency: Currency
@@ -60,11 +61,10 @@ class SymbolTotals:
 class ReportBuilder:
     """Accumulate one tax year's reportable rows and aggregates for the sink.
 
-    Scoped to a single ``year``: the bulk ingest methods (``add_realized_lines`` and
-    the ``set_*`` setters) retain only rows dated in that year, so a caller may hand
-    over an unscoped multi-year parse and trust the builder to keep just its year.
-    ``add_realized`` is the unscoped per-line primitive that the ingest path and the
-    tests build on.
+    Scoped to a single year: the bulk ingest methods (add_realized_lines and the set_*
+    setters) retain only rows dated in that year, so a caller may hand over an unscoped
+    multi-year parse and trust the builder to keep just its year.  add_realized is the
+    unscoped per-line primitive that the ingest path and the tests build on.
     """
 
     year: int
@@ -126,13 +126,13 @@ class ReportBuilder:
     def _in_year(
         self, rows: Iterable[_RowT], key: Callable[[_RowT], dt.date | None]
     ) -> list[_RowT]:
-        """Keep only rows whose scoping date falls in this report's ``year``.
+        """Keep only rows whose scoping date falls in this report's year.
 
         Each row type carries its membership date on a different attribute (realized
-        lines: sell_date, cash flows: date, SYEP: an optional value_date), so the
-        caller injects the accessor. A None date is out of scope: only SYEP rows can
-        lack a value_date, and a dateless row cannot be placed in any year (this also
-        drops the CSV 'Total' line the SYEP extractor leaves undated).
+        lines: sell_date, cash flows: date, SYEP: an optional value_date), so the caller
+        injects the accessor. A None date is out of scope: only SYEP rows can lack a
+        value_date, and a dateless row cannot be placed in any year (this also drops the
+        CSV 'Total' line the SYEP extractor leaves undated).
         """
         return [r for r in rows if (d := key(r)) is not None and d.year == self.year]
 
@@ -190,9 +190,9 @@ class ReportBuilder:
     ) -> Decimal | None:
         """Resolve the EUR-per-unit rate for (date, currency); record a miss if absent.
 
-        Returns None -- and accumulates (date, currency) in ``fx_missing`` -- when no
-        table is given, the currency is absent, or no rate exists on/before the date.
-        Never substitutes another date's rate.
+        Returns None, and accumulates (date, currency) in fx_missing, when no table is
+        given, the currency is absent, or no rate exists on/before the date.  Never
+        substitutes another date's rate.
         """
         if currency.is_base:
             return Decimal("1")
@@ -291,8 +291,8 @@ class ReportBuilder:
     def quadro_8a(self) -> list[Quadro8ALine]:
         """Anexo J Quadro 8A income lines grouped from the already-converted rows.
 
-        A plain property (not memoized in ``convert_eur``) keeps the data flow explicit
-        and free of any coupling to conversion order; the row counts are tiny.
+        A plain property (not memoized in convert_eur) keeps the data flow explicit and
+        free of any coupling to conversion order; the row counts are tiny.
         """
         return aggregate_quadro_8a(
             dividends=self.dividends,

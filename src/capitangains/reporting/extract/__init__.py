@@ -7,7 +7,7 @@ public surface is re-exported here so callers keep importing from
 capitangains.reporting.extract.
 """
 
-from ._common import ExtractionDefect
+from ._common import CashFlowRow, ExtractionDefect
 from .dividends import DividendRow, parse_dividends
 from .interest import InterestRow, parse_interest
 from .statement import StatementMetadata, StatementPeriod, parse_statement_metadata
@@ -21,9 +21,10 @@ __all__ = [
     "ExtractionDefect",
     "TradeRow",
     "TransferRow",
+    "CashFlowRow",
     "DividendRow",
-    "WithholdingRow",
     "InterestRow",
+    "WithholdingRow",
     "SyepInterestRow",
     "StatementPeriod",
     "StatementMetadata",

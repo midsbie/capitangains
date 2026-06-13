@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
+from typing import ClassVar
 
-from capitangains.conv import Currency
 from capitangains.model import IbkrModel
 
 from ._common import (
-    CashFlowFields,
+    CashFlowRow,
     ExtractionDefect,
     _extract_cashflow_section,
-    _require_date,
-    _require_decimal,
 )
 from .sections import SEC_DIVIDENDS
 
@@ -23,22 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class DividendRow:
-    currency: Currency
-    date: dt.date
-    description: str
-    amount: Decimal
-    amount_eur: Decimal | None = None
+class DividendRow(CashFlowRow):
+    """A dividend cash flow, reported under the 'dividend row' label."""
 
-
-def _build_dividend_row(f: CashFlowFields) -> DividendRow:
-    amt = _require_decimal("dividend row", "Amount", f.amount_s)
-    return DividendRow(
-        currency=f.currency,
-        date=_require_date("dividend row", "Date", f.date_s),
-        description=f.description,
-        amount=amt,
-    )
+    _label: ClassVar[str] = "dividend row"
 
 
 def parse_dividends(
@@ -48,7 +32,7 @@ def parse_dividends(
         model,
         section=SEC_DIVIDENDS,
         logger=logger,
-        build=_build_dividend_row,
+        build=DividendRow.from_fields,
     )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d dividend entries", len(out))

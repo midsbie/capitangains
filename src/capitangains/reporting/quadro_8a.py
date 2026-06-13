@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from .extract import DividendRow, InterestRow, WithholdingRow
+from .extract import CashFlowRow, WithholdingRow
 from .money import quantize_money
 
 
@@ -121,8 +121,8 @@ def _route_withholding(
 
 def aggregate_quadro_8a(
     *,
-    dividends: Sequence[DividendRow],
-    interest: Sequence[InterestRow],
+    dividends: Sequence[CashFlowRow],
+    interest: Sequence[CashFlowRow],
     withholding: Sequence[WithholdingRow],
     broker_country: str,
 ) -> list[Quadro8ALine]:

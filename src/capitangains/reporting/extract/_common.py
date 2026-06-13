@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TypeVar
+from typing import ClassVar, Self, TypeVar
 
 from capitangains.conv import ELISION_PLACEHOLDERS, Currency, parse_date, to_dec_strict
 from capitangains.errors import DataQualityError
@@ -112,6 +112,47 @@ class CashFlowFields:
     description: str
     amount_s: str
     raw: dict[str, str]
+
+
+@dataclass
+class CashFlowRow:
+    """One IBKR cash-flow line: a dated, described amount in a trade currency.
+
+    The shared shape behind both the dividend and account-interest streams, whose IBKR
+    sections carry these columns exactly. amount_eur is filled later by the FX pass.
+
+    Concrete rows are the DividendRow and InterestRow subtypes, never this base: keeping
+    the streams distinct types stops one from being passed where the other is expected
+    (set_dividends will not accept interest rows), and each subtype owns the _label its
+    defects are reported under. Nothing dispatches on the class at runtime; the
+    distinction is purely static, plus that label.
+    """
+
+    currency: Currency
+    date: dt.date
+    description: str
+    amount: Decimal
+    amount_eur: Decimal | None = None
+
+    _label: ClassVar[str] = "cash-flow row"
+
+    @classmethod
+    def from_fields(cls, f: CashFlowFields) -> Self:
+        """Build a row of this concrete subtype from parsed fields, Amount before Date.
+
+        Defects are reported under cls._label, and Self flows the precise subtype back
+        out so each extractor returns its own row list. The parse order is deliberate:
+        when a row has several bad columns, validating Amount first makes its defect the
+        one reported (the ordering _extract_cashflow_section's contract leaves to the
+        builder).
+        """
+        amount = _require_decimal(cls._label, "Amount", f.amount_s)
+        return cls(
+            currency=f.currency,
+            date=_require_date(cls._label, "Date", f.date_s),
+            description=f.description,
+            amount=amount,
+        )
 
 
 def _extract_cashflow_section(

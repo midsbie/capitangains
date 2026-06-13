@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Generic, Protocol, TypeVar
+from typing import Generic, TypeVar
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -15,7 +15,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from capitangains.conv import EUR, Currency
 
-from .extract import SyepInterestRow, WithholdingRow
+from .extract import CashFlowRow, SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
 from .i18n import NumberFormats, labels_for
 from .money import quantize_money
@@ -399,27 +399,14 @@ _PER_SYMBOL_SPEC: _SheetSpec[_PerSymbolRow] = _SheetSpec(
 )
 
 
-class _CashFlowRow(Protocol):
-    """Shared shape of the dividend and account-interest rows: a dated, described cash
-    flow in a trade currency with an optional EUR equivalent. Both render as the same
-    five-column sheet, so a single _cash_flow_spec builds both.
-    """
-
-    date: dt.date
-    currency: Currency
-    description: str
-    amount: Decimal
-    amount_eur: Decimal | None
-
-
-_CashFlowT = TypeVar("_CashFlowT", bound=_CashFlowRow)
-
-
 def _cash_flow_spec(
-    sheet_key: str, source: Callable[[ReportBuilder], Iterable[_CashFlowT]]
-) -> _SheetSpec[_CashFlowT]:
+    sheet_key: str, source: Callable[[ReportBuilder], Iterable[CashFlowRow]]
+) -> _SheetSpec[CashFlowRow]:
     """Build the spec for a cash-flow sheet (dividends, account interest), sorted by
     description. The sheet title and column labels share sheet_key as their section.
+
+    Dividends and interest share the CashFlowRow base, so one spec renders either;
+    source selects the stream, and the column layout is identical for both.
     """
     return _SheetSpec(
         sheet_key=sheet_key,
@@ -429,13 +416,13 @@ def _cash_flow_spec(
             source(report), key=lambda row: row.description.lower()
         ),
         columns=(
-            _DateColumn[_CashFlowT]("date", value=lambda r: r.date),
-            _TextColumn[_CashFlowT]("currency", value=lambda r: str(r.currency)),
-            _TextColumn[_CashFlowT]("desc", value=lambda r: r.description),
-            _MoneyColumn[_CashFlowT](
+            _DateColumn[CashFlowRow]("date", value=lambda r: r.date),
+            _TextColumn[CashFlowRow]("currency", value=lambda r: str(r.currency)),
+            _TextColumn[CashFlowRow]("desc", value=lambda r: r.description),
+            _MoneyColumn[CashFlowRow](
                 "amount", value=lambda r: r.amount, currency=lambda r: r.currency
             ),
-            _MoneyColumn[_CashFlowT](
+            _MoneyColumn[CashFlowRow](
                 "amount_eur", value=lambda r: r.amount_eur, currency=lambda _r: EUR
             ),
         ),

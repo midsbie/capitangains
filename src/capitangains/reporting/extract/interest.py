@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 from dataclasses import dataclass
-from decimal import Decimal
+from typing import ClassVar
 
-from capitangains.conv import Currency
 from capitangains.model import IbkrModel
 
 from ._common import (
-    CashFlowFields,
+    CashFlowRow,
     ExtractionDefect,
     _extract_cashflow_section,
-    _require_date,
-    _require_decimal,
 )
 from .sections import SEC_INTEREST
 
@@ -23,22 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class InterestRow:
-    currency: Currency
-    date: dt.date
-    description: str
-    amount: Decimal
-    amount_eur: Decimal | None = None
+class InterestRow(CashFlowRow):
+    """An account-interest cash flow, reported under the 'interest row' label."""
 
-
-def _build_interest_row(f: CashFlowFields) -> InterestRow:
-    amt = _require_decimal("interest row", "Amount", f.amount_s)
-    return InterestRow(
-        currency=f.currency,
-        date=_require_date("interest row", "Date", f.date_s),
-        description=f.description,
-        amount=amt,
-    )
+    _label: ClassVar[str] = "interest row"
 
 
 def parse_interest(
@@ -55,7 +39,7 @@ def parse_interest(
         model,
         section=SEC_INTEREST,
         logger=logger,
-        build=_build_interest_row,
+        build=InterestRow.from_fields,
     )
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug("Extracted %d interest entries", len(out))
