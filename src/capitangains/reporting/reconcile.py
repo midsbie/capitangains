@@ -7,9 +7,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from capitangains.conv import Currency
-from capitangains.reporting.extract import TradeRow
-from capitangains.reporting.fifo_domain import RealizedLine
-from capitangains.reporting.money import abs_decimal
+
+from .extract import TradeRow
+from .fifo_domain import RealizedLine
+from .money import abs_decimal
 
 logger = logging.getLogger(__name__)
 

@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from capitangains.diagnostics import (
+from .diagnostics import (
     parse_acknowledged_gaps,
     report_extraction_defects,
     report_gap_acknowledgments,
@@ -43,9 +43,9 @@ from capitangains.diagnostics import (
     report_unattributed_income,
     report_unrecognized_sections,
 )
-from capitangains.errors import EXIT_DATA_QUALITY, EXIT_SETUP, DataQualityError
-from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
-from capitangains.reporting import (
+from .errors import EXIT_DATA_QUALITY, EXIT_SETUP, DataQualityError
+from .model import IbkrStatementCsvParser, merge_models, merge_reports
+from .reporting import (
     EventStream,
     FifoMatcher,
     FxTable,
@@ -60,8 +60,8 @@ from capitangains.reporting import (
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
 )
-from capitangains.reporting.gap_policy import build_gap_policy
-from capitangains.reporting.report_sink import ExcelReportSink
+from .reporting.gap_policy import build_gap_policy
+from .reporting.report_sink import ExcelReportSink
 
 
 @dataclass(frozen=True)

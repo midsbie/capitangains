@@ -18,9 +18,9 @@ import datetime as dt
 import logging
 from collections.abc import Mapping, Sequence
 
-from capitangains.conv import Currency, parse_date
-from capitangains.errors import EXIT_DATA_QUALITY, DataQualityError
-from capitangains.reporting import (
+from .conv import Currency, parse_date
+from .errors import EXIT_DATA_QUALITY, DataQualityError
+from .reporting import (
     ExtractionDefect,
     OrderingCollision,
     Quadro8ALine,
@@ -28,7 +28,7 @@ from capitangains.reporting import (
     SymbolReconciliation,
     UnrecognizedSection,
 )
-from capitangains.reporting.fifo_domain import GapEvent, GapKey, GapResolution
+from .reporting.fifo_domain import GapEvent, GapKey, GapResolution
 
 
 def parse_acknowledged_gaps(spec: str | None) -> frozenset[GapKey]:

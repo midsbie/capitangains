@@ -39,13 +39,14 @@ import argparse
 import logging
 from pathlib import Path
 
-from capitangains.cmd.discovery import (
+from capitangains.logging import configure_logging
+from capitangains.pipeline import RunOptions, run
+
+from .discovery import (
     DiscoveredStatement,
     DiscoveryResult,
     discover_statements,
 )
-from capitangains.logging import configure_logging
-from capitangains.pipeline import RunOptions, run
 
 
 def _broker_country(value: str) -> str:
