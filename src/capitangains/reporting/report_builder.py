@@ -137,29 +137,17 @@ class ReportBuilder:
 
     def _convert_realized_lines(self, fx: FxTable | None) -> None:
         for rl in self.realized_lines:
-            if rl.currency == "EUR":
-                self._convert_realized_line_eur(rl)
-            else:
-                self._convert_realized_line_fx(rl, fx)
+            self._convert_realized_line(rl, fx)
 
-    def _convert_realized_line_eur(self, rl: RealizedLine) -> None:
-        rl.sell_gross_eur = rl.sell_gross_ccy
-        rl.sell_comm_eur = rl.sell_comm_ccy
-        rl.sell_net_eur = rl.sell_net_ccy
-        alloc_eur = Decimal("0")
-        # per-leg EUR breakdown (identity conversion)
-        for leg in rl.legs:
-            leg.alloc_cost_eur = leg.alloc_cost_ccy
-            alloc_eur += leg.alloc_cost_eur
-        rl.alloc_cost_eur = quantize_money(alloc_eur)
-        rl.realized_pl_eur = quantize_money(rl.sell_net_eur - rl.alloc_cost_eur)
-        self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
-
-    def _convert_realized_line_fx(self, rl: RealizedLine, fx: FxTable | None) -> None:
+    def _convert_realized_line(self, rl: RealizedLine, fx: FxTable | None) -> None:
         # PT practice: proceeds convert at the sell-date rate, each acquisition leg at
-        # its own buy-date rate. If ANY required rate is missing the whole line is left
-        # unconverted (and the gap recorded); a rate from another date is never
-        # substituted, as that would silently misstate cost basis or proceeds.
+        # its own buy-date rate. EUR is not special-cased: _rate_or_record returns 1 for
+        # the base currency, so an EUR line flows through the same cent-quantizing
+        # arithmetic as a converted one (value * 1). That keeps every *_eur field
+        # cent-exact for any currency, the per-leg alloc_cost_eur in particular, which
+        # feeds the filer-facing Anexo J cost. If ANY required rate is missing the whole
+        # line is left unconverted (and the gap recorded); a rate from another date is
+        # never substituted, as that would silently misstate cost basis or proceeds.
         sell_rate = self._rate_or_record(rl.sell_date, rl.currency, fx)
         leg_rates = [
             sell_rate

@@ -16,7 +16,12 @@ from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.i18n import LABELS, labels_for
 from capitangains.reporting.quadro_8a import IncomeKind, Quadro8ALine
 from capitangains.reporting.report_builder import ReportBuilder
-from capitangains.reporting.report_sink import ExcelReportSink, _gap_status
+from capitangains.reporting.report_sink import (
+    _REALIZED_SPEC,
+    ExcelReportSink,
+    _anexo_j_rows,
+    _gap_status,
+)
 from tests.support import make_fx, realized_line, trade_row
 
 
@@ -578,3 +583,68 @@ def test_pt_projection_renders_portuguese_labels():
     assert pt["anexo_j"]["pl_eur"] == "Mais/menos-valia (EUR)"
     # Any unrecognized locale falls back to PT (the report's default).
     assert labels_for("XX") == pt
+
+
+# CG-12: allocated cost must reach the sheets cent-quantized regardless of currency.
+# FIFO basis allocation (round_cost_piece) emits 8-decimal residuals: 100 * 1/3 is
+# stored as 33.33333333. The FX conversion path quantizes each leg to cents
+# (quantize_money), but the EUR-identity path copies the raw 8-decimal value straight
+# onto leg.alloc_cost_eur, and the trade-currency columns sum the raw pieces unrounded.
+_BASIS_RESIDUAL = Decimal("33.33333333")  # == round_cost_piece(Decimal("100"), 1, 3)
+
+_RESIDUAL_LEG = {
+    "buy_date": dt.date(2024, 1, 10),
+    "qty": Decimal("1"),
+    "alloc_cost_ccy": _BASIS_RESIDUAL,
+}
+
+
+def _anexo_j_alloc_eur(currency: str, fx) -> Decimal | None:
+    """The single Anexo J row's stored EUR acquisition cost for a one-leg sell."""
+    rb = ReportBuilder(year=2024)
+    rb.add_realized(
+        realized_line(
+            symbol="ACME",
+            currency=currency,
+            sell_date=dt.date(2024, 6, 15),
+            sell_gross_ccy="50",
+            sell_net_ccy="50",
+            legs=[_RESIDUAL_LEG],
+        )
+    )
+    rb.convert_eur(fx)
+    (row,) = _anexo_j_rows(rb)
+    return row.alloc_eur
+
+
+def test_anexo_j_eur_alloc_cost_is_cent_quantized_like_the_fx_path():
+    # Control: a non-EUR lot priced at exactly 1.0 is quantized to cents by the FX path.
+    usd = _anexo_j_alloc_eur(
+        "USD",
+        make_fx(
+            {
+                ("USD", "2024-01-10"): Decimal("1"),
+                ("USD", "2024-06-15"): Decimal("1"),
+            }
+        ),
+    )
+    assert usd == Decimal("33.33")
+
+    # Defect: the economically identical EUR lot leaks the raw 8-decimal residual into
+    # the filer-facing Anexo J tax sheet instead of the same cent-exact 33.33.
+    assert _anexo_j_alloc_eur("EUR", None) == usd
+
+
+def test_realized_sheet_alloc_tcy_cell_is_cent_quantized():
+    # The trade-currency allocated-cost column sums raw 8-decimal leg pieces; the cell
+    # openpyxl persists must still be cent-exact, not the sub-cent value the money
+    # format would hide. float(Decimal("33.33")) is the exact double of the 33.33
+    # literal, so this equality is precise (the raw 33.33333333 cell would not pass).
+    rl = realized_line(
+        symbol="ACME",
+        currency="EUR",
+        sell_date=dt.date(2024, 6, 15),
+        legs=[_RESIDUAL_LEG],
+    )
+    (alloc_tcy,) = [c for c in _REALIZED_SPEC.columns if c.header_key == "alloc_tcy"]
+    assert alloc_tcy.cell_value(rl) == float(Decimal("33.33"))

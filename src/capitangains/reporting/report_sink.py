@@ -107,8 +107,11 @@ class _MoneyColumn(_Column[_RowT]):
     currency: Callable[[_RowT], str]
 
     def cell_value(self, row: _RowT) -> object:
+        # The sink is the boundary where money becomes cents. Some sources are raw
+        # 8-decimal allocation pieces (sum of leg.alloc_cost_ccy from round_cost_piece),
+        # so quantize here rather than store sub-cent noise the money format would mask.
         v = self.value(row)
-        return None if v is None else float(v)
+        return None if v is None else float(quantize_money(v))
 
     def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         # The currency selector is a uniform callable (per-row lambda or constant EUR),
