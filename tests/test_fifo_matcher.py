@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 
+from capitangains.conv import Currency
 from capitangains.reporting.events import EventRecorder
 from capitangains.reporting.fifo import FifoMatcher
 from capitangains.reporting.fifo_domain import (
@@ -15,6 +16,8 @@ from capitangains.reporting.fifo_domain import (
 from capitangains.reporting.gap_policy import GapPolicy, UnacknowledgedGapPolicy
 from capitangains.reporting.positions import PositionBook
 from tests.support import Trade, Transfer
+
+_USD = Currency("USD")
 
 
 class DummyPolicy(GapPolicy):
@@ -62,7 +65,7 @@ def _trade(
     *,
     proceeds: Decimal,
     comm: Decimal,
-    currency: str = "USD",
+    currency: Currency = _USD,
 ) -> Trade:
     return Trade(
         symbol=symbol,
@@ -80,13 +83,13 @@ def test_fifo_matcher_buy_uses_injected_position_book():
     trade = _trade("ABC", Decimal("10"), proceeds=Decimal("-100"), comm=Decimal("-1"))
 
     assert matcher.ingest_trade(trade) is None
-    assert book.has_position("ABC", "USD") is True
+    assert book.has_position("ABC", Currency("USD")) is True
 
 
 def test_fifo_matcher_sell_uses_gap_policy_and_recorder():
     book = PositionBook()
     book.append_buy(
-        "ABC", Lot(dt.date(2023, 12, 1), Decimal("5"), Decimal("50"), "USD")
+        "ABC", Lot(dt.date(2023, 12, 1), Decimal("5"), Decimal("50"), Currency("USD"))
     )
     policy = DummyPolicy()
     recorder = EventRecorder()
@@ -140,7 +143,7 @@ def _transfer(
     qty: str,
     direction: str,
     market_value: str,
-    currency: str = "USD",
+    currency: Currency = _USD,
 ) -> Transfer:
     return Transfer(
         date=date,
@@ -165,7 +168,7 @@ def test_transfer_out_after_buy_depletes_lots_before_sell():
             date=dt.date(2024, 3, 1),
             symbol="ABC",
             quantity=Decimal("-100"),
-            currency="USD",
+            currency=Currency("USD"),
             proceeds=Decimal("1200"),
             comm_fee=Decimal("0"),
         )
@@ -185,7 +188,7 @@ def test_transfer_in_before_sell_funds_sell():
             date=dt.date(2024, 2, 1),
             symbol="XYZ",
             quantity=Decimal("-50"),
-            currency="USD",
+            currency=Currency("USD"),
             proceeds=Decimal("600"),
             comm_fee=Decimal("0"),
         )
@@ -207,7 +210,7 @@ def test_transfer_in_after_sell_does_not_fund_earlier_sell():
             date=dt.date(2024, 1, 1),
             symbol="ABC",
             quantity=Decimal("-100"),
-            currency="USD",
+            currency=Currency("USD"),
             proceeds=Decimal("1200"),
             comm_fee=Decimal("0"),
         )
@@ -231,7 +234,7 @@ def test_buy_transfer_out_sell_partial_depletes_correctly():
             date=dt.date(2024, 3, 1),
             symbol="ABC",
             quantity=Decimal("-50"),
-            currency="USD",
+            currency=Currency("USD"),
             proceeds=Decimal("600"),
             comm_fee=Decimal("0"),
         )
@@ -255,7 +258,7 @@ def test_sell_matches_only_lots_in_same_currency():
             Decimal("100"),
             proceeds=Decimal("-1000"),
             comm=Decimal("0"),
-            currency="EUR",
+            currency=Currency("EUR"),
         )
     )
 
@@ -266,7 +269,7 @@ def test_sell_matches_only_lots_in_same_currency():
             Decimal("-100"),
             proceeds=Decimal("1200"),
             comm=Decimal("0"),
-            currency="USD",
+            currency=Currency("USD"),
         )
     )
 
@@ -274,7 +277,7 @@ def test_sell_matches_only_lots_in_same_currency():
     # The sell must report a gap: no USD lots exist for XYZ
     assert line.has_gap is True
     # The EUR lot must remain unconsumed
-    assert matcher.positions.has_position("XYZ", "EUR") is True
+    assert matcher.positions.has_position("XYZ", Currency("EUR")) is True
 
 
 def test_transfer_in_and_buy_both_fund_sell_in_fifo_order():
@@ -287,7 +290,7 @@ def test_transfer_in_and_buy_both_fund_sell_in_fifo_order():
             date=dt.date(2024, 2, 1),
             symbol="ABC",
             quantity=Decimal("50"),
-            currency="USD",
+            currency=Currency("USD"),
             proceeds=Decimal("-600"),
             comm_fee=Decimal("0"),
         )
@@ -297,7 +300,7 @@ def test_transfer_in_and_buy_both_fund_sell_in_fifo_order():
             date=dt.date(2024, 3, 1),
             symbol="ABC",
             quantity=Decimal("-100"),
-            currency="USD",
+            currency=Currency("USD"),
             proceeds=Decimal("1200"),
             comm_fee=Decimal("0"),
         )

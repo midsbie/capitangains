@@ -13,6 +13,8 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
+from capitangains.conv import EUR, Currency
+
 from .extract import SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
 from .i18n import NumberFormats, labels_for
@@ -104,7 +106,7 @@ class _PctColumn(_Column[_RowT]):
 @dataclass(frozen=True)
 class _MoneyColumn(_Column[_RowT]):
     value: Callable[[_RowT], Decimal | None]
-    currency: Callable[[_RowT], str]
+    currency: Callable[[_RowT], Currency]
 
     def cell_value(self, row: _RowT) -> object:
         # The sink is the boundary where money becomes cents. Some sources are raw
@@ -114,9 +116,11 @@ class _MoneyColumn(_Column[_RowT]):
         return None if v is None else float(quantize_money(v))
 
     def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
-        # The currency selector is a uniform callable (per-row lambda or constant EUR),
-        # so no isinstance branch is needed and the format follows each row's currency.
-        return formats.money(self.currency(row))
+        # The currency selector is a uniform callable (per-row Currency or the EUR
+        # constant), so no isinstance branch is needed and the format follows each row's
+        # currency. money() takes the code string, so unwrap the Currency here, at the
+        # sink boundary.
+        return formats.money(str(self.currency(row)))
 
 
 def _legs_json(rl: RealizedLine) -> str:
@@ -140,7 +144,7 @@ class _AnexoJRow:
     """
 
     symbol: str
-    currency: str
+    currency: Currency
     buy_date: dt.date | None
     sell_date: dt.date
     qty: Decimal
@@ -181,7 +185,7 @@ class _PerSymbolRow:
     """One symbol's totals (single trade currency plus EUR) with a gap flag."""
 
     symbol: str
-    currency: str
+    currency: Currency
     pl_tcy: Decimal
     net_tcy: Decimal
     alloc_tcy: Decimal
@@ -243,7 +247,7 @@ _REALIZED_SPEC: _SheetSpec[RealizedLine] = _SheetSpec(
     rows=lambda report: report.realized_lines,
     columns=(
         _TextColumn[RealizedLine]("ticker", value=lambda rl: rl.symbol),
-        _TextColumn[RealizedLine]("trade_currency", value=lambda rl: rl.currency),
+        _TextColumn[RealizedLine]("trade_currency", value=lambda rl: str(rl.currency)),
         _DateColumn[RealizedLine]("sell_date", value=lambda rl: rl.sell_date),
         _QtyColumn[RealizedLine]("qty_sold", value=lambda rl: rl.sell_qty),
         _MoneyColumn[RealizedLine](
@@ -274,27 +278,27 @@ _REALIZED_SPEC: _SheetSpec[RealizedLine] = _SheetSpec(
         _MoneyColumn[RealizedLine](
             "gross_eur",
             value=lambda rl: rl.sell_gross_eur,
-            currency=lambda _r: "EUR",
+            currency=lambda _r: EUR,
         ),
         _MoneyColumn[RealizedLine](
             "fees_eur",
             value=lambda rl: rl.sell_comm_eur,
-            currency=lambda _r: "EUR",
+            currency=lambda _r: EUR,
         ),
         _MoneyColumn[RealizedLine](
             "net_eur",
             value=lambda rl: rl.sell_net_eur,
-            currency=lambda _r: "EUR",
+            currency=lambda _r: EUR,
         ),
         _MoneyColumn[RealizedLine](
             "alloc_eur",
             value=lambda rl: rl.alloc_cost_eur,
-            currency=lambda _r: "EUR",
+            currency=lambda _r: EUR,
         ),
         _MoneyColumn[RealizedLine](
             "pl_eur",
             value=lambda rl: rl.realized_pl_eur,
-            currency=lambda _r: "EUR",
+            currency=lambda _r: EUR,
         ),
         _TextColumn[RealizedLine]("legs_json", value=_legs_json),
         _TextColumn[RealizedLine]("gap_status", value=_gap_status),
@@ -308,18 +312,18 @@ _ANEXO_J_SPEC: _SheetSpec[_AnexoJRow] = _SheetSpec(
     rows=_anexo_j_rows,
     columns=(
         _TextColumn[_AnexoJRow]("ticker", value=lambda r: r.symbol),
-        _TextColumn[_AnexoJRow]("trade_currency", value=lambda r: r.currency),
+        _TextColumn[_AnexoJRow]("trade_currency", value=lambda r: str(r.currency)),
         _DateColumn[_AnexoJRow]("buy_date", value=lambda r: r.buy_date),
         _DateColumn[_AnexoJRow]("sell_date", value=lambda r: r.sell_date),
         _QtyColumn[_AnexoJRow]("qty", value=lambda r: r.qty),
         _MoneyColumn[_AnexoJRow](
-            "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: "EUR"
+            "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: EUR
         ),
         _MoneyColumn[_AnexoJRow](
-            "proceeds_eur", value=lambda r: r.proceeds_eur, currency=lambda _r: "EUR"
+            "proceeds_eur", value=lambda r: r.proceeds_eur, currency=lambda _r: EUR
         ),
         _MoneyColumn[_AnexoJRow](
-            "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: "EUR"
+            "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: EUR
         ),
         _TextColumn[_AnexoJRow](
             "transferred", value=lambda r: "Yes" if r.transferred else ""
@@ -355,10 +359,10 @@ def _quadro_8a_spec(kind_labels: dict[str, str]) -> _SheetSpec[Quadro8ALine]:
             ),
             _TextColumn[Quadro8ALine]("country", value=lambda r: r.country),
             _MoneyColumn[Quadro8ALine](
-                "gross_eur", value=lambda r: r.gross_eur, currency=lambda _r: "EUR"
+                "gross_eur", value=lambda r: r.gross_eur, currency=lambda _r: EUR
             ),
             _MoneyColumn[Quadro8ALine](
-                "tax_eur", value=lambda r: r.tax_eur, currency=lambda _r: "EUR"
+                "tax_eur", value=lambda r: r.tax_eur, currency=lambda _r: EUR
             ),
         ),
     )
@@ -370,7 +374,7 @@ _PER_SYMBOL_SPEC: _SheetSpec[_PerSymbolRow] = _SheetSpec(
     rows=_per_symbol_rows,
     columns=(
         _TextColumn[_PerSymbolRow]("ticker", value=lambda r: r.symbol),
-        _TextColumn[_PerSymbolRow]("trade_currency", value=lambda r: r.currency),
+        _TextColumn[_PerSymbolRow]("trade_currency", value=lambda r: str(r.currency)),
         _MoneyColumn[_PerSymbolRow](
             "pl_tcy", value=lambda r: r.pl_tcy, currency=lambda r: r.currency
         ),
@@ -381,13 +385,13 @@ _PER_SYMBOL_SPEC: _SheetSpec[_PerSymbolRow] = _SheetSpec(
             "alloc_tcy", value=lambda r: r.alloc_tcy, currency=lambda r: r.currency
         ),
         _MoneyColumn[_PerSymbolRow](
-            "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: "EUR"
+            "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: EUR
         ),
         _MoneyColumn[_PerSymbolRow](
-            "net_eur", value=lambda r: r.net_eur, currency=lambda _r: "EUR"
+            "net_eur", value=lambda r: r.net_eur, currency=lambda _r: EUR
         ),
         _MoneyColumn[_PerSymbolRow](
-            "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: "EUR"
+            "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: EUR
         ),
         _TextColumn[_PerSymbolRow](
             "has_gap", value=lambda r: "Yes" if r.has_gap else ""
@@ -403,7 +407,7 @@ class _CashFlowRow(Protocol):
     """
 
     date: dt.date
-    currency: str
+    currency: Currency
     description: str
     amount: Decimal
     amount_eur: Decimal | None
@@ -427,13 +431,13 @@ def _cash_flow_spec(
         ),
         columns=(
             _DateColumn[_CashFlowT]("date", value=lambda r: r.date),
-            _TextColumn[_CashFlowT]("currency", value=lambda r: r.currency),
+            _TextColumn[_CashFlowT]("currency", value=lambda r: str(r.currency)),
             _TextColumn[_CashFlowT]("desc", value=lambda r: r.description),
             _MoneyColumn[_CashFlowT](
                 "amount", value=lambda r: r.amount, currency=lambda r: r.currency
             ),
             _MoneyColumn[_CashFlowT](
-                "amount_eur", value=lambda r: r.amount_eur, currency=lambda _r: "EUR"
+                "amount_eur", value=lambda r: r.amount_eur, currency=lambda _r: EUR
             ),
         ),
     )
@@ -450,7 +454,7 @@ _SYEP_SPEC: _SheetSpec[SyepInterestRow] = _SheetSpec(
     rows=lambda report: report.syep_interest,
     columns=(
         _DateColumn[SyepInterestRow]("date", value=lambda s: s.value_date),
-        _TextColumn[SyepInterestRow]("currency", value=lambda s: s.currency),
+        _TextColumn[SyepInterestRow]("currency", value=lambda s: str(s.currency)),
         _TextColumn[SyepInterestRow]("symbol", value=lambda s: s.symbol),
         _DateColumn[SyepInterestRow]("start_date", value=lambda s: s.start_date),
         _QtyColumn[SyepInterestRow]("quantity", value=lambda s: s.quantity),
@@ -471,7 +475,7 @@ _SYEP_SPEC: _SheetSpec[SyepInterestRow] = _SheetSpec(
         _MoneyColumn[SyepInterestRow](
             "interest_paid_eur",
             value=lambda s: s.interest_paid_eur,
-            currency=lambda _s: "EUR",
+            currency=lambda _s: EUR,
         ),
         _TextColumn[SyepInterestRow]("code", value=lambda s: s.code),
     ),
@@ -484,11 +488,11 @@ _WITHHOLDING_SPEC: _SheetSpec[WithholdingRow] = _SheetSpec(
     skip_if_empty=True,
     rows=lambda report: sorted(
         report.withholding,
-        key=lambda row: (row.currency.upper(), row.description.lower()),
+        key=lambda row: (str(row.currency), row.description.lower()),
     ),
     columns=(
         _DateColumn[WithholdingRow]("date", value=lambda w: w.date),
-        _TextColumn[WithholdingRow]("currency", value=lambda w: w.currency),
+        _TextColumn[WithholdingRow]("currency", value=lambda w: str(w.currency)),
         _TextColumn[WithholdingRow]("desc", value=lambda w: w.description),
         _TextColumn[WithholdingRow]("type", value=lambda w: w.type),
         _TextColumn[WithholdingRow]("country", value=lambda w: w.country),
@@ -496,7 +500,7 @@ _WITHHOLDING_SPEC: _SheetSpec[WithholdingRow] = _SheetSpec(
             "amount", value=lambda w: w.amount, currency=lambda w: w.currency
         ),
         _MoneyColumn[WithholdingRow](
-            "amount_eur", value=lambda w: w.amount_eur, currency=lambda _w: "EUR"
+            "amount_eur", value=lambda w: w.amount_eur, currency=lambda _w: EUR
         ),
     ),
 )
@@ -512,7 +516,7 @@ _TRANSFERS_SPEC: _SheetSpec[TransferProtocol] = _SheetSpec(
         _TextColumn[TransferProtocol]("symbol", value=lambda t: t.symbol),
         _TextColumn[TransferProtocol]("direction", value=lambda t: t.direction),
         _QtyColumn[TransferProtocol]("quantity", value=lambda t: t.quantity),
-        _TextColumn[TransferProtocol]("currency", value=lambda t: t.currency),
+        _TextColumn[TransferProtocol]("currency", value=lambda t: str(t.currency)),
         _MoneyColumn[TransferProtocol](
             "market_value",
             value=lambda t: t.market_value,
@@ -556,20 +560,21 @@ class _SheetWriter:
         totals_by_cur: dict[str, Decimal] = {}
         for rl in report.realized_lines:
             # Exclude EUR from by-currency totals to avoid duplicate label confusion
-            if rl.currency == "EUR":
+            if rl.currency.is_base:
                 continue
-            totals_by_cur[rl.currency] = (
-                totals_by_cur.get(rl.currency, Decimal("0")) + rl.realized_pl_ccy
+            code = str(rl.currency)
+            totals_by_cur[code] = (
+                totals_by_cur.get(code, Decimal("0")) + rl.realized_pl_ccy
             )
         ws.append([self.labels["summary"]["metric"], self.labels["summary"]["amount"]])
 
         # Primary EUR totals
         ws.append([self.labels["summary"]["total_eur"], float(total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money("EUR")
+        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(str(EUR))
         ws.append([self.labels["summary"]["proceeds_eur"], float(proceeds_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money("EUR")
+        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(str(EUR))
         ws.append([self.labels["summary"]["alloc_eur"], float(alloc_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money("EUR")
+        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(str(EUR))
 
         for cur, amt in sorted(totals_by_cur.items()):
             ws.append(

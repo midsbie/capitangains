@@ -6,6 +6,7 @@ Test coverage for src/capitangains/reporting/extract.py::parse_withholding_tax
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import parse_withholding_tax
 from tests.support import parse_model
 
@@ -42,7 +43,7 @@ def test_parse_dividend_withholding_with_country():
 
     assert len(withholding) == 1
     w = withholding[0]
-    assert w.currency == "USD"
+    assert w.currency == Currency("USD")
     assert w.date == dt.date(2024, 1, 15)
     assert "Cash Dividend" in w.description
     assert w.amount == Decimal("-7.20")
@@ -79,7 +80,7 @@ def test_parse_interest_withholding_with_country():
 
     assert len(withholding) == 1
     w = withholding[0]
-    assert w.currency == "EUR"
+    assert w.currency == Currency("EUR")
     assert w.type == "Interest"
     assert w.country == "NL"
     assert w.code == "W"
@@ -470,7 +471,7 @@ def test_skip_rows_with_empty_currency():
 
     # Only the first row should be parsed
     assert len(withholding) == 1
-    assert withholding[0].currency == "USD"
+    assert withholding[0].currency == Currency("USD")
 
 
 def test_skip_rows_with_empty_date():
@@ -646,9 +647,9 @@ def test_parse_multiple_withholding_entries():
     withholding, _ = parse_withholding_tax(model)
 
     assert len(withholding) == 3
-    assert withholding[0].currency == "USD"
-    assert withholding[1].currency == "EUR"
-    assert withholding[2].currency == "GBP"
+    assert withholding[0].currency == Currency("USD")
+    assert withholding[1].currency == Currency("EUR")
+    assert withholding[2].currency == Currency("GBP")
 
 
 # =============================================================================

@@ -6,6 +6,7 @@ Test coverage for src/capitangains/reporting/extract.py::parse_dividends
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import parse_dividends
 from tests.support import parse_model
 
@@ -40,7 +41,7 @@ def test_parse_basic_dividend():
 
     assert len(dividends) == 1
     d = dividends[0]
-    assert d.currency == "USD"
+    assert d.currency == Currency("USD")
     assert d.date == dt.date(2024, 1, 15)
     assert "AAPL" in d.description
     assert d.amount == Decimal("24.00")
@@ -88,9 +89,9 @@ def test_parse_multiple_dividends():
     dividends, _ = parse_dividends(model)
 
     assert len(dividends) == 3
-    assert dividends[0].currency == "USD"
-    assert dividends[1].currency == "EUR"
-    assert dividends[2].currency == "GBP"
+    assert dividends[0].currency == Currency("USD")
+    assert dividends[1].currency == Currency("EUR")
+    assert dividends[2].currency == Currency("GBP")
 
 
 def test_parse_amount_with_thousand_separator():
@@ -188,7 +189,7 @@ def test_skip_rows_with_empty_currency():
 
     # Only the first row should be parsed
     assert len(dividends) == 1
-    assert dividends[0].currency == "USD"
+    assert dividends[0].currency == Currency("USD")
 
 
 def test_skip_rows_with_empty_date():

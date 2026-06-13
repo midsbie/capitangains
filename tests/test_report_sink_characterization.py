@@ -23,6 +23,7 @@ from decimal import Decimal
 import pytest
 from openpyxl import load_workbook
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import (
     DividendRow,
     InterestRow,
@@ -53,7 +54,7 @@ def _build_report() -> ReportBuilder:
     # are distinguishable from per_symbol (sorted by symbol).
     mlt = realized_line(
         symbol="MLT",
-        currency="USD",
+        currency=Currency("USD"),
         sell_date=dt.date(2024, 6, 15),
         legs=[
             {
@@ -75,7 +76,7 @@ def _build_report() -> ReportBuilder:
     rb.add_realized(
         realized_line(
             symbol="GAP",
-            currency="USD",
+            currency=Currency("USD"),
             sell_date=dt.date(2024, 6, 20),
             legs=[
                 {"buy_date": None, "qty": Decimal("5"), "alloc_cost_ccy": Decimal("0")}
@@ -86,7 +87,7 @@ def _build_report() -> ReportBuilder:
     rb.add_realized(
         realized_line(
             symbol="NOC",
-            currency="GBP",
+            currency=Currency("GBP"),
             sell_date=dt.date(2024, 6, 30),
             legs=[
                 {
@@ -100,37 +101,61 @@ def _build_report() -> ReportBuilder:
 
     rb.set_dividends(
         [
-            DividendRow("USD", dt.date(2024, 2, 1), "Zulu", Decimal("5")),
-            DividendRow("USD", dt.date(2024, 2, 2), "alpha", Decimal("3")),
-            DividendRow("GBP", dt.date(2024, 2, 3), "Beta", Decimal("7")),
+            DividendRow(Currency("USD"), dt.date(2024, 2, 1), "Zulu", Decimal("5")),
+            DividendRow(Currency("USD"), dt.date(2024, 2, 2), "alpha", Decimal("3")),
+            DividendRow(Currency("GBP"), dt.date(2024, 2, 3), "Beta", Decimal("7")),
         ]
     )
     rb.set_interest(
         [
-            InterestRow("USD", dt.date(2024, 3, 1), "Zeta", Decimal("2")),
-            InterestRow("USD", dt.date(2024, 3, 2), "apex", Decimal("1")),
+            InterestRow(Currency("USD"), dt.date(2024, 3, 1), "Zeta", Decimal("2")),
+            InterestRow(Currency("USD"), dt.date(2024, 3, 2), "apex", Decimal("1")),
         ]
     )
     rb.set_withholding(
         [
             WithholdingRow(
-                "EUR", dt.date(2024, 4, 2), "Zulu", Decimal("-1"), "", "Interest", ""
+                Currency("EUR"),
+                dt.date(2024, 4, 2),
+                "Zulu",
+                Decimal("-1"),
+                "",
+                "Interest",
+                "",
             ),
             WithholdingRow(
-                "EUR", dt.date(2024, 4, 3), "Alpha", Decimal("-1.5"), "", "Dividend", ""
+                Currency("EUR"),
+                dt.date(2024, 4, 3),
+                "Alpha",
+                Decimal("-1.5"),
+                "",
+                "Dividend",
+                "",
             ),
             WithholdingRow(
-                "USD", dt.date(2024, 4, 1), "Bravo", Decimal("-2"), "", "Dividend", "US"
+                Currency("USD"),
+                dt.date(2024, 4, 1),
+                "Bravo",
+                Decimal("-2"),
+                "",
+                "Dividend",
+                "US",
             ),
             WithholdingRow(
-                "GBP", dt.date(2024, 4, 4), "Gamma", Decimal("-3"), "", "Unknown", "GB"
+                Currency("GBP"),
+                dt.date(2024, 4, 4),
+                "Gamma",
+                Decimal("-3"),
+                "",
+                "Unknown",
+                "GB",
             ),
         ]
     )
     rb.set_syep_interest(
         [
             SyepInterestRow(
-                currency="USD",
+                currency=Currency("USD"),
                 value_date=dt.date(2024, 5, 1),
                 symbol="LEND",
                 start_date=dt.date(2023, 12, 1),
@@ -148,7 +173,7 @@ def _build_report() -> ReportBuilder:
             TransferRow(
                 section="Transfers",
                 asset_category="Stocks",
-                currency="USD",
+                currency=Currency("USD"),
                 symbol="ZZZ",
                 date=dt.date(2024, 3, 1),
                 direction="Out",
@@ -159,7 +184,7 @@ def _build_report() -> ReportBuilder:
             TransferRow(
                 section="Transfers",
                 asset_category="Stocks",
-                currency="USD",
+                currency=Currency("USD"),
                 symbol="AAA",
                 date=dt.date(2024, 1, 1),
                 direction="In",
@@ -170,7 +195,7 @@ def _build_report() -> ReportBuilder:
             TransferRow(
                 section="Transfers",
                 asset_category="Stocks",
-                currency="EUR",
+                currency=Currency("EUR"),
                 symbol="BBB",
                 date=dt.date(2024, 1, 1),
                 direction="In",
@@ -1043,7 +1068,7 @@ def test_optional_sheets_omitted_when_source_empty(tmp_path):
     rb.add_realized(
         realized_line(
             symbol="ONLY",
-            currency="USD",
+            currency=Currency("USD"),
             sell_date=dt.date(2024, 6, 1),
             legs=[
                 {

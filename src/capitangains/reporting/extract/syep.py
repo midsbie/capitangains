@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SyepInterestRow:
-    currency: str
+    currency: Currency
     value_date: dt.date | None
     symbol: str
     start_date: dt.date | None
@@ -89,7 +90,7 @@ def parse_syep_interest_details(
 
             out.append(
                 SyepInterestRow(
-                    currency=cur,
+                    currency=Currency(cur),
                     value_date=(
                         _require_date("SYEP interest row", "Value Date", value_date_s)
                         if value_date_s

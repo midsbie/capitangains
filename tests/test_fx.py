@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from capitangains.conv import Currency
 from capitangains.reporting.fx import FxTable
 
 
@@ -27,9 +28,9 @@ def test_fx_from_csv_parses_rates(tmp_path):
     )
     table = FxTable.from_csv(path)
     expected = Decimal("1") / Decimal("1.20")
-    assert table.get_rate(dt.date(2024, 1, 2), "USD") == expected
-    assert table.has_rate_exact(dt.date(2024, 1, 1), "USD") is True
-    assert table.has_rate_exact(dt.date(2024, 1, 3), "USD") is False
+    assert table.get_rate(dt.date(2024, 1, 2), Currency("USD")) == expected
+    assert table.has_rate_exact(dt.date(2024, 1, 1), Currency("USD")) is True
+    assert table.has_rate_exact(dt.date(2024, 1, 3), Currency("USD")) is False
 
 
 def test_fx_from_csv_rejects_missing_columns(tmp_path):
@@ -90,7 +91,7 @@ def test_fx_from_csv_accepts_large_rate_without_separator(tmp_path):
     path = _write_csv(tmp_path, [["2024-01-01", "IDR", "17000"]])
     table = FxTable.from_csv(path)
     expected = Decimal("1") / Decimal("17000")
-    assert table.get_rate(dt.date(2024, 1, 1), "IDR") == expected
+    assert table.get_rate(dt.date(2024, 1, 1), Currency("IDR")) == expected
 
 
 def test_fx_from_csv_rejects_row_missing_rate(tmp_path):
@@ -111,16 +112,16 @@ def test_fx_get_rate_weekend_fallback(tmp_path):
     )
     table = FxTable.from_csv(path)
     # weekend fallback (2024-01-06) should use 2024-01-05 rate
-    assert table.get_rate(dt.date(2024, 1, 6), "USD") == table.get_rate(
-        dt.date(2024, 1, 5), "USD"
+    assert table.get_rate(dt.date(2024, 1, 6), Currency("USD")) == table.get_rate(
+        dt.date(2024, 1, 5), Currency("USD")
     )
 
 
 def test_fx_get_rate_unknown_currency():
     table = FxTable()
-    assert table.get_rate(dt.date(2024, 1, 1), "JPY") is None
-    assert table.has_rate_exact(dt.date(2024, 1, 1), "JPY") is False
-    assert table.get_rate(dt.date(2024, 1, 1), "EUR") == Decimal("1")
+    assert table.get_rate(dt.date(2024, 1, 1), Currency("JPY")) is None
+    assert table.has_rate_exact(dt.date(2024, 1, 1), Currency("JPY")) is False
+    assert table.get_rate(dt.date(2024, 1, 1), Currency("EUR")) == Decimal("1")
 
 
 def test_fx_short_fallback_logs_info_not_warning(tmp_path, caplog):
@@ -129,9 +130,11 @@ def test_fx_short_fallback_logs_info_not_warning(tmp_path, caplog):
     table = FxTable.from_csv(path)
 
     with caplog.at_level(logging.INFO, logger="capitangains.reporting.fx"):
-        rate = table.get_rate(dt.date(2024, 1, 8), "USD")  # Monday: 3 days back
+        rate = table.get_rate(
+            dt.date(2024, 1, 8), Currency("USD")
+        )  # Monday: 3 days back
 
-    assert rate == table.get_rate(dt.date(2024, 1, 5), "USD")
+    assert rate == table.get_rate(dt.date(2024, 1, 5), Currency("USD"))
     records = [r for r in caplog.records if "3 days earlier" in r.getMessage()]
     assert len(records) == 1
     assert records[0].levelno == logging.INFO
@@ -141,8 +144,8 @@ def test_fx_fallback_at_cap_boundary_is_returned(tmp_path):
     # Exactly _MAX_FX_LOOKBACK_DAYS (7) back is still fresh enough -> rate returned.
     path = _write_csv(tmp_path, [["2024-01-05", "USD", "1.20"]])
     table = FxTable.from_csv(path)
-    assert table.get_rate(dt.date(2024, 1, 12), "USD") == table.get_rate(
-        dt.date(2024, 1, 5), "USD"
+    assert table.get_rate(dt.date(2024, 1, 12), Currency("USD")) == table.get_rate(
+        dt.date(2024, 1, 5), Currency("USD")
     )
 
 
@@ -152,7 +155,7 @@ def test_fx_stale_fallback_beyond_cap_returns_none(tmp_path, caplog):
     table = FxTable.from_csv(path)
 
     with caplog.at_level(logging.WARNING, logger="capitangains.reporting.fx"):
-        rate = table.get_rate(dt.date(2024, 1, 13), "USD")  # 8 days back
+        rate = table.get_rate(dt.date(2024, 1, 13), Currency("USD"))  # 8 days back
 
     assert rate is None
     assert any("staleness cap" in r.getMessage() for r in caplog.records)
@@ -163,7 +166,7 @@ def test_fx_date_past_table_end_returns_none(tmp_path):
     # last entry must not silently reuse the last rate.
     path = _write_csv(tmp_path, [["2024-10-31", "USD", "1.20"]])
     table = FxTable.from_csv(path)
-    assert table.get_rate(dt.date(2024, 12, 15), "USD") is None
+    assert table.get_rate(dt.date(2024, 12, 15), Currency("USD")) is None
 
 
 def test_fx_from_csv_rejects_unpadded_date(tmp_path):
@@ -197,6 +200,10 @@ def test_fx_from_csv_keys_on_real_dates(tmp_path):
         ],
     )
     table = FxTable.from_csv(path)
-    assert table.get_rate(dt.date(2024, 1, 10), "USD") == Decimal("1") / Decimal("1.10")
+    assert table.get_rate(dt.date(2024, 1, 10), Currency("USD")) == Decimal(
+        "1"
+    ) / Decimal("1.10")
     # 2024-01-07 falls back to the nearest prior observation, 2024-01-05.
-    assert table.get_rate(dt.date(2024, 1, 7), "USD") == Decimal("1") / Decimal("1.20")
+    assert table.get_rate(dt.date(2024, 1, 7), Currency("USD")) == Decimal(
+        "1"
+    ) / Decimal("1.20")

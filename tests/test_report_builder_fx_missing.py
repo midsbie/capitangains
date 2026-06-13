@@ -8,6 +8,7 @@ to abort on.
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import DividendRow
 from capitangains.reporting.report_builder import ReportBuilder
 from tests.support import make_fx, realized_line, sell_match_leg
@@ -35,7 +36,7 @@ def test_missing_sell_rate_records_gap_and_leaves_line_unconverted():
 
     rb.convert_eur(make_fx({}))  # no USD rates at all
 
-    assert (dt.date(2024, 6, 10), "USD") in rb.fx_missing
+    assert (dt.date(2024, 6, 10), Currency("USD")) in rb.fx_missing
     assert rl.sell_net_eur is None
     assert rl.realized_pl_eur is None
 
@@ -50,7 +51,7 @@ def test_missing_buy_rate_records_gap_without_substituting_sell_rate():
 
     # The buy-date gap is recorded and the whole line is left unconverted -- the
     # sell-date rate is never substituted for the missing acquisition rate.
-    assert rb.fx_missing == {(dt.date(2023, 1, 1), "USD")}
+    assert rb.fx_missing == {(dt.date(2023, 1, 1), Currency("USD"))}
     assert rl.legs[0].alloc_cost_eur is None
     assert rl.alloc_cost_eur is None
     assert rl.realized_pl_eur is None
@@ -59,7 +60,7 @@ def test_missing_buy_rate_records_gap_without_substituting_sell_rate():
 def test_missing_amount_rate_records_gap_and_leaves_amount_unconverted():
     rb = ReportBuilder(year=2024)
     div = DividendRow(
-        currency="USD",
+        currency=Currency("USD"),
         date=dt.date(2024, 6, 15),
         description="d",
         amount=Decimal("10"),
@@ -69,7 +70,7 @@ def test_missing_amount_rate_records_gap_and_leaves_amount_unconverted():
     # Only a later USD rate exists, so no fallback is available for the dividend date.
     rb.convert_eur(make_fx({("USD", "2024-09-01"): Decimal("0.9")}))
 
-    assert (dt.date(2024, 6, 15), "USD") in rb.fx_missing
+    assert (dt.date(2024, 6, 15), Currency("USD")) in rb.fx_missing
     assert div.amount_eur is None
 
 

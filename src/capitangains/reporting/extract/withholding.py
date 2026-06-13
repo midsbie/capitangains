@@ -9,6 +9,7 @@ from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.model import IbkrModel
 
 from ._common import (
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WithholdingRow:
-    currency: str
+    currency: Currency
     date: dt.date
     description: str
     amount: Decimal

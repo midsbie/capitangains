@@ -21,7 +21,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from capitangains.conv import has_intraday_time
+from capitangains.conv import Currency, has_intraday_time
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -32,7 +32,7 @@ from .quadro_8a import Quadro8ALine
 
 def detect_symbol_currency_violations(
     trades: Sequence[TradeRow], transfers: Sequence[TransferRow]
-) -> dict[str, frozenset[str]]:
+) -> dict[str, frozenset[Currency]]:
     """Find symbols that appear under more than one trade currency.
 
     Design choice: IBKR symbols are treated as exchange-specific identifiers, each
@@ -46,7 +46,7 @@ def detect_symbol_currency_violations(
     Returns each offending symbol mapped to the (>1) currencies seen for it; an empty
     mapping means the invariant holds.
     """
-    seen: dict[str, set[str]] = defaultdict(set)
+    seen: dict[str, set[Currency]] = defaultdict(set)
     events: Sequence[TradeRow | TransferRow] = [*trades, *transfers]
     for event in events:
         seen[event.symbol].add(event.currency)
@@ -69,7 +69,7 @@ class OrderingCollision:
     """
 
     symbol: str
-    currency: str
+    currency: Currency
     date: dt.date
     n_trades: int
     n_untimed_trades: int
@@ -100,15 +100,15 @@ def detect_ordering_collisions(
     decision to halt rather than fabricate an order is the boundary's (see
     diagnostics.report_ordering_collisions).
     """
-    trades_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
-    untimed_trades_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
+    trades_by_key: dict[tuple[str, Currency, dt.date], int] = defaultdict(int)
+    untimed_trades_by_key: dict[tuple[str, Currency, dt.date], int] = defaultdict(int)
     for t in trades:
         key = (t.symbol, t.currency, t.date)
         trades_by_key[key] += 1
         if not has_intraday_time(t.datetime_str):
             untimed_trades_by_key[key] += 1
 
-    transfers_by_key: dict[tuple[str, str, dt.date], int] = defaultdict(int)
+    transfers_by_key: dict[tuple[str, Currency, dt.date], int] = defaultdict(int)
     for tr in transfers:
         transfers_by_key[(tr.symbol, tr.currency, tr.date)] += 1
 

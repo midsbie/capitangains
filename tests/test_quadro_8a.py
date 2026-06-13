@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import pytest
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import DividendRow, InterestRow, WithholdingRow
 from capitangains.reporting.quadro_8a import (
     IncomeKind,
@@ -24,7 +25,7 @@ _DATE = dt.date(2024, 1, 1)
 
 def _div(description: str, amount_eur: Decimal | None) -> DividendRow:
     return DividendRow(
-        currency="USD",
+        currency=Currency("USD"),
         date=_DATE,
         description=description,
         amount=Decimal("0"),
@@ -34,7 +35,7 @@ def _div(description: str, amount_eur: Decimal | None) -> DividendRow:
 
 def _interest(description: str, amount_eur: Decimal | None) -> InterestRow:
     return InterestRow(
-        currency="USD",
+        currency=Currency("USD"),
         date=_DATE,
         description=description,
         amount=Decimal("0"),
@@ -46,7 +47,7 @@ def _wh(
     description: str, wtype: str, country: str, amount_eur: Decimal | None
 ) -> WithholdingRow:
     return WithholdingRow(
-        currency="USD",
+        currency=Currency("USD"),
         date=_DATE,
         description=description,
         amount=Decimal("0"),

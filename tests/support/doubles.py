@@ -22,6 +22,8 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
+from capitangains.conv import Currency
+
 
 @dataclass
 class Trade:
@@ -30,7 +32,7 @@ class Trade:
     date: dt.date
     symbol: str
     quantity: Decimal
-    currency: str
+    currency: Currency
     proceeds: Decimal
     comm_fee: Decimal
     basis_ccy: Decimal | None = None
@@ -43,7 +45,7 @@ class Transfer:
     date: dt.date
     symbol: str
     quantity: Decimal
-    currency: str
+    currency: Currency
     direction: str
     market_value: Decimal
     code: str = ""

@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 
+from capitangains.conv import Currency
 from capitangains.reporting.fifo_domain import GapResolution, Lot, SellMatchLeg
 from capitangains.reporting.gap_policy import BasisSynthesisPolicy
 from capitangains.reporting.positions import PositionBook
@@ -14,14 +15,14 @@ def test_position_book_fifo_consumption_and_residual_tracking():
     book = PositionBook()
     book.append_buy(
         "ABC",
-        Lot(dt.date(2024, 1, 1), Decimal("100"), Decimal("1000"), "USD"),
+        Lot(dt.date(2024, 1, 1), Decimal("100"), Decimal("1000"), Currency("USD")),
     )
     book.append_buy(
         "ABC",
-        Lot(dt.date(2024, 2, 1), Decimal("50"), Decimal("600"), "USD"),
+        Lot(dt.date(2024, 2, 1), Decimal("50"), Decimal("600"), Currency("USD")),
     )
 
-    legs, alloc, remaining = book.consume_fifo("ABC", "USD", Decimal("120"))
+    legs, alloc, remaining = book.consume_fifo("ABC", Currency("USD"), Decimal("120"))
     assert remaining == Decimal("0")
     assert len(legs) == 2
     assert legs[0].qty == Decimal("100")
@@ -30,7 +31,7 @@ def test_position_book_fifo_consumption_and_residual_tracking():
     assert legs[1].alloc_cost_ccy == Decimal("240.00000000")
     assert alloc == Decimal("1240.00000000")
 
-    legs2, alloc2, remaining2 = book.consume_fifo("ABC", "USD", Decimal("50"))
+    legs2, alloc2, remaining2 = book.consume_fifo("ABC", Currency("USD"), Decimal("50"))
     # 30 available from previous lot, 20 shortage
     assert len(legs2) == 1
     assert legs2[0].qty == Decimal("30")
@@ -44,22 +45,22 @@ def test_position_book_validations():
     with pytest.raises(ValueError):
         book.append_buy(
             "XYZ",
-            Lot(dt.date(2024, 1, 1), Decimal("0"), Decimal("0"), "USD"),
+            Lot(dt.date(2024, 1, 1), Decimal("0"), Decimal("0"), Currency("USD")),
         )
     with pytest.raises(ValueError):
         book.append_buy(
             "XYZ",
-            Lot(dt.date(2024, 1, 1), Decimal("-5"), Decimal("0"), "USD"),
+            Lot(dt.date(2024, 1, 1), Decimal("-5"), Decimal("0"), Currency("USD")),
         )
-    lot = Lot(dt.date(2024, 1, 2), Decimal("10"), Decimal("100"), "USD")
+    lot = Lot(dt.date(2024, 1, 2), Decimal("10"), Decimal("100"), Currency("USD"))
     book.append_buy("XYZ", lot)
     with pytest.raises(ValueError):
-        book.consume_fifo("XYZ", "USD", Decimal("0"))
+        book.consume_fifo("XYZ", Currency("USD"), Decimal("0"))
 
 
 def test_position_book_returns_remainder_when_no_lots():
     book = PositionBook()
-    legs, alloc, remaining = book.consume_fifo("MISSING", "USD", Decimal("5"))
+    legs, alloc, remaining = book.consume_fifo("MISSING", Currency("USD"), Decimal("5"))
     assert legs == []
     assert alloc == Decimal("0")
     assert remaining == Decimal("5")
@@ -69,20 +70,22 @@ def test_position_book_consume_fifo_isolates_currencies():
     book = PositionBook()
     book.append_buy(
         "XYZ",
-        Lot(dt.date(2024, 1, 1), Decimal("100"), Decimal("1000"), "EUR"),
+        Lot(dt.date(2024, 1, 1), Decimal("100"), Decimal("1000"), Currency("EUR")),
     )
     book.append_buy(
         "XYZ",
-        Lot(dt.date(2024, 2, 1), Decimal("50"), Decimal("600"), "USD"),
+        Lot(dt.date(2024, 2, 1), Decimal("50"), Decimal("600"), Currency("USD")),
     )
 
-    legs, alloc, remaining = book.consume_fifo("XYZ", "USD", Decimal("50"))
+    legs, alloc, remaining = book.consume_fifo("XYZ", Currency("USD"), Decimal("50"))
     assert remaining == Decimal("0")
     assert len(legs) == 1
     assert alloc == Decimal("600.00000000")
 
     # EUR lot untouched
-    legs_eur, alloc_eur, remaining_eur = book.consume_fifo("XYZ", "EUR", Decimal("100"))
+    legs_eur, alloc_eur, remaining_eur = book.consume_fifo(
+        "XYZ", Currency("EUR"), Decimal("100")
+    )
     assert remaining_eur == Decimal("0")
     assert len(legs_eur) == 1
     assert alloc_eur == Decimal("1000.00000000")
@@ -92,7 +95,7 @@ def test_basis_synthesis_policy_within_tolerance_clamps_to_zero():
     trade = Trade(
         symbol="ABC",
         date=dt.date(2024, 3, 1),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-100"),
         proceeds=Decimal("1200"),
         comm_fee=Decimal("0"),
@@ -116,7 +119,7 @@ def test_basis_synthesis_policy_negative_residual_beyond_tolerance_is_defective(
     trade = Trade(
         symbol="DEF",
         date=dt.date(2024, 3, 2),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-15"),
         proceeds=Decimal("900"),
         comm_fee=Decimal("0"),
@@ -138,7 +141,7 @@ def test_basis_synthesis_policy_missing_basis_is_defective():
     trade = Trade(
         symbol="GHI",
         date=dt.date(2024, 3, 3),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-5"),
         proceeds=Decimal("100"),
         comm_fee=Decimal("0"),
@@ -160,7 +163,7 @@ def test_basis_synthesis_policy_residual_equal_tolerance_clamps():
     trade = Trade(
         symbol="HIJ",
         date=dt.date(2024, 3, 4),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-10"),
         proceeds=Decimal("1000"),
         comm_fee=Decimal("0"),
@@ -186,7 +189,7 @@ def test_basis_synthesis_policy_rejects_basis_inconsistent_with_realized():
     trade = Trade(
         symbol="BAD",
         date=dt.date(2024, 3, 5),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-10"),
         proceeds=Decimal("1200"),
         comm_fee=Decimal("0"),
@@ -209,7 +212,7 @@ def test_basis_synthesis_policy_accepts_near_total_loss_satisfying_identity():
     trade = Trade(
         symbol="PNY",
         date=dt.date(2024, 3, 6),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-50000"),
         proceeds=Decimal("450"),
         comm_fee=Decimal("-12.84851"),
@@ -236,7 +239,7 @@ def test_basis_synthesis_policy_refuses_when_realized_absent():
     trade = Trade(
         symbol="NOR",
         date=dt.date(2024, 3, 7),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-10"),
         proceeds=Decimal("1200"),
         comm_fee=Decimal("0"),
@@ -258,7 +261,7 @@ def test_realized_line_builder_rounds_realized_pl():
     trade = Trade(
         symbol="JKL",
         date=dt.date(2024, 4, 1),
-        currency="USD",
+        currency=Currency("USD"),
         quantity=Decimal("-50"),
         proceeds=Decimal("500.1234"),
         comm_fee=Decimal("-1.23"),

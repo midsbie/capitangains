@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from decimal import Decimal
 
+from capitangains.conv import Currency
+
 from .fifo_domain import Lot, SellMatchLeg
 from .money import abs_decimal, quantize_allocation, round_cost_piece
 
@@ -11,7 +13,7 @@ class PositionBook:
     """Maintain FIFO lots per symbol without matching policy concerns."""
 
     def __init__(self) -> None:
-        self._positions: dict[tuple[str, str], deque[Lot]] = defaultdict(deque)
+        self._positions: dict[tuple[str, Currency], deque[Lot]] = defaultdict(deque)
 
     def append_buy(self, symbol: str, lot: Lot) -> None:
         if lot.qty <= 0:
@@ -19,7 +21,7 @@ class PositionBook:
         self._positions[(symbol, lot.currency)].append(lot)
 
     def consume_fifo(
-        self, symbol: str, currency: str, qty: Decimal
+        self, symbol: str, currency: Currency, qty: Decimal
     ) -> tuple[list[SellMatchLeg], Decimal, Decimal]:
         if qty <= 0:
             raise ValueError("qty to consume must be positive")
@@ -62,16 +64,16 @@ class PositionBook:
 
         return legs, alloc_cost_ccy, qty_remaining
 
-    def lot_count(self, symbol: str, currency: str) -> int:
+    def lot_count(self, symbol: str, currency: Currency) -> int:
         lots = self._positions.get((symbol, currency))
         return len(lots) if lots else 0
 
-    def total_qty(self, symbol: str, currency: str) -> Decimal:
+    def total_qty(self, symbol: str, currency: Currency) -> Decimal:
         lots = self._positions.get((symbol, currency))
         if not lots:
             return Decimal("0")
         return sum((lot.qty for lot in lots), Decimal("0"))
 
-    def has_position(self, symbol: str, currency: str) -> bool:
+    def has_position(self, symbol: str, currency: Currency) -> bool:
         key = (symbol, currency)
         return key in self._positions and bool(self._positions[key])

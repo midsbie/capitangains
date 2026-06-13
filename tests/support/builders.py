@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from typing import Any
 
+from capitangains.conv import Currency
 from capitangains.model import IbkrModel, IbkrStatementCsvParser
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo import FifoMatcher
@@ -45,6 +46,10 @@ def _date(value: dt.date | str) -> dt.date:
     return value if isinstance(value, dt.date) else dt.date.fromisoformat(value)
 
 
+def _ccy(value: Currency | str) -> Currency:
+    return value if isinstance(value, Currency) else Currency(value)
+
+
 def parse_model(rows: Iterable[Any]) -> IbkrModel:
     """Parse raw CSV rows into an IbkrModel, discarding the ParseReport."""
     model, _ = IbkrStatementCsvParser().parse_rows(rows)
@@ -54,7 +59,7 @@ def parse_model(rows: Iterable[Any]) -> IbkrModel:
 def trade_row(
     *,
     symbol: str = "AAPL",
-    currency: str = "USD",
+    currency: Currency | str = "USD",
     asset_category: str = "Stocks",
     date: dt.date | str = dt.date(2024, 1, 1),
     datetime_str: str | None = None,
@@ -76,7 +81,7 @@ def trade_row(
     return TradeRow(
         section="Trades",
         asset_category=asset_category,
-        currency=currency,
+        currency=_ccy(currency),
         symbol=symbol,
         datetime_str=datetime_str,
         date=d,
@@ -97,7 +102,7 @@ def buy(
     proceeds: Decimal | str,
     comm: Decimal | str,
     *,
-    ccy: str = "USD",
+    ccy: Currency | str = "USD",
 ) -> TradeRow:
     """A buy TradeRow: proceeds negative (cash out), comm negative."""
     return trade_row(
@@ -122,7 +127,7 @@ def sell(
     *,
     basis: Decimal | str | None = None,
     realized: Decimal | str | None = None,
-    ccy: str = "USD",
+    ccy: Currency | str = "USD",
 ) -> TradeRow:
     """A sell TradeRow: proceeds positive, comm negative; ``basis`` feeds gap synthesis,
     ``realized`` is IBKR's per-trade Realized P/L (the reconciler's RHS)."""
@@ -144,7 +149,7 @@ def sell(
 def transfer_row(
     *,
     symbol: str = "AAPL",
-    currency: str = "USD",
+    currency: Currency | str = "USD",
     asset_category: str = "Stocks",
     date: dt.date | str = dt.date(2024, 1, 1),
     direction: str = "In",
@@ -156,7 +161,7 @@ def transfer_row(
     return TransferRow(
         section="Transfers",
         asset_category=asset_category,
-        currency=currency,
+        currency=_ccy(currency),
         symbol=symbol,
         date=_date(date),
         direction=direction,
@@ -209,7 +214,7 @@ def _normalize_legs(legs: Iterable[LegSpec] | None) -> list[SellMatchLeg]:
 def realized_line(
     *,
     symbol: str = "AAPL",
-    currency: str = "USD",
+    currency: Currency | str = "USD",
     sell_date: dt.date | str = dt.date(2024, 1, 1),
     legs: Iterable[LegSpec] | None = None,
     sell_gross_ccy: Decimal | str = "100",
@@ -235,7 +240,7 @@ def realized_line(
     realized = net - alloc if realized_pl_ccy is None else _dec(realized_pl_ccy)
     return RealizedLine(
         symbol=symbol,
-        currency=currency,
+        currency=_ccy(currency),
         sell_date=_date(sell_date),
         sell_qty=qty,
         sell_gross_ccy=gross,
@@ -253,9 +258,9 @@ def make_fx(rates: Mapping[tuple[str, str], Decimal]) -> FxTable:
     """Build an FxTable from ``{(currency, "yyyy-mm-dd"): eur_per_unit}``."""
     table = FxTable()
     for (ccy, date), value in rates.items():
-        table.data[ccy.upper()][_date(date)] = value
-    for ccy, by_date in table.data.items():
-        table.date_index[ccy] = sorted(by_date.keys())
+        table.data[_ccy(ccy)][_date(date)] = value
+    for cur, by_date in table.data.items():
+        table.date_index[cur] = sorted(by_date.keys())
     return table
 
 
@@ -274,7 +279,7 @@ def make_gap_event(
     symbol: str = "AAPL",
     date: dt.date | str = dt.date(2024, 1, 1),
     remaining_qty: Decimal | str = "1",
-    currency: str = "USD",
+    currency: Currency | str = "USD",
     message: str = "test",
     outcome: GapResolution,
 ) -> GapEvent:
@@ -283,7 +288,7 @@ def make_gap_event(
         symbol=symbol,
         date=_date(date),
         remaining_qty=_dec(remaining_qty),
-        currency=currency,
+        currency=_ccy(currency),
         message=message,
         outcome=outcome,
     )

@@ -24,6 +24,7 @@ import pytest
 from openpyxl import load_workbook
 
 from capitangains.cmd.cli import build_argparser
+from capitangains.conv import Currency
 from capitangains.diagnostics import (
     format_reconciliation_sample,
     parse_acknowledged_gaps,
@@ -214,8 +215,8 @@ def test_report_symbol_currency_violations_lists_and_exits(caplog):
     # fail-fast, mirroring the other boundary reporters.
     logger = logging.getLogger("symccy_report_fatal")
     violations = {
-        "ABC": frozenset({"USD", "EUR"}),
-        "XYZ": frozenset({"GBP", "USD"}),
+        "ABC": frozenset({Currency("USD"), Currency("EUR")}),
+        "XYZ": frozenset({Currency("GBP"), Currency("USD")}),
     }
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         report_symbol_currency_violations(violations, logger)
@@ -267,7 +268,7 @@ def test_detect_ordering_collisions_two_same_day_transfers():
     assert detect_ordering_collisions([], transfers) == [
         OrderingCollision(
             symbol="AAPL",
-            currency="USD",
+            currency=Currency("USD"),
             date=dt.date(2024, 6, 10),
             n_trades=0,
             n_untimed_trades=0,
@@ -301,7 +302,7 @@ def test_detect_ordering_collisions_date_only_trade_collides_with_timed_trade():
         _trade_row("AAPL", "USD", "2024-06-15"),  # builder stamps an intraday time
         trade_row(
             symbol="AAPL",
-            currency="USD",
+            currency=Currency("USD"),
             date="2024-06-15",
             datetime_str="2024-06-15",
             quantity="-10",
@@ -310,7 +311,7 @@ def test_detect_ordering_collisions_date_only_trade_collides_with_timed_trade():
     assert detect_ordering_collisions(trades, []) == [
         OrderingCollision(
             symbol="AAPL",
-            currency="USD",
+            currency=Currency("USD"),
             date=dt.date(2024, 6, 15),
             n_trades=2,
             n_untimed_trades=1,
@@ -325,14 +326,14 @@ def test_detect_ordering_collisions_two_timed_trades_are_orderable():
     trades = [
         trade_row(
             symbol="AAPL",
-            currency="USD",
+            currency=Currency("USD"),
             date="2024-06-15",
             datetime_str="2024-06-15, 09:30:00",
             quantity="10",
         ),
         trade_row(
             symbol="AAPL",
-            currency="USD",
+            currency=Currency("USD"),
             date="2024-06-15",
             datetime_str="2024-06-15, 15:00:00",
             quantity="-10",
@@ -346,7 +347,7 @@ def test_detect_ordering_collisions_lone_date_only_trade_is_silent():
     trades = [
         trade_row(
             symbol="AAPL",
-            currency="USD",
+            currency=Currency("USD"),
             date="2024-06-15",
             datetime_str="2024-06-15",
             quantity="-10",
@@ -371,8 +372,8 @@ def test_report_ordering_collisions_lists_and_exits(caplog):
     # sharing a day with another trade -- both reported through the one mechanism.
     logger = logging.getLogger("ordering_report_fatal")
     collisions = [
-        OrderingCollision("AAPL", "USD", dt.date(2024, 6, 10), 1, 0, 1),
-        OrderingCollision("VOD", "GBP", dt.date(2024, 7, 1), 2, 1, 0),
+        OrderingCollision("AAPL", Currency("USD"), dt.date(2024, 6, 10), 1, 0, 1),
+        OrderingCollision("VOD", Currency("GBP"), dt.date(2024, 7, 1), 2, 1, 0),
     ]
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
         report_ordering_collisions(collisions, logger)
@@ -739,9 +740,7 @@ def test_run_does_not_swallow_a_reconciliation_crash(
     def _boom(*args, **kwargs):
         raise RuntimeError("reconciliation bug")
 
-    monkeypatch.setattr(
-        "capitangains.pipeline.reconcile_realized_against_ibkr", _boom
-    )
+    monkeypatch.setattr("capitangains.pipeline.reconcile_realized_against_ibkr", _boom)
 
     with pytest.raises(RuntimeError, match="reconciliation bug"):
         run(_args(stmt, out_path))
@@ -965,7 +964,7 @@ def test_process_files_exits_2_on_unacknowledged_gap(tmp_path, out_path, caplog)
     # must never be silently valued at zero cost.
     stmt = tmp_path / "stmt.csv"
     _write_single_sell(
-        stmt, symbol="ORPH", currency="USD", basis="-1000", realized="200"
+        stmt, symbol="ORPH", currency=Currency("USD"), basis="-1000", realized="200"
     )
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
@@ -1003,7 +1002,7 @@ def test_process_files_exits_2_on_acknowledged_gap_with_corrupt_basis(
     # message survives the move to the boundary (mentions both "Basis" and "Realized").
     stmt = tmp_path / "stmt.csv"
     _write_single_sell(
-        stmt, symbol="CORRUPT", currency="USD", basis="-99999", realized="200"
+        stmt, symbol="CORRUPT", currency=Currency("USD"), basis="-99999", realized="200"
     )
     args = _args(stmt, out_path, auto_fix_sell_gaps="CORRUPT@2024-06-10")
 
@@ -1025,7 +1024,9 @@ def test_process_files_exits_2_on_acknowledged_gap_with_missing_basis(
     # synthesize from, so the run aborts (exit 2, no workbook) rather than electing a
     # zero basis.
     stmt = tmp_path / "stmt.csv"
-    _write_single_sell(stmt, symbol="NOBASIS", currency="USD", basis="", realized="")
+    _write_single_sell(
+        stmt, symbol="NOBASIS", currency=Currency("USD"), basis="", realized=""
+    )
     args = _args(stmt, out_path, auto_fix_sell_gaps="NOBASIS@2024-06-10")
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
@@ -1044,7 +1045,7 @@ def test_process_files_synthesizes_acknowledged_gap_and_writes_workbook(
     # never silent. EUR trades need no FX table (identity conversion).
     stmt = tmp_path / "stmt.csv"
     _write_single_sell(
-        stmt, symbol="EURGAP", currency="EUR", basis="-1000", realized="200"
+        stmt, symbol="EURGAP", currency=Currency("EUR"), basis="-1000", realized="200"
     )
     args = _args(stmt, out_path, auto_fix_sell_gaps="EURGAP@2024-06-10")
 
@@ -1073,7 +1074,9 @@ def test_process_files_dry_run_writes_no_workbook_on_clean_input(
     # A run that would otherwise succeed writes nothing under --dry-run: it returns
     # normally (exit 0), leaves no file at out_path, and announces the preflight.
     stmt = tmp_path / "stmt.csv"
-    _write_statement(stmt, currency="EUR")  # matched, EUR: clean through to the write
+    _write_statement(
+        stmt, currency=Currency("EUR")
+    )  # matched, EUR: clean through to the write
     args = _args(stmt, out_path, dry_run=True)
 
     with caplog.at_level(logging.INFO):
@@ -1087,7 +1090,7 @@ def test_process_files_dry_run_does_not_overwrite_existing_output(tmp_path, out_
     # The existing report at out_path is left byte-for-byte untouched: --dry-run never
     # clobbers a prior good workbook.
     stmt = tmp_path / "stmt.csv"
-    _write_statement(stmt, currency="EUR")
+    _write_statement(stmt, currency=Currency("EUR"))
     out_path.write_bytes(b"prior report")
     args = _args(stmt, out_path, dry_run=True)
 
@@ -1310,7 +1313,7 @@ def test_process_files_multifile_one_invalid_identity_exits_2(
 
 def _recon(symbol, computed, ibkr):
     return SymbolReconciliation(
-        symbol=symbol, currency="USD", computed=computed, ibkr=ibkr, n_sells=1
+        symbol=symbol, currency=Currency("USD"), computed=computed, ibkr=ibkr, n_sells=1
     )
 
 
@@ -1371,7 +1374,7 @@ def test_report_reconciliation_warns_on_anomalous_non_forex_elision(caplog):
         reconciled=[],
         synthetic=[],
         incomplete=[],
-        anomalous_elision=[("AAPL", "USD")],
+        anomalous_elision=[("AAPL", Currency("USD"))],
     )
     logger = logging.getLogger("recon_render_anom")
 

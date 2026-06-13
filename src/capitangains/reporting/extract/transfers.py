@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-from capitangains.conv import to_dec
+from capitangains.conv import Currency, to_dec
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -23,7 +23,7 @@ ASSET_STOCK_LIKE = {"Stocks", "Stock", "ETFs", "ETF", "ETCs", "ETP"}
 class TransferRow:
     section: str
     asset_category: str
-    currency: str
+    currency: Currency
     symbol: str
     date: dt.date
     direction: str  # "In" or "Out"
@@ -139,7 +139,7 @@ def parse_transfers(
                     TransferRow(
                         section=SEC_TRANSFERS,
                         asset_category=asset_cat,
-                        currency=currency,
+                        currency=Currency(currency),
                         symbol=symbol,
                         date=_require_date("transfer row", "Date", date_s),
                         direction=direction,

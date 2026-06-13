@@ -6,6 +6,7 @@ Test coverage for src/capitangains/reporting/extract.py::parse_syep_interest_det
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import parse_syep_interest_details
 from tests.support import parse_model
 
@@ -52,7 +53,7 @@ def test_parse_complete_syep_row():
 
     assert len(syep) == 1
     s = syep[0]
-    assert s.currency == "USD"
+    assert s.currency == Currency("USD")
     assert s.value_date == dt.date(2024, 1, 15)
     assert s.symbol == "AAPL"
     assert s.start_date == dt.date(2024, 1, 1)

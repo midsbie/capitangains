@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import TradeRow
 from capitangains.reporting.fifo_domain import RealizedLine
 
@@ -37,7 +38,7 @@ class SymbolReconciliation:
     """
 
     symbol: str
-    currency: str
+    currency: Currency
     computed: Decimal | None
     ibkr: Decimal | None
     n_sells: int  # comparable (non-elided) sells behind ibkr; bounds rounding gap
@@ -100,8 +101,8 @@ class ReconciliationReport:
 
     reconciled: list[SymbolReconciliation]
     synthetic: list[SymbolReconciliation]
-    incomplete: list[tuple[str, str]]
-    anomalous_elision: list[tuple[str, str]] = field(default_factory=list)
+    incomplete: list[tuple[str, Currency]]
+    anomalous_elision: list[tuple[str, Currency]] = field(default_factory=list)
 
     @property
     def sign_flips(self) -> list[SymbolReconciliation]:
@@ -150,10 +151,10 @@ def reconcile_realized_against_ibkr(
     # sells are all elided can be reported as skipped, while one that also has a
     # comparable sell is still cross-checked on it. Eliding one sell makes only it
     # unverifiable, never its siblings (per-trade, not per-symbol).
-    ibkr_realized: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
-    n_sells: dict[tuple[str, str], int] = defaultdict(int)
-    keys_with_elided_sell: set[tuple[str, str]] = set()
-    anomalous_elision: set[tuple[str, str]] = set()
+    ibkr_realized: dict[tuple[str, Currency], Decimal] = defaultdict(Decimal)
+    n_sells: dict[tuple[str, Currency], int] = defaultdict(int)
+    keys_with_elided_sell: set[tuple[str, Currency]] = set()
+    anomalous_elision: set[tuple[str, Currency]] = set()
     for t in trades:
         if t.date.year != year:
             continue
@@ -175,8 +176,8 @@ def reconcile_realized_against_ibkr(
     # set at replay), so the same disposals are excluded from both sides and the
     # remaining sums compare like for like. A synthetic line still contributes to its
     # key's displayed total: it is surfaced as unconfirmed, not silently dropped.
-    computed_realized: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
-    synthetic_keys: set[tuple[str, str]] = set()
+    computed_realized: dict[tuple[str, Currency], Decimal] = defaultdict(Decimal)
+    synthetic_keys: set[tuple[str, Currency]] = set()
     for rl in realized_lines:
         if rl.sell_date.year != year:
             continue
@@ -190,7 +191,7 @@ def reconcile_realized_against_ibkr(
         if not rl.ibkr_realized_elided:
             computed_realized[key] += rl.realized_pl_ccy
 
-    def _entry(key: tuple[str, str]) -> SymbolReconciliation:
+    def _entry(key: tuple[str, Currency]) -> SymbolReconciliation:
         sym, ccy = key
         return SymbolReconciliation(
             symbol=sym,

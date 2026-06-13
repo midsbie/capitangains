@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TypeVar
 
+from capitangains.conv import Currency
+
 from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
 from .fifo_domain import SellMatchLeg, TransferProtocol
@@ -29,10 +31,10 @@ class CurrencyTotals:
 class SymbolTotals:
     """Aggregated totals for a symbol across currencies."""
 
-    by_currency: dict[str, CurrencyTotals] = field(default_factory=dict)
+    by_currency: dict[Currency, CurrencyTotals] = field(default_factory=dict)
     eur: CurrencyTotals = field(default_factory=CurrencyTotals)
 
-    def get_currency(self, currency: str) -> CurrencyTotals:
+    def get_currency(self, currency: Currency) -> CurrencyTotals:
         """Get or create currency totals."""
         if currency not in self.by_currency:
             self.by_currency[currency] = CurrencyTotals()
@@ -67,7 +69,7 @@ class ReportBuilder:
     # Every (date, currency) lookup no FX rate could satisfy. A complete table is a
     # precondition for the EUR report: the CLI aborts (exit 2) when this is non-empty
     # rather than emit substituted or blank EUR figures.
-    fx_missing: set[tuple[dt.date, str]] = field(default_factory=set)
+    fx_missing: set[tuple[dt.date, Currency]] = field(default_factory=set)
 
     def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
@@ -172,7 +174,7 @@ class ReportBuilder:
         self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
 
     def _rate_or_record(
-        self, date: dt.date, currency: str, fx: FxTable | None
+        self, date: dt.date, currency: Currency, fx: FxTable | None
     ) -> Decimal | None:
         """Resolve the EUR-per-unit rate for (date, currency); record a miss if absent.
 
@@ -180,13 +182,12 @@ class ReportBuilder:
         table is given, the currency is absent, or no rate exists on/before the date.
         Never substitutes another date's rate.
         """
-        cur = currency.upper()
-        if cur == "EUR":
+        if currency.is_base:
             return Decimal("1")
 
-        rate = fx.get_rate(date, cur) if fx is not None else None
+        rate = fx.get_rate(date, currency) if fx is not None else None
         if rate is None:
-            self.fx_missing.add((date, cur))
+            self.fx_missing.add((date, currency))
 
         return rate
 
@@ -248,7 +249,7 @@ class ReportBuilder:
 
     def _convert_amount_to_eur(
         self,
-        currency: str,
+        currency: Currency,
         date: dt.date | None,
         amount: Decimal,
         fx: FxTable | None,
@@ -259,7 +260,7 @@ class ReportBuilder:
         SYEP rows lacking a value date, so this returns None without recording an
         FX-table gap (the absence is a source-data issue, not a missing rate).
         """
-        if currency.upper() == "EUR":
+        if currency.is_base:
             return quantize_money(amount)
 
         if date is None:

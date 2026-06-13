@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from openpyxl import load_workbook
 
+from capitangains.conv import Currency
 from capitangains.model.ibkr import IbkrStatementCsvParser
 from capitangains.reporting.extract import (
     DividendRow,
@@ -67,7 +68,7 @@ def test_syep_interest_parsing_excludes_totals():
     parsed, _ = parse_syep_interest_details(model)
     assert len(parsed) == 1
     r = parsed[0]
-    assert r.currency == "USD"
+    assert r.currency == Currency("USD")
     assert r.symbol == "BANC"
     assert r.value_date is not None and r.value_date.isoformat() == "2024-06-10"
     assert r.interest_paid == Decimal("0.01")
@@ -90,7 +91,7 @@ def test_interest_parsing_excludes_totals():
     model, _ = IbkrStatementCsvParser().parse_rows(rows)
     parsed, _ = parse_interest(model)
     assert len(parsed) == 1
-    assert parsed[0].currency == "EUR"
+    assert parsed[0].currency == Currency("EUR")
     assert parsed[0].amount == Decimal("139.06")
 
 
@@ -100,7 +101,7 @@ def test_convert_eur_for_income_rows(tmp_path):
     rb.set_dividends(
         [
             DividendRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="Test Div",
                 amount=Decimal("100"),
@@ -110,7 +111,7 @@ def test_convert_eur_for_income_rows(tmp_path):
     rb.set_withholding(
         [
             WithholdingRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="Test WHT",
                 amount=Decimal("50"),
@@ -123,7 +124,7 @@ def test_convert_eur_for_income_rows(tmp_path):
     rb.set_syep_interest(
         [
             SyepInterestRow(
-                currency="USD",
+                currency=Currency("USD"),
                 value_date=dt.date(2024, 1, 1),
                 symbol="ABC",
                 start_date=dt.date(2024, 1, 1),
@@ -169,7 +170,7 @@ def test_per_symbol_summary_trade_and_eur(tmp_path):
     ]
     rl = RealizedLine(
         symbol="GOOGL",
-        currency="USD",
+        currency=Currency("USD"),
         sell_date=dt.date(2024, 2, 1),
         sell_qty=Decimal("10"),
         sell_gross_ccy=Decimal("1000"),

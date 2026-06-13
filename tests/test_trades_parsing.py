@@ -7,6 +7,7 @@ and parse_trades_stocklike_row
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import parse_trades_stocklike
 from tests.support import parse_model
 
@@ -53,7 +54,7 @@ def test_parse_basic_buy_trade():
     t = trades[0]
     assert t.section == "Trades"
     assert t.asset_category == "Stocks"
-    assert t.currency == "USD"
+    assert t.currency == Currency("USD")
     assert t.symbol == "AAPL"
     assert t.datetime_str == "2024-01-15, 10:30:00"
     assert t.date == dt.date(2024, 1, 15)

@@ -6,6 +6,7 @@ Test coverage for src/capitangains/reporting/extract.py::parse_interest
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import parse_interest
 from tests.support import parse_model
 
@@ -40,7 +41,7 @@ def test_parse_regular_credit_interest():
 
     assert len(interest) == 1
     i = interest[0]
-    assert i.currency == "EUR"
+    assert i.currency == Currency("EUR")
     assert i.date == dt.date(2024, 1, 31)
     assert "Credit Interest" in i.description
     assert i.amount == Decimal("5.25")
@@ -146,8 +147,8 @@ def test_parse_multiple_interest_entries():
     interest, _ = parse_interest(model)
 
     assert len(interest) == 3
-    assert interest[0].currency == "EUR"
-    assert interest[1].currency == "USD"
+    assert interest[0].currency == Currency("EUR")
+    assert interest[1].currency == Currency("USD")
     assert "Stock Yield Enhancement Program" in interest[2].description
 
 
@@ -190,7 +191,7 @@ def test_skip_total_rows_empty_currency():
 
     # Total row should be skipped
     assert len(interest) == 1
-    assert interest[0].currency == "EUR"
+    assert interest[0].currency == Currency("EUR")
 
 
 def test_skip_total_in_eur_rows():
@@ -262,7 +263,7 @@ def test_skip_rows_with_total_prefix():
     interest, _ = parse_interest(model)
 
     assert len(interest) == 1
-    assert interest[0].currency == "EUR"
+    assert interest[0].currency == Currency("EUR")
 
 
 def test_skip_rows_with_empty_date():

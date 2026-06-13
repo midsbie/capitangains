@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TypeVar
 
-from capitangains.conv import ELISION_PLACEHOLDERS, parse_date, to_dec_strict
+from capitangains.conv import ELISION_PLACEHOLDERS, Currency, parse_date, to_dec_strict
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -102,11 +102,12 @@ class CashFlowFields:
 
     Date and Amount stay as raw strings: each builder parses them via the _require_*
     helpers (so a failure names the field) and controls the parse order that decides
-    which defect is reported first. raw is the escape hatch for section-specific columns
-    (e.g. withholding's 'Code').
+    which defect is reported first. currency is already a normalized Currency (the field
+    gate has run, so it is non-empty). raw is the escape hatch for section-specific
+    columns (e.g. withholding's 'Code').
     """
 
-    currency: str
+    currency: Currency
     date_s: str
     description: str
     amount_s: str
@@ -160,7 +161,7 @@ def _extract_cashflow_section(
             _require_fields(
                 f"{section} row", Date=date_s, Currency=cur, Description=desc
             )
-            out.append(build(CashFlowFields(cur, date_s, desc, amount_s, r)))
+            out.append(build(CashFlowFields(Currency(cur), date_s, desc, amount_s, r)))
         except DataQualityError as e:
             defects.append(ExtractionDefect(section, None, date_s or None, str(e)))
 

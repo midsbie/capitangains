@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from openpyxl import load_workbook
 
+from capitangains.conv import Currency
 from capitangains.reporting import detect_symbol_currency_violations
 from capitangains.reporting.extract import (
     DividendRow,
@@ -59,7 +60,7 @@ def test_report_builder_add_realized_accumulates_symbol_totals():
     rb.add_realized(rl2)
 
     totals = rb.symbol_totals["ABC"]
-    usd = totals.by_currency["USD"]
+    usd = totals.by_currency[Currency("USD")]
     assert usd.realized == rl1.realized_pl_ccy + rl2.realized_pl_ccy
     assert usd.proceeds == rl1.sell_net_ccy + rl2.sell_net_ccy
 
@@ -67,11 +68,11 @@ def test_report_builder_add_realized_accumulates_symbol_totals():
 def test_multi_currency_same_symbol_detected():
     """Same symbol in multiple currencies is a detected violation."""
     trades = [
-        trade_row(symbol="ABC", currency="USD"),
-        trade_row(symbol="ABC", currency="EUR"),
+        trade_row(symbol="ABC", currency=Currency("USD")),
+        trade_row(symbol="ABC", currency=Currency("EUR")),
     ]
     assert detect_symbol_currency_violations(trades, []) == {
-        "ABC": frozenset({"USD", "EUR"})
+        "ABC": frozenset({Currency("USD"), Currency("EUR")})
     }
 
 
@@ -115,9 +116,9 @@ def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
     assert rl_usd.sell_net_eur is None
     # Every unresolved lookup is recorded for the CLI to abort on.
     assert rb.fx_missing == {
-        (dt.date(2023, 6, 1), "USD"),
-        (dt.date(2024, 1, 10), "GBP"),
-        (dt.date(2024, 2, 1), "GBP"),
+        (dt.date(2023, 6, 1), Currency("USD")),
+        (dt.date(2024, 1, 10), Currency("GBP")),
+        (dt.date(2024, 2, 1), Currency("GBP")),
     }
 
 
@@ -125,7 +126,7 @@ def test_convert_eur_zero_sell_qty_skips_proceeds_allocation():
     rb = ReportBuilder(year=2024)
     zero_qty_rl = RealizedLine(
         symbol="ZQ",
-        currency="USD",
+        currency=Currency("USD"),
         sell_date=dt.date(2024, 4, 1),
         sell_qty=Decimal("0"),
         sell_gross_ccy=Decimal("0"),
@@ -152,13 +153,13 @@ def test_report_builder_income_conversion():
     rb.set_dividends(
         [
             DividendRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="Div USD",
                 amount=Decimal("10"),
             ),
             DividendRow(
-                currency="EUR",
+                currency=Currency("EUR"),
                 date=dt.date(2024, 1, 2),
                 description="Div EUR",
                 amount=Decimal("5"),
@@ -168,7 +169,7 @@ def test_report_builder_income_conversion():
     rb.set_withholding(
         [
             WithholdingRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="Tax",
                 amount=Decimal("-2"),
@@ -181,7 +182,7 @@ def test_report_builder_income_conversion():
     rb.set_syep_interest(
         [
             SyepInterestRow(
-                currency="USD",
+                currency=Currency("USD"),
                 value_date=dt.date(2024, 1, 1),
                 symbol="SYEP",
                 start_date=None,
@@ -212,13 +213,13 @@ def _income_report(broker_country: str = "IE") -> ReportBuilder:
     rb.set_dividends(
         [
             DividendRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="PACW(US6952631033) Cash Dividend",
                 amount=Decimal("10"),
             ),
             DividendRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 2),
                 description="PACW(US6952631033) Payment in Lieu of Dividend",
                 amount=Decimal("4"),
@@ -228,7 +229,7 @@ def _income_report(broker_country: str = "IE") -> ReportBuilder:
     rb.set_interest(
         [
             InterestRow(
-                currency="EUR",
+                currency=Currency("EUR"),
                 date=dt.date(2024, 1, 3),
                 description="EUR Credit Interest for Jan-2024",
                 amount=Decimal("2"),
@@ -238,7 +239,7 @@ def _income_report(broker_country: str = "IE") -> ReportBuilder:
     rb.set_withholding(
         [
             WithholdingRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="PACW(US6952631033) Cash Dividend",
                 amount=Decimal("-1.50"),
@@ -396,13 +397,13 @@ def test_excel_report_sink_sorts_dividends_by_description(tmp_path):
     rb.set_dividends(
         [
             DividendRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 2),
                 description="Zulu",
                 amount=Decimal("2"),
             ),
             DividendRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="Alpha",
                 amount=Decimal("1"),
@@ -426,13 +427,13 @@ def test_excel_report_sink_sorts_account_interest(tmp_path):
     rb.set_interest(
         [
             InterestRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 2),
                 description="Zulu",
                 amount=Decimal("2"),
             ),
             InterestRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 1),
                 description="Alpha",
                 amount=Decimal("1"),
@@ -495,7 +496,7 @@ def test_excel_report_sink_sorts_withholding(tmp_path):
     rb.set_withholding(
         [
             WithholdingRow(
-                currency="USD",
+                currency=Currency("USD"),
                 date=dt.date(2024, 1, 3),
                 description="Bravo",
                 amount=Decimal("-2"),
@@ -504,7 +505,7 @@ def test_excel_report_sink_sorts_withholding(tmp_path):
                 country="",
             ),
             WithholdingRow(
-                currency="EUR",
+                currency=Currency("EUR"),
                 date=dt.date(2024, 1, 1),
                 description="Zulu",
                 amount=Decimal("-1"),
@@ -513,7 +514,7 @@ def test_excel_report_sink_sorts_withholding(tmp_path):
                 country="",
             ),
             WithholdingRow(
-                currency="EUR",
+                currency=Currency("EUR"),
                 date=dt.date(2024, 1, 2),
                 description="Alpha",
                 amount=Decimal("-1.5"),
@@ -642,7 +643,7 @@ def test_realized_sheet_alloc_tcy_cell_is_cent_quantized():
     # literal, so this equality is precise (the raw 33.33333333 cell would not pass).
     rl = realized_line(
         symbol="ACME",
-        currency="EUR",
+        currency=Currency("EUR"),
         sell_date=dt.date(2024, 6, 15),
         legs=[_RESIDUAL_LEG],
     )

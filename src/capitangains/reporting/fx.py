@@ -8,7 +8,7 @@ from collections import defaultdict
 from decimal import Decimal, DivisionByZero
 from pathlib import Path
 
-from capitangains.conv import parse_date, to_dec_strict
+from capitangains.conv import Currency, parse_date, to_dec_strict
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _MAX_FX_LOOKBACK_DAYS = 7
 
 
-def _parse_fx_rate(raw: str | None, ccy: str, date: dt.date) -> Decimal:
+def _parse_fx_rate(raw: str | None, ccy: Currency, date: dt.date) -> Decimal:
     """Parse one operator-supplied FX rate strictly, rejecting an ambiguous comma.
 
     The --fx-table CSV declares no locale, so a comma in the rate is irrecoverably
@@ -56,12 +56,13 @@ class FxTable:
     """
 
     def __init__(self) -> None:
-        # Map: currency -> { date -> Decimal(eur_per_unit) }, plus sorted date list.
-        # Dates are real `d.date keys, not strings: comparison and bisect are then
-        # chronological by construction, immune to the lexical-vs-chronological hazard a
-        # non-canonical string key would introduce.
-        self.data: dict[str, dict[dt.date, Decimal]] = defaultdict(dict)
-        self.date_index: dict[str, list[dt.date]] = {}
+        # Map: Currency -> { date -> Decimal(eur_per_unit) }, plus sorted date list.
+        # Keys are normalized Currency objects, so a lookup is case-insensitive by
+        # construction. Dates are real dt.date keys, not strings: comparison and bisect
+        # are then chronological by construction, immune to the lexical-vs-chronological
+        # hazard a non-canonical string key would introduce.
+        self.data: dict[Currency, dict[dt.date, Decimal]] = defaultdict(dict)
+        self.date_index: dict[Currency, list[dt.date]] = {}
 
     @classmethod
     def from_csv(cls, path: str | Path) -> FxTable:
@@ -87,10 +88,10 @@ class FxTable:
                     raise ValueError(
                         f"FX table has an unparseable date {raw_date!r}"
                     ) from exc
-                ccy = row["currency"].strip().upper()
-                if not ccy:
+                ccy = Currency(row["currency"])
+                if not ccy.code:
                     raise ValueError(f"FX row missing currency for date {d}")
-                if ccy == "EUR":
+                if ccy.is_base:
                     # Store identity explicitly for completeness.
                     eur_per_unit = Decimal("1")
                 else:
@@ -135,13 +136,12 @@ class FxTable:
 
         return inst
 
-    def has_rate_exact(self, date: dt.date, currency: str) -> bool:
-        c = currency.upper()
-        if c == "EUR":
+    def has_rate_exact(self, date: dt.date, currency: Currency) -> bool:
+        if currency.is_base:
             return True
-        return c in self.data and date in self.data[c]
+        return currency in self.data and date in self.data[currency]
 
-    def get_rate(self, date: dt.date, currency: str) -> Decimal | None:
+    def get_rate(self, date: dt.date, currency: Currency) -> Decimal | None:
         """Return EUR per 1 unit of currency, or None if no fresh rate is available.
 
         Falls back to the nearest *previous* observation to absorb weekends/holidays,
@@ -151,29 +151,32 @@ class FxTable:
         it missing (the same fatal path as an absent rate). Never forward-fills: a past
         event is not priced at a future rate.
         """
-        c = currency.upper()
-        if c == "EUR":
+        if currency.is_base:
             return Decimal("1")
-        if c not in self.data:
+        if currency not in self.data:
             logger.debug(
-                "FX rate lookup: %s on %s: NOT FOUND (currency not in table)", c, date
+                "FX rate lookup: %s on %s: NOT FOUND (currency not in table)",
+                currency,
+                date,
             )
             return None
 
-        if date in self.data[c]:
-            rate = self.data[c][date]
-            logger.debug("FX rate lookup: %s on %s = %s (exact match)", c, date, rate)
+        if date in self.data[currency]:
+            rate = self.data[currency][date]
+            logger.debug(
+                "FX rate lookup: %s on %s = %s (exact match)", currency, date, rate
+            )
             return rate
 
         # Fall back to the nearest previous observation, but only within the staleness
         # cap (see _MAX_FX_LOOKBACK_DAYS). Find the latest date <= the requested one.
-        dates = self.date_index[c]
+        dates = self.date_index[currency]
 
         pos = bisect.bisect_right(dates, date)
         if pos == 0:
             logger.debug(
                 "FX rate lookup: %s on %s: NOT FOUND (no earlier date available)",
-                c,
+                currency,
                 date,
             )
             return None
@@ -186,7 +189,7 @@ class FxTable:
             logger.warning(
                 "FX rate for %s on %s: nearest prior rate is %d days old (%s), beyond "
                 "the %d-day staleness cap; treating as missing.",
-                c,
+                currency,
                 date,
                 days_back,
                 fallback_date,
@@ -194,10 +197,10 @@ class FxTable:
             )
             return None
 
-        rate = self.data[c][fallback_date]
+        rate = self.data[currency][fallback_date]
         logger.info(
             "FX rate for %s on %s: using rate from %s (%d days earlier) = %s",
-            c,
+            currency,
             date,
             fallback_date,
             days_back,

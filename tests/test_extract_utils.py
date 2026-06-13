@@ -1,6 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import (
     parse_dividends,
     parse_interest,
@@ -145,7 +146,7 @@ def test_parse_dividends_and_withholding_classification():
     dividends, _ = parse_dividends(model)
     assert len(dividends) == 1
     drow = dividends[0]
-    assert drow.currency == "USD"
+    assert drow.currency == Currency("USD")
     assert drow.date == dt.date(2024, 1, 5)
     assert drow.description == "Test Div"
     assert drow.amount == Decimal("10.00")

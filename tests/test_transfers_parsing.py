@@ -6,6 +6,7 @@ Test coverage for src/capitangains/reporting/extract.py::parse_transfers
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import parse_transfers
 from tests.support import parse_model
 
@@ -62,7 +63,7 @@ def test_parse_basic_incoming_transfer():
     t = transfers[0]
     assert t.section == "Transfers"
     assert t.asset_category == "Stocks"
-    assert t.currency == "GBP"
+    assert t.currency == Currency("GBP")
     assert t.symbol == "AZN"
     assert t.date == dt.date(2021, 10, 15)
     assert t.direction == "In"
@@ -1174,7 +1175,7 @@ def test_parse_real_world_data():
 
     # Verify specific transfers
     azn = next(t for t in transfers if t.symbol == "AZN")
-    assert azn.currency == "GBP"
+    assert azn.currency == Currency("GBP")
     assert azn.quantity == Decimal("10")
     assert azn.market_value == Decimal("881.40")
 
@@ -1183,6 +1184,6 @@ def test_parse_real_world_data():
     assert lloy.market_value == Decimal("1211.00")  # Comma removed
 
     fronu = next(t for t in transfers if t.symbol == "FRONU")
-    assert fronu.currency == "USD"
+    assert fronu.currency == Currency("USD")
     assert fronu.quantity == Decimal("660")
     assert fronu.market_value == Decimal("6534.00")  # Comma removed

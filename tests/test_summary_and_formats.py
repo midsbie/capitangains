@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from openpyxl import load_workbook
 
+from capitangains.conv import Currency
 from capitangains.reporting.fifo import RealizedLine
 from capitangains.reporting.fifo_domain import SellMatchLeg
 from capitangains.reporting.report_builder import ReportBuilder
@@ -15,7 +16,7 @@ def build_rb_for_summary():
     # One EUR trade
     rl_eur = RealizedLine(
         symbol="ASML",
-        currency="EUR",
+        currency=Currency("EUR"),
         sell_date=dt.date(2024, 1, 5),
         sell_qty=Decimal("10"),
         sell_gross_ccy=Decimal("1000"),
@@ -36,7 +37,7 @@ def build_rb_for_summary():
     # One USD trade
     rl_usd = RealizedLine(
         symbol="AMD",
-        currency="USD",
+        currency=Currency("USD"),
         sell_date=dt.date(2024, 1, 10),
         sell_qty=Decimal("5"),
         sell_gross_ccy=Decimal("500"),

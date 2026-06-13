@@ -8,6 +8,7 @@ extractor leaves undated for CSV 'Total' lines).
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.extract import DividendRow, SyepInterestRow
 from capitangains.reporting.report_builder import ReportBuilder
 from tests.support import realized_line
@@ -15,7 +16,7 @@ from tests.support import realized_line
 
 def _syep(symbol, value_date):
     return SyepInterestRow(
-        currency="USD",
+        currency=Currency("USD"),
         value_date=value_date,
         symbol=symbol,
         start_date=None,
@@ -44,8 +45,8 @@ def test_set_dividends_drops_rows_outside_report_year():
     rb = ReportBuilder(year=2024)
     rb.set_dividends(
         [
-            DividendRow("USD", dt.date(2023, 6, 1), "prior", Decimal("10")),
-            DividendRow("USD", dt.date(2024, 6, 1), "current", Decimal("20")),
+            DividendRow(Currency("USD"), dt.date(2023, 6, 1), "prior", Decimal("10")),
+            DividendRow(Currency("USD"), dt.date(2024, 6, 1), "current", Decimal("20")),
         ]
     )
     assert [d.description for d in rb.dividends] == ["current"]

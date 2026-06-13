@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
 from tests.support import buy, ingest, make_matcher, sell, transfer_row
 
@@ -85,7 +86,9 @@ def test_dropped_buy_lot_is_reconciled_mismatch_not_excluded():
     report = reconcile_realized_against_ibkr(trades, realized, 2024)
 
     assert report.synthetic == []  # a zero-cost gap is not synthetic
-    assert ("MSFT", "USD") in {(r.symbol, r.currency) for r in report.reconciled}
+    assert ("MSFT", Currency("USD")) in {
+        (r.symbol, r.currency) for r in report.reconciled
+    }
     [r] = report.reconciled
     assert not r.is_match
 
@@ -178,6 +181,6 @@ def test_synthesized_gap_sell_lands_in_synthetic_not_reconciled():
 
     assert report.reconciled == []
     [s] = report.synthetic
-    assert (s.symbol, s.currency) == ("SYN", "USD")
+    assert (s.symbol, s.currency) == ("SYN", Currency("USD"))
     assert s.computed == s.ibkr == Decimal("1000.00")
     assert s.is_match  # would pass -- hence the need to exclude it from `reconciled`

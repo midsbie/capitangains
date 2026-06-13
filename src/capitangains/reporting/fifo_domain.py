@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import NamedTuple, Protocol, runtime_checkable
 
+from capitangains.conv import Currency
+
 # ---------------------------------------------------------------------------
 # Protocol types for duck-typed trade/transfer objects
 # ---------------------------------------------------------------------------
@@ -18,7 +20,7 @@ class TradeProtocol(Protocol):
     date: dt.date
     symbol: str
     quantity: Decimal
-    currency: str
+    currency: Currency
     proceeds: Decimal
     comm_fee: Decimal
 
@@ -37,7 +39,7 @@ class TransferProtocol(Protocol):
     date: dt.date
     symbol: str
     quantity: Decimal
-    currency: str
+    currency: Currency
     direction: str
     market_value: Decimal
     code: str
@@ -65,14 +67,14 @@ class Lot:
     buy_date: dt.date
     qty: Decimal  # remaining quantity in lot
     basis_ccy: Decimal  # total basis in trade currency (incl. buy fees)
-    currency: str
+    currency: Currency
     transferred: bool = False  # True if lot originated from a transfer
 
 
 @dataclass
 class RealizedLine:
     symbol: str
-    currency: str
+    currency: Currency
     sell_date: dt.date
     sell_qty: Decimal  # positive quantity sold (abs of trade negative qty)
     sell_gross_ccy: Decimal  # abs(proceeds) before fees
@@ -126,7 +128,7 @@ class GapEvent:
     symbol: str
     date: dt.date
     remaining_qty: Decimal
-    currency: str
+    currency: Currency
     message: str
     outcome: GapResolution
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
+from capitangains.conv import Currency
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
@@ -69,12 +70,12 @@ NEED_TRADE_COLS = [
 class TradeRow:
     section: str
     asset_category: str
-    currency: str
+    currency: Currency
     symbol: str
     datetime_str: str
     date: dt.date
     quantity: Decimal  # positive buy, negative sell
-    t_price: Decimal   # mandatory per IBKR spec; strict gate, not read by valuation
+    t_price: Decimal  # mandatory per IBKR spec; strict gate, not read by valuation
     proceeds: Decimal  # signed: negative buy cash, positive sell cash
     comm_fee: Decimal  # signed: negative fee/commission, rarely positive rebates
     code: str
@@ -123,7 +124,7 @@ def parse_trades_stocklike_row(
     trade = TradeRow(
         section=SEC_TRADES,
         asset_category=asset_category,
-        currency=currency,
+        currency=Currency(currency),
         symbol=symbol,
         datetime_str=dt_str,
         date=_require_date("trade row", "Date/Time", dt_str),

@@ -2,6 +2,7 @@ import datetime as dt
 import logging
 from decimal import Decimal
 
+from capitangains.conv import Currency
 from capitangains.reporting.fifo_domain import RealizedLine
 from capitangains.reporting.reconcile import reconcile_realized_against_ibkr
 from tests.support import realized_line, trade_row
@@ -70,7 +71,7 @@ def test_realized_matches_ibkr_in_trade_currency():
 
     [r] = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
-    assert (r.symbol, r.currency) == ("GOOGL", "USD")
+    assert (r.symbol, r.currency) == ("GOOGL", Currency("USD"))
     assert r.computed == Decimal("22493.07")
     assert r.ibkr == Decimal("22493.07342")
     assert r.is_match
@@ -145,7 +146,7 @@ def test_elided_ibkr_realized_skips_forex_symbol_quietly(caplog):
         report = reconcile_realized_against_ibkr(trades, lines, 2024)
 
     assert report.reconciled == []  # IBKR total untrustworthy -> not reconciled
-    assert report.incomplete == [("EUR.USD", "USD")]
+    assert report.incomplete == [("EUR.USD", Currency("USD"))]
     assert report.anomalous_elision == []  # Forex elision is expected, not anomalous
     assert any(
         "skipped" in rec.getMessage() and "EUR.USD" in rec.getMessage()
@@ -166,7 +167,7 @@ def test_elided_realized_on_non_forex_sell_is_anomalous(caplog):
     with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
         report = reconcile_realized_against_ibkr(trades, lines, 2024)
 
-    assert report.anomalous_elision == [("ABC", "USD")]
+    assert report.anomalous_elision == [("ABC", Currency("USD"))]
     assert report.incomplete == []  # not folded into the benign skip
     assert report.reconciled == []  # still nothing comparable
     # The anomaly is warned by the boundary reporter, not the detector: no INFO skip.
@@ -194,11 +195,11 @@ def test_sibling_elided_sell_does_not_drop_a_valid_sells_mismatch():
 
     # The valid sell is cross-checked despite the elided sibling: a real mismatch
     # surfaces instead of the whole symbol vanishing into `incomplete`.
-    assert ("ABC", "USD") not in report.incomplete
+    assert ("ABC", Currency("USD")) not in report.incomplete
     # The blank sell still alarms, orthogonally: being reconciled is no exemption.
-    assert report.anomalous_elision == [("ABC", "USD")]
+    assert report.anomalous_elision == [("ABC", Currency("USD"))]
     [r] = report.value_diffs
-    assert (r.symbol, r.currency) == ("ABC", "USD")
+    assert (r.symbol, r.currency) == ("ABC", Currency("USD"))
     assert r.computed == Decimal("999.00") and r.ibkr == Decimal("100.00")
     assert r.n_sells == 1  # only the comparable sell counts toward tolerance
 
@@ -220,11 +221,13 @@ def test_synthetic_symbol_with_sibling_elided_sell_is_surfaced(caplog):
     with caplog.at_level(logging.INFO, logger="capitangains.reporting.reconcile"):
         report = reconcile_realized_against_ibkr(trades, lines, 2024)
 
-    assert ("SYN", "USD") in [(s.symbol, s.currency) for s in report.synthetic]
+    assert ("SYN", Currency("USD")) in [
+        (s.symbol, s.currency) for s in report.synthetic
+    ]
     assert report.incomplete == []  # surfaced as unconfirmed, not silently skipped
     assert report.reconciled == []  # the only comparable activity is tautological
     # The non-Forex blank sibling alarms orthogonally, even on a surfaced synthetic key.
-    assert report.anomalous_elision == [("SYN", "USD")]
+    assert report.anomalous_elision == [("SYN", Currency("USD"))]
     assert not any("skipped" in rec.getMessage() for rec in caplog.records)
 
 
@@ -275,7 +278,7 @@ def test_our_line_without_ibkr_realized_is_mismatch():
 
     assert report.reconciled == []
     [s] = report.synthetic
-    assert (s.symbol, s.currency) == ("SYN", "USD")
+    assert (s.symbol, s.currency) == ("SYN", Currency("USD"))
     assert s.computed == Decimal("42.00")
 
 
@@ -292,8 +295,8 @@ def test_each_symbol_compared_in_its_own_currency():
     results = reconcile_realized_against_ibkr(trades, lines, 2024).reconciled
 
     assert [(r.symbol, r.currency) for r in results] == [
-        ("AZN", "GBP"),
-        ("GOOGL", "USD"),
+        ("AZN", Currency("GBP")),
+        ("GOOGL", Currency("USD")),
     ]
     assert all(r.is_match for r in results)
 

@@ -18,7 +18,7 @@ import datetime as dt
 import logging
 from collections.abc import Mapping, Sequence
 
-from capitangains.conv import parse_date
+from capitangains.conv import Currency, parse_date
 from capitangains.errors import DataQualityError
 from capitangains.reporting import (
     ExtractionDefect,
@@ -189,7 +189,7 @@ def report_extraction_defects(
 
 
 def report_missing_fx(
-    missing: set[tuple[dt.date, str]], logger: logging.Logger
+    missing: set[tuple[dt.date, Currency]], logger: logging.Logger
 ) -> None:
     """Abort if the FX table could not supply every rate the EUR report needs.
 
@@ -214,7 +214,7 @@ def report_missing_fx(
 
 
 def report_symbol_currency_violations(
-    violations: Mapping[str, frozenset[str]], logger: logging.Logger
+    violations: Mapping[str, frozenset[Currency]], logger: logging.Logger
 ) -> None:
     """Abort if any symbol appears under more than one trade currency.
 
@@ -229,7 +229,7 @@ def report_symbol_currency_violations(
         logger.error(
             "Symbol %s maps to multiple trade currencies: %s",
             sym,
-            ", ".join(sorted(ccys)),
+            ", ".join(str(c) for c in sorted(ccys)),
         )
 
     logger.error(
