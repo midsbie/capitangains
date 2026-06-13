@@ -43,7 +43,7 @@ from capitangains.diagnostics import (
     report_unattributed_income,
     report_unrecognized_sections,
 )
-from capitangains.errors import DataQualityError
+from capitangains.errors import EXIT_DATA_QUALITY, EXIT_SETUP, DataQualityError
 from capitangains.model import IbkrStatementCsvParser, merge_models, merge_reports
 from capitangains.reporting import (
     EventStream,
@@ -92,7 +92,7 @@ def run(options: RunOptions) -> None:
         acknowledged = parse_acknowledged_gaps(options.auto_fix_sell_gaps)
     except DataQualityError as e:
         logger.error("%s", e)
-        raise SystemExit(2) from e
+        raise SystemExit(EXIT_DATA_QUALITY) from e
 
     # Parse one or more CSVs
     inputs = options.inputs
@@ -117,7 +117,7 @@ def run(options: RunOptions) -> None:
     parse_report = merge_reports(reports)
     parse_report.log_with(logger)
     if parse_report.has_errors:
-        raise SystemExit(2)
+        raise SystemExit(EXIT_DATA_QUALITY)
 
     # Validate every input's statement identity (account + reporting period) as a
     # fail-closed precondition, regardless of file count, before trusting its contents.
@@ -216,7 +216,7 @@ def run(options: RunOptions) -> None:
             logger.error(
                 "Failed to prepare FX conversion from %s: %s", options.fx_table, e
             )
-            raise SystemExit(1) from e
+            raise SystemExit(EXIT_SETUP) from e
 
     rb.convert_eur(fx)
     report_missing_fx(rb.fx_missing, logger)

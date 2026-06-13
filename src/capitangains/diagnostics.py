@@ -19,7 +19,7 @@ import logging
 from collections.abc import Mapping, Sequence
 
 from capitangains.conv import Currency, parse_date
-from capitangains.errors import DataQualityError
+from capitangains.errors import EXIT_DATA_QUALITY, DataQualityError
 from capitangains.reporting import (
     ExtractionDefect,
     OrderingCollision,
@@ -93,9 +93,10 @@ def report_gap_acknowledgments(
       (stale, mistyped, or for a gap that did not occur) is fatal.
 
     All three are accumulated into one pre-flight report: one ERROR per offending item,
-    a summary ERROR, then a single SystemExit(2) -- no fail-fast, so the operator sees
-    every problem in one pass. Only when the tie-out is clean does each SYNTHESIZED gap
-    emit its per-lot audit WARNING (the synthetic cost basis is never silent).
+    a summary ERROR, then a single SystemExit(EXIT_DATA_QUALITY) -- no fail-fast, so the
+    operator sees every problem in one pass. Only when the tie-out is clean does each
+    SYNTHESIZED gap emit its per-lot audit WARNING (the synthetic cost basis is never
+    silent).
     """
     if not gaps and not acknowledged:
         return
@@ -142,7 +143,7 @@ def report_gap_acknowledgments(
             len(defective),
             len(orphans),
         )
-        raise SystemExit(2)
+        raise SystemExit(EXIT_DATA_QUALITY)
 
     for ge in gaps:
         if ge.outcome is GapResolution.SYNTHESIZED:
@@ -166,7 +167,7 @@ def report_extraction_defects(
     Each extractor accumulates its row-level data-quality defects instead of raising on
     the first bad row, so the operator sees every problem in one pass (mirroring the FX
     and gap-acknowledgment reports above). One ERROR per defect, a summary ERROR, then a
-    single SystemExit(2) -- no workbook written.
+    single SystemExit(EXIT_DATA_QUALITY) -- no workbook written.
     """
     if not defects:
         return
@@ -185,7 +186,7 @@ def report_extraction_defects(
         "row(s) above and rerun.",
         len(defects),
     )
-    raise SystemExit(2)
+    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 def report_missing_fx(
@@ -210,7 +211,7 @@ def report_missing_fx(
         "and rerun.",
         len(missing),
     )
-    raise SystemExit(2)
+    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 def report_symbol_currency_violations(
@@ -237,7 +238,7 @@ def report_symbol_currency_violations(
         "trade currency (each must map to exactly one); no workbook written.",
         len(violations),
     )
-    raise SystemExit(2)
+    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 def report_ordering_collisions(
@@ -251,10 +252,10 @@ def report_ordering_collisions(
     date-only trade, and silently risk a wrong cost basis on exactly the figures this
     tool exists to get right, we refuse to guess. A tax figure must be correct rather
     than plausibly guessed (the stance already taken for a missing FX rate or an
-    unmatched sell), so every collision is listed, then a single SystemExit(2), and no
-    workbook is written. These collisions are rare (settlement windows push transfers
-    and same-symbol trading apart, and trade rows are normally timestamped), so no
-    override mechanism is built; an empty list is silent.
+    unmatched sell), so every collision is listed, then a single
+    SystemExit(EXIT_DATA_QUALITY), and no workbook is written. These collisions are rare
+    (settlement windows push transfers and same-symbol trading apart, and trade rows are
+    normally timestamped), so no override mechanism is built; an empty list is silent.
     """
     if not collisions:
         return
@@ -281,7 +282,7 @@ def report_ordering_collisions(
         "symbol(s) by hand, or adjust the inputs so the events do not coincide.",
         len(collisions),
     )
-    raise SystemExit(2)
+    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 def report_unrecognized_sections(
@@ -379,10 +380,10 @@ def report_invalid_statements(problems: Sequence[str], logger: logging.Logger) -
 
     The partition (reporting.validation.partition_statements_by_metadata) owns the
     rationale and produces one "<path>: <reason>" string per file whose identity could
-    not be established. The boundary lists every one, then a single SystemExit(2)
-    without writing a workbook. An empty sequence means every input's identity is sound
-    and nothing is logged. Sequenced before the cross-file conflict check, which assumes
-    a parseable identity on every input.
+    not be established. The boundary lists every one, then a single
+    SystemExit(EXIT_DATA_QUALITY) without writing a workbook. An empty sequence means
+    every input's identity is sound and nothing is logged. Sequenced before the
+    cross-file conflict check, which assumes a parseable identity on every input.
     """
     if not problems:
         return
@@ -397,7 +398,7 @@ def report_invalid_statements(problems: Sequence[str], logger: logging.Logger) -
         "rerun.",
         len(problems),
     )
-    raise SystemExit(2)
+    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 def report_statement_input_conflicts(
@@ -407,10 +408,10 @@ def report_statement_input_conflicts(
 
     The detector (reporting.validation.detect_statement_input_conflicts) owns the
     rationale and produces one human-readable problem string per conflict. The
-    boundary lists every one, then a single SystemExit(2) -- no workbook written. An
-    empty sequence means the input set is coherent and nothing is logged. Sequenced
-    before merge_models so duplicate data never reaches FIFO and the merged diagnostics
-    are not doubled.
+    boundary lists every one, then a single SystemExit(EXIT_DATA_QUALITY) -- no workbook
+    written. An empty sequence means the input set is coherent and nothing is logged.
+    Sequenced before merge_models so duplicate data never reaches FIFO and the merged
+    diagnostics are not doubled.
     """
     if not problems:
         return
@@ -423,7 +424,7 @@ def report_statement_input_conflicts(
         "workbook written. Pass one account's statements, one period per year with no "
         "overlap to prevent double-counting trades."
     )
-    raise SystemExit(2)
+    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 _RECONCILIATION_SAMPLE = 10
