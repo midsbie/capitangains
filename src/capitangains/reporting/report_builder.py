@@ -4,7 +4,7 @@ import datetime as dt
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from capitangains.conv import Currency
 
@@ -16,6 +16,20 @@ from .money import quantize_money
 from .quadro_8a import Quadro8ALine, aggregate_quadro_8a
 
 _RowT = TypeVar("_RowT")
+
+
+class _ConvertibleAmount(Protocol):
+    """A dated, currency-tagged amount the EUR pass prices in place.
+
+    The structural shape shared by DividendRow, InterestRow, and WithholdingRow:
+    _convert_amounts reads (currency, date, amount) and writes amount_eur, so the three
+    income streams convert through one loop regardless of their other fields.
+    """
+
+    currency: Currency
+    date: dt.date
+    amount: Decimal
+    amount_eur: Decimal | None
 
 
 @dataclass
@@ -130,9 +144,9 @@ class ReportBuilder:
         """
         self._convert_realized_lines(fx)
         self._convert_syep_interest(fx)
-        self._convert_withholding(fx)
-        self._convert_dividends(fx)
-        self._convert_interest(fx)
+        self._convert_amounts(self.withholding, fx)
+        self._convert_amounts(self.dividends, fx)
+        self._convert_amounts(self.interest, fx)
         self._recompute_aggregates()
 
     def _convert_realized_lines(self, fx: FxTable | None) -> None:
@@ -218,29 +232,15 @@ class ReportBuilder:
                 row.currency, row.value_date, row.interest_paid, fx
             )
 
-    def _convert_withholding(self, fx: FxTable | None) -> None:
-        if not self.withholding:
-            return
+    def _convert_amounts(
+        self, rows: Iterable[_ConvertibleAmount], fx: FxTable | None
+    ) -> None:
+        """Price each dated cash-flow row in EUR, in place.
 
-        for row in self.withholding:
-            row.amount_eur = self._convert_amount_to_eur(
-                row.currency, row.date, row.amount, fx
-            )
-
-    def _convert_dividends(self, fx: FxTable | None) -> None:
-        if not self.dividends:
-            return
-
-        for row in self.dividends:
-            row.amount_eur = self._convert_amount_to_eur(
-                row.currency, row.date, row.amount, fx
-            )
-
-    def _convert_interest(self, fx: FxTable | None) -> None:
-        if not self.interest:
-            return
-
-        for row in self.interest:
+        A None amount_eur means no rate was available; the gap is recorded by
+        _convert_amount_to_eur via _rate_or_record.
+        """
+        for row in rows:
             row.amount_eur = self._convert_amount_to_eur(
                 row.currency, row.date, row.amount, fx
             )
