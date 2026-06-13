@@ -375,6 +375,26 @@ def report_orphaned_foreign_tax(
     )
 
 
+def _list_then_abort(
+    problems: Sequence[str], summary: str, logger: logging.Logger
+) -> None:
+    """List every problem string, then abort with the summary and no workbook.
+
+    The shared tail of the string-list reporters below: one ERROR per already-formatted
+    problem, a summary ERROR, then a single SystemExit(EXIT_DATA_QUALITY) -- never
+    fail-fast. An empty sequence is silent. The caller passes ``summary`` already
+    formatted, since one reporter interpolates a count and the other is fixed.
+    """
+    if not problems:
+        return
+
+    for problem in problems:
+        logger.error("%s", problem)
+
+    logger.error("%s", summary)
+    raise SystemExit(EXIT_DATA_QUALITY)
+
+
 def report_invalid_statements(problems: Sequence[str], logger: logging.Logger) -> None:
     """Abort if any input statement's account/period identity is missing or malformed.
 
@@ -385,20 +405,14 @@ def report_invalid_statements(problems: Sequence[str], logger: logging.Logger) -
     every input's identity is sound and nothing is logged. Sequenced before the
     cross-file conflict check, which assumes a parseable identity on every input.
     """
-    if not problems:
-        return
-
-    for problem in problems:
-        logger.error("%s", problem)
-
-    logger.error(
-        "%d input statement(s) have a missing or malformed identity; no workbook "
-        "written. A valid statement carries an Account number (Account Information) "
-        "and a parseable reporting Period (Statement). Correct the file(s) above and "
-        "rerun.",
-        len(problems),
+    _list_then_abort(
+        problems,
+        f"{len(problems)} input statement(s) have a missing or malformed identity; no "
+        "workbook written. A valid statement carries an Account number (Account "
+        "Information) and a parseable reporting Period (Statement). Correct the "
+        "file(s) above and rerun.",
+        logger,
     )
-    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 def report_statement_input_conflicts(
@@ -413,18 +427,13 @@ def report_statement_input_conflicts(
     Sequenced before merge_models so duplicate data never reaches FIFO and the merged
     diagnostics are not doubled.
     """
-    if not problems:
-        return
-
-    for problem in problems:
-        logger.error("%s", problem)
-
-    logger.error(
+    _list_then_abort(
+        problems,
         "Input statements do not form a single-account, non-overlapping set; no "
         "workbook written. Pass one account's statements, one period per year with no "
-        "overlap to prevent double-counting trades."
+        "overlap to prevent double-counting trades.",
+        logger,
     )
-    raise SystemExit(EXIT_DATA_QUALITY)
 
 
 _RECONCILIATION_SAMPLE = 10
