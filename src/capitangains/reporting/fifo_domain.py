@@ -77,6 +77,15 @@ class RealizedLine:
     alloc_cost_eur: Decimal | None = None
     realized_pl_eur: Decimal | None = None
 
+    @property
+    def alloc_cost_ccy(self) -> Decimal:
+        """Total allocated cost in trade currency: the sum of the legs' pieces.
+
+        The trade-currency counterpart to the stored ``alloc_cost_eur``; derived rather
+        than stored because the legs already carry the authoritative per-lot pieces.
+        """
+        return sum((leg.alloc_cost_ccy for leg in self.legs), Decimal("0"))
+
 
 class GapResolution(enum.Enum):
     """Outcome of resolving an unmatched SELL (a "gap"), partitioned at the boundary.

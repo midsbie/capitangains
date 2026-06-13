@@ -92,7 +92,7 @@ class ReportBuilder:
         ccy = t.get_currency(rl.currency)
         ccy.realized += rl.realized_pl_ccy
         ccy.proceeds += rl.sell_net_ccy
-        ccy.alloc_cost += sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0"))
+        ccy.alloc_cost += rl.alloc_cost_ccy
 
     def add_realized_lines(self, lines: Iterable[RealizedLine]) -> None:
         """Aggregate every realized line whose sell date falls in this report's year."""

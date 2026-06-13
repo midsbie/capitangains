@@ -266,7 +266,7 @@ _REALIZED_SPEC: _SheetSpec[RealizedLine] = _SheetSpec(
         ),
         _MoneyColumn[RealizedLine](
             "alloc_tcy",
-            value=lambda rl: sum((leg.alloc_cost_ccy for leg in rl.legs), Decimal("0")),
+            value=lambda rl: rl.alloc_cost_ccy,
             currency=lambda rl: rl.currency,
         ),
         _MoneyColumn[RealizedLine](
