@@ -200,8 +200,7 @@ class FifoMatcher:
             gap_fixed = gap_event.outcome is GapResolution.SYNTHESIZED
             if gap_fixed:
                 logger.info(
-                    "Gap resolved by policy: added leg with %s shares "
-                    "(cost: %s %s)",
+                    "Gap resolved by policy: added leg with %s shares (cost: %s %s)",
                     result.leg.qty,
                     result.leg.alloc_cost_ccy,
                     trade.currency,

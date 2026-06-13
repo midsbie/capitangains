@@ -9,6 +9,7 @@ from decimal import Decimal
 from capitangains.conv import Currency
 from capitangains.reporting.extract import TradeRow
 from capitangains.reporting.fifo_domain import RealizedLine
+from capitangains.reporting.money import abs_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class SymbolReconciliation:
     def diff(self) -> Decimal | None:
         if self.computed is None or self.ibkr is None:
             return None
-        return (self.computed - self.ibkr).copy_abs()
+        return abs_decimal(self.computed - self.ibkr)
 
     @property
     def tolerance(self) -> Decimal:
