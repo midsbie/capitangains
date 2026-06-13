@@ -20,6 +20,32 @@ ELISION_PLACEHOLDERS = frozenset({"-", "--", "...", "N/A", "n/a"})
 logger = logging.getLogger(__name__)
 
 
+def _coerce_or_text(s: str | float | int | Decimal | None) -> Decimal | str | None:
+    """Resolve the numeric fast-paths shared by to_dec and to_dec_strict.
+
+    Returns None for a None input, a Decimal when the value is already numeric (a
+    Decimal passes through, an int/float widens), or the stripped text otherwise. A
+    returned str still needs the IBKR number grammar; each caller layers its own empty,
+    placeholder, and malformed policy on top.
+    """
+    if s is None:
+        return None
+    if isinstance(s, Decimal):
+        return s
+    if isinstance(s, (int, float)):
+        return Decimal(str(s))
+    return s.strip()
+
+
+def _parse_clean(text: str) -> Decimal:
+    """Apply IBKR number grammar: drop thousands separators, then parse.
+
+    Raises InvalidOperation on malformed input; the caller maps that to its own
+    disposition (default for to_dec, ValueError for to_dec_strict).
+    """
+    return Decimal(NUM_CLEAN_RE.sub("", text))
+
+
 def to_dec(
     s: str | float | int | Decimal | None, default: Decimal = Decimal("0")
 ) -> Decimal:
@@ -31,33 +57,29 @@ def to_dec(
     - "...", "N/A" -> default (with warning for elided data)
     - "1,234.56" -> Decimal("1234.56")
     """
-    if s is None:
+    coerced = _coerce_or_text(s)
+    if coerced is None:
         return default
-    if isinstance(s, Decimal):
-        return s
-    if isinstance(s, (int, float)):
-        return Decimal(str(s))
-
-    s_stripped = s.strip()
-    if not s_stripped:
+    if isinstance(coerced, Decimal):
+        return coerced
+    if not coerced:
         return default
 
     # Silent placeholders
-    if s_stripped in {"-", "--"}:
+    if coerced in {"-", "--"}:
         return default
 
     # Warn on elided/missing data
-    if s_stripped in {"...", "N/A", "n/a"}:
+    if coerced in {"...", "N/A", "n/a"}:
         logger.warning(
             'Encountered elided/unavailable value "%s"; treating as %s.',
-            s_stripped,
+            coerced,
             default,
         )
         return default
 
     try:
-        s_clean = NUM_CLEAN_RE.sub("", s_stripped)
-        return Decimal(s_clean)
+        return _parse_clean(coerced)
     except InvalidOperation:
         logger.error("Failed to parse number from: %r; using %s", s, default)
         return default
@@ -73,23 +95,19 @@ def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
     it is not suitable for operator-supplied numbers of unknown locale; the --fx-table
     rate is parsed strictly on both axes by fx._parse_fx_rate.
     """
-    if s is None:
+    coerced = _coerce_or_text(s)
+    if coerced is None:
         raise ValueError("Value is None")
-    if isinstance(s, Decimal):
-        return s
-    if isinstance(s, (int, float)):
-        return Decimal(str(s))
-
-    s_stripped = s.strip()
-    if not s_stripped:
+    if isinstance(coerced, Decimal):
+        return coerced
+    if not coerced:
         raise ValueError("Value is empty string")
 
-    if s_stripped in ELISION_PLACEHOLDERS:
-        raise ValueError(f"Value is a placeholder: {s_stripped!r}")
+    if coerced in ELISION_PLACEHOLDERS:
+        raise ValueError(f"Value is a placeholder: {coerced!r}")
 
     try:
-        s_clean = NUM_CLEAN_RE.sub("", s_stripped)
-        return Decimal(s_clean)
+        return _parse_clean(coerced)
     except InvalidOperation as e:
         raise ValueError(f"Invalid decimal format: {s!r}") from e
 
