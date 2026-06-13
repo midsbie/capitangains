@@ -55,7 +55,6 @@ def _zero_cost_leg(qty: Decimal) -> SellMatchLeg:
     return SellMatchLeg(
         buy_date=None,
         qty=qty,
-        lot_qty_before=Decimal("0"),
         alloc_cost_ccy=quantize_allocation(Decimal("0")),
     )
 
@@ -213,7 +212,6 @@ class BasisSynthesisPolicy:
             leg=SellMatchLeg(
                 buy_date=trade.date,
                 qty=qty_remaining,
-                lot_qty_before=Decimal("0"),
                 alloc_cost_ccy=synth_cost,
                 synthetic=True,
             ),

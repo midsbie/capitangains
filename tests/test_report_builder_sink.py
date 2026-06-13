@@ -136,7 +136,6 @@ def test_convert_eur_zero_sell_qty_skips_proceeds_allocation():
             SellMatchLeg(
                 buy_date=None,
                 qty=Decimal("0"),
-                lot_qty_before=Decimal("0"),
                 alloc_cost_ccy=Decimal("0"),
             )
         ],

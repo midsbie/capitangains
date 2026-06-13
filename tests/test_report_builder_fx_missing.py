@@ -22,7 +22,6 @@ def _realized(currency, sell_date, buy_date):
             sell_match_leg(
                 buy_date=buy_date,
                 qty="10",
-                lot_qty_before="10",
                 alloc_cost_ccy="900",
             )
         ],

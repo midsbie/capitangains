@@ -164,7 +164,6 @@ def test_per_symbol_summary_trade_and_eur(tmp_path):
         SellMatchLeg(
             buy_date=dt.date(2024, 1, 1),
             qty=Decimal("10"),
-            lot_qty_before=Decimal("10"),
             alloc_cost_ccy=Decimal("800"),
         )
     ]

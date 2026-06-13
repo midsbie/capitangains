@@ -270,7 +270,6 @@ def test_realized_line_builder_rounds_realized_pl():
         SellMatchLeg(
             buy_date=dt.date(2023, 6, 1),
             qty=Decimal("50"),
-            lot_qty_before=Decimal("50"),
             alloc_cost_ccy=Decimal("420.56789012"),
         )
     ]

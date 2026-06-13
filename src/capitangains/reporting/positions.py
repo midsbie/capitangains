@@ -40,7 +40,6 @@ class PositionBook:
             leg = SellMatchLeg(
                 buy_date=lot.buy_date,
                 qty=take,
-                lot_qty_before=lot.qty,
                 alloc_cost_ccy=cost_piece,
                 transferred=lot.transferred,
             )

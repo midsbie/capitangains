@@ -182,7 +182,6 @@ class FifoMatcher:
             trade.currency,
         )
 
-        gap_event: GapEvent | None = None
         has_gap = qty_remaining > 0
         gap_fixed = False
 
@@ -198,22 +197,19 @@ class FifoMatcher:
             legs.append(result.leg)
             alloc_cost_ccy = result.alloc_cost
             gap_event = result.event
-            if gap_event is not None:
-                gap_fixed = gap_event.outcome is GapResolution.SYNTHESIZED
-                if gap_fixed:
-                    logger.info(
-                        "Gap resolved by policy: added leg with %s shares "
-                        "(cost: %s %s)",
-                        result.leg.qty,
-                        result.leg.alloc_cost_ccy,
-                        trade.currency,
-                    )
-                else:
-                    # The CLI boundary owns user-facing reporting of unresolved gaps
-                    # (the two-way acknowledgment tie-out); keep this at debug.
-                    logger.debug("Gap NOT resolved: %s", gap_event.message)
-
-        if gap_event is not None:
+            gap_fixed = gap_event.outcome is GapResolution.SYNTHESIZED
+            if gap_fixed:
+                logger.info(
+                    "Gap resolved by policy: added leg with %s shares "
+                    "(cost: %s %s)",
+                    result.leg.qty,
+                    result.leg.alloc_cost_ccy,
+                    trade.currency,
+                )
+            else:
+                # The CLI boundary owns user-facing reporting of unresolved gaps
+                # (the two-way acknowledgment tie-out); keep this at debug.
+                logger.debug("Gap NOT resolved: %s", gap_event.message)
             self.recorder.record_gap(gap_event)
 
         line = build_realized_line(trade, legs, alloc_cost_ccy)

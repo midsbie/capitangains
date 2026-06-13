@@ -30,7 +30,6 @@ class DummyPolicy(GapPolicy):
             leg=SellMatchLeg(
                 buy_date=trade.date,
                 qty=qty_remaining,
-                lot_qty_before=Decimal("0"),
                 alloc_cost_ccy=Decimal("0"),
             ),
             alloc_cost=alloc_cost_so_far,
@@ -42,20 +41,6 @@ class DummyPolicy(GapPolicy):
                 message="dummy",
                 outcome=GapResolution.SYNTHESIZED,
             ),
-        )
-
-
-class NoneEventPolicy(GapPolicy):
-    def resolve(self, trade, qty_remaining, alloc_cost_so_far):
-        return ResolvedGap(
-            leg=SellMatchLeg(
-                buy_date=None,
-                qty=qty_remaining,
-                lot_qty_before=Decimal("0"),
-                alloc_cost_ccy=Decimal("0"),
-            ),
-            alloc_cost=alloc_cost_so_far,
-            event=None,
         )
 
 
@@ -101,18 +86,6 @@ def test_fifo_matcher_sell_uses_gap_policy_and_recorder():
     assert line is not None and line.has_gap is True and line.gap_fixed is True
     assert policy.calls == 1
     assert recorder.gap_events[0].message == "dummy"
-
-
-def test_fifo_matcher_gap_policy_can_skip_event():
-    book = PositionBook()
-    policy = NoneEventPolicy()
-    matcher = FifoMatcher(positions=book, gap_policy=policy)
-
-    trade = _trade("ABC", Decimal("-5"), proceeds=Decimal("50"), comm=Decimal("0"))
-    line = matcher.ingest_trade(trade)
-
-    assert line is not None and line.has_gap is True
-    assert matcher.gap_events == []
 
 
 def test_fifo_matcher_validates_quantities():

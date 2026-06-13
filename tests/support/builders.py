@@ -175,7 +175,6 @@ def sell_match_leg(
     *,
     buy_date: dt.date | str | None = None,
     qty: Decimal | str = "0",
-    lot_qty_before: Decimal | str = "0",
     alloc_cost_ccy: Decimal | str = "0",
     synthetic: bool = False,
     transferred: bool = False,
@@ -184,7 +183,6 @@ def sell_match_leg(
     return SellMatchLeg(
         buy_date=None if buy_date is None else _date(buy_date),
         qty=_dec(qty),
-        lot_qty_before=_dec(lot_qty_before),
         alloc_cost_ccy=_dec(alloc_cost_ccy),
         synthetic=synthetic,
         transferred=transferred,
@@ -196,7 +194,6 @@ def _leg_from_spec(spec: Mapping[str, Any]) -> SellMatchLeg:
     return sell_match_leg(
         buy_date=spec.get("buy_date"),
         qty=qty,
-        lot_qty_before=spec.get("lot_qty_before", qty),
         alloc_cost_ccy=spec["alloc_cost_ccy"],
         synthetic=spec.get("synthetic", False),
         transferred=spec.get("transferred", False),

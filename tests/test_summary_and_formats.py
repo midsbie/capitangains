@@ -26,7 +26,6 @@ def build_rb_for_summary():
             SellMatchLeg(
                 buy_date=dt.date(2023, 12, 1),
                 qty=Decimal("10"),
-                lot_qty_before=Decimal("10"),
                 alloc_cost_ccy=Decimal("800.00"),
             )
         ],
@@ -47,7 +46,6 @@ def build_rb_for_summary():
             SellMatchLeg(
                 buy_date=dt.date(2023, 6, 1),
                 qty=Decimal("5"),
-                lot_qty_before=Decimal("5"),
                 alloc_cost_ccy=Decimal("400.00"),
             )
         ],

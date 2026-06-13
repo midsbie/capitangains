@@ -26,13 +26,6 @@ class TradeProtocol(Protocol):
 
 
 @runtime_checkable
-class TradeWithBasisProtocol(TradeProtocol, Protocol):
-    """Trade protocol extended with optional basis for gap resolution."""
-
-    basis_ccy: Decimal | None
-
-
-@runtime_checkable
 class TransferProtocol(Protocol):
     """Minimal interface for transfer objects used in position seeding."""
 
@@ -54,7 +47,6 @@ class TransferProtocol(Protocol):
 class SellMatchLeg:
     buy_date: dt.date | None
     qty: Decimal
-    lot_qty_before: Decimal
     alloc_cost_ccy: Decimal
     synthetic: bool = False
     transferred: bool = False
@@ -138,9 +130,9 @@ class ResolvedGap(NamedTuple):
 
     ``leg`` is the single gap leg to append -- a zero-cost placeholder or a synthetic
     lot; ``alloc_cost`` is the resulting total allocated cost; ``event`` is the audit
-    record, or None when a policy records nothing.
+    record of the resolution.
     """
 
     leg: SellMatchLeg
     alloc_cost: Decimal
-    event: GapEvent | None
+    event: GapEvent
