@@ -232,7 +232,6 @@ def main() -> None:
     parser = build_argparser()
     args = parser.parse_args()
 
-    # Configure logging based on verbosity
     verbosity_map = {
         0: logging.WARNING,  # Default: quiet
         1: logging.INFO,  # -v: informational

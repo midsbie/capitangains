@@ -76,7 +76,7 @@ def parse_transfers(
 
             symbol = r.get("Symbol", "").strip()
             date_s = r.get("Date", "").strip()
-            direction = r.get("Direction", "").strip()  # "In" or "Out"
+            direction = r.get("Direction", "").strip()
             qty_s = r.get("Qty", "").strip()
             if not qty_s and "Quantity" in r:
                 qty_s = r.get("Quantity", "").strip()
@@ -159,7 +159,6 @@ def parse_transfers(
                 )
                 continue
 
-    # Sort by date
     out.sort(key=lambda x: x.date)
 
     if skipped_non_stock:

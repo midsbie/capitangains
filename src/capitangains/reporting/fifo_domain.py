@@ -8,10 +8,6 @@ from typing import NamedTuple, Protocol, runtime_checkable
 
 from capitangains.conv import Currency
 
-# ---------------------------------------------------------------------------
-# Protocol types for duck-typed trade/transfer objects
-# ---------------------------------------------------------------------------
-
 
 @runtime_checkable
 class TradeProtocol(Protocol):
@@ -36,11 +32,6 @@ class TransferProtocol(Protocol):
     direction: str
     market_value: Decimal
     code: str
-
-
-# ---------------------------------------------------------------------------
-# Domain dataclasses
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -76,10 +67,9 @@ class RealizedLine:
     realized_pl_ccy: Decimal
     has_gap: bool = False
     gap_fixed: bool = False
-    # True when IBKR elided this disposal's per-trade Realized P/L (Forex rows, or a
-    # corrupt cell). Such a disposal carries no IBKR figure to reconcile against, so it
-    # is dropped from the cross-check on BOTH sides. Set at event-stream replay, where
-    # the source TradeRow is in hand; see reconcile.reconcile_realized_against_ibkr.
+    # True when IBKR elided this disposal's per-trade Realized P/L (Forex, or a corrupt
+    # cell), so it carries no IBKR figure and is dropped from the cross-check on BOTH
+    # sides. Set at event-stream replay; see reconcile.reconcile_realized_against_ibkr.
     ibkr_realized_elided: bool = False
     sell_gross_eur: Decimal | None = None
     sell_comm_eur: Decimal | None = None

@@ -12,11 +12,9 @@ from capitangains.conv import Currency, parse_date, to_dec_strict
 
 logger = logging.getLogger(__name__)
 
-# Hard cap on how stale a fallback rate may be. The nearest prior observation is
-# accepted only within this window (covers weekends/holidays); a gap wider than the cap
-# makes get_rate return None so the rate is reported missing rather than silently
-# extrapolated. The usual cause is a lookup that runs more than this many days past the
-# table's last entry.
+# Hard cap on fallback-rate staleness. The nearest prior observation is accepted
+# only within this window (covers weekends/holidays); a wider gap makes get_rate return
+# None so the rate is reported missing rather than silently extrapolated.
 _MAX_FX_LOOKBACK_DAYS = 7
 
 
@@ -56,11 +54,10 @@ class FxTable:
     """
 
     def __init__(self) -> None:
-        # Map: Currency -> { date -> Decimal(eur_per_unit) }, plus sorted date list.
-        # Keys are normalized Currency objects, so a lookup is case-insensitive by
-        # construction. Dates are real dt.date keys, not strings: comparison and bisect
-        # are then chronological by construction, immune to the lexical-vs-chronological
-        # hazard a non-canonical string key would introduce.
+        # Map: Currency -> { date -> Decimal(eur_per_unit) }, plus a sorted date list.
+        # Currency keys are normalized, so lookups are case-insensitive. Dates are real
+        # dt.date keys (not strings), so comparison and bisect are chronological, immune
+        # to the lexical-vs-chronological hazard a string key would introduce.
         self.data: dict[Currency, dict[dt.date, Decimal]] = defaultdict(dict)
         self.date_index: dict[Currency, list[dt.date]] = {}
 
@@ -82,9 +79,8 @@ class FxTable:
                 try:
                     d = parse_date(raw_date)
                 except (ValueError, TypeError) as exc:
-                    # Reject a non-canonical or malformed date loudly here rather than
-                    # store it as an untrusted string and mis-sort/mis-match it later.
-                    # A valid ISO date is a precondition for the table.
+                    # Reject a malformed date here rather than store an untrusted string
+                    # and mis-sort it later. A valid ISO date is a precondition.
                     raise ValueError(
                         f"FX table has an unparseable date {raw_date!r}"
                     ) from exc
@@ -92,7 +88,6 @@ class FxTable:
                 if not ccy.code:
                     raise ValueError(f"FX row missing currency for date {d}")
                 if ccy.is_base:
-                    # Store identity explicitly for completeness.
                     eur_per_unit = Decimal("1")
                 else:
                     units_per_eur = _parse_fx_rate(row["rate"], ccy, d)
@@ -108,11 +103,9 @@ class FxTable:
                             f"Invalid zero FX rate for {ccy} on {d}"
                         ) from exc
 
-                # Any duplicate (currency, date) row means the upstream process emitted
-                # the same key twice. A process that double-emits cannot be trusted to
-                # have faithfully represented the rest of the table and, as a
-                # consequence, we reject outright, like the loader's other per-row
-                # validations.
+                # A duplicate (currency, date) row means the upstream process double-
+                # emitted a key; a process that does so cannot be trusted with the rest
+                # of the table, so reject outright like the loader's other validations.
                 if d in inst.data[ccy]:
                     raise ValueError(f"FX table has a duplicate row for {ccy} on {d}")
 

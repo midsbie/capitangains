@@ -108,9 +108,8 @@ def _route_withholding(
     """
     if wh.type == "Interest":
         # Interest withholding carries no country suffix in IBKR data, so it joins the
-        # gross interest under the broker group. The ``wh.country or`` is defensive:
-        # a suffixed interest withholding, should one ever appear, routes to its own
-        # country instead of silently joining the broker group.
+        # broker group. ``wh.country or`` is defensive: a suffixed one (should it ever
+        # appear) routes to its own country instead.
         return IncomeKind.INTEREST, (wh.country or broker_country)
     if wh.type == "Dividend":
         # Country comes from the withholding's " - XX Tax" suffix (wh.country), which in
@@ -152,12 +151,10 @@ def aggregate_quadro_8a(
                 _dividend_kind(div.description), isin_country(div.description) or ""
             ).gross += div.amount_eur
 
-    # Gross: broker-paid interest income (credit + monthly SYEP summaries) under one
-    # injected jurisdiction. Debit (margin) interest the account pays is a financing
-    # cost, not Box 8A income, so _is_income_interest drops it rather than letting it
-    # net against credit interest. The per-loan ``syep_interest`` detail is deliberately
-    # not a parameter, structurally preventing a double-count with the SYEP lines that
-    # ``interest`` already carries.
+    # Gross: broker-paid interest (credit + monthly SYEP summaries) under one injected
+    # jurisdiction. Debit (margin) interest is a financing cost, not Box 8A income, so
+    # _is_income_interest drops it. The per-loan syep_interest detail is deliberately
+    # not a parameter, preventing a double-count with the SYEP lines interest carries.
     for intr in interest:
         if intr.amount_eur is not None and _is_income_interest(intr.description):
             group_for(IncomeKind.INTEREST, broker_country).gross += intr.amount_eur

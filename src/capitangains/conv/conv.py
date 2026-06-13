@@ -5,15 +5,11 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation
 
-# Strip thousands separators and whitespace before Decimal parsing. This is safe ONLY
-# for IBKR statement numbers, where a comma is unambiguously a thousands separator (e.g.
-# Quantity "1,300", or "-29,252.67" where a comma and a decimal point coexist in one
-# cell), never a decimal comma. IBKR applies the grouping inconsistently (most values >=
-# 1000 are ungrouped, and a single row can mix the two, e.g. Quantity "1,300" beside
-# Proceeds -19838), but a comma's *meaning* is fixed, so stripping it is correct
-# regardless of that inconsistency. Operator-supplied numbers (the --fx-table CSV) carry
-# no such guarantee: there a comma could be a decimal comma, so they must NOT be parsed
-# through this cleaner. See fx._parse_fx_rate.
+# Strip thousands separators and whitespace before Decimal parsing. Safe ONLY for IBKR
+# statement numbers, where a comma is a thousands separator, never a decimal comma
+# (even when IBKR groups inconsistently within a row). Operator-supplied numbers (the
+# --fx-table CSV) carry no such guarantee, so they must NOT pass through this cleaner.
+# See fx._parse_fx_rate.
 NUM_CLEAN_RE = re.compile(r"[,\s]")
 
 # The strings IBKR uses for an absent or elided numeric cell. One home for "what counts
@@ -63,7 +59,6 @@ def to_dec(
         s_clean = NUM_CLEAN_RE.sub("", s_stripped)
         return Decimal(s_clean)
     except InvalidOperation:
-        # Log error but don't crash; return default
         logger.error("Failed to parse number from: %r; using %s", s, default)
         return default
 

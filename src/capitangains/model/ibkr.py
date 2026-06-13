@@ -134,7 +134,7 @@ class IbkrStatementCsvParser:
             # Strip BOM on first cell if present
             section = (row[0] or "").lstrip("\ufeff")
             kind = (row[1] or "").strip()
-            payload = list(row[2:])  # copy
+            payload = list(row[2:])
 
             if kind == "Header":
                 # Start a new subtable with this header under the given section
@@ -171,7 +171,6 @@ class IbkrStatementCsvParser:
                 report.warn(line_no, f"Unknown kind {kind!r}; row skipped.", row)
                 continue
 
-            # "Data" row
             if current_section is None or current_subtable is None:
                 report.error(
                     line_no, "Data row encountered before any header; row skipped.", row
@@ -202,7 +201,6 @@ class IbkrStatementCsvParser:
 
         self._report_width_mismatches(sections_acc, report)
 
-        # Freeze into the public immutable dataclasses
         model = IbkrModel(
             sections={
                 sec: [sub.freeze() for sub in subtables]

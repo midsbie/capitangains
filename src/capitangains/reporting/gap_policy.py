@@ -19,16 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 # IBKR's per-trade columns satisfy Proceeds + Comm + Basis = Realized to sub-cent
-# precision (observed residuals <= ~1e-6 on real statements). A residual beyond this
-# band means the Basis cell is internally inconsistent with Realized -- a typo or
-# corruption -- so a cost synthesized from it would be fabricated, not approximate.
-# 0.02 sits well above rounding noise and far below any realistic Basis typo.
+# precision (observed residuals <= ~1e-6). A residual beyond this band means the Basis
+# cell is inconsistent with Realized (a typo or corruption), so a cost synthesized from
+# it would be fabricated. 0.02 sits well above rounding noise, below any realistic typo.
 _IDENTITY_TOLERANCE = Decimal("0.02")
 
-# Default band for the synthesis residual: when an acknowledged gap's IBKR Basis falls a
-# hair below the already-matched cost, a shortfall within this tolerance is rounding
-# noise and is clamped to zero rather than rejected. Distinct from the identity check
-# above -- that validates the Basis cell; this absorbs sub-cent allocation drift.
+# Default band for the synthesis residual: a shortfall within this tolerance is rounding
+# noise, clamped to zero rather than rejected. Distinct from the identity check above:
+# that validates the Basis cell, this absorbs sub-cent allocation drift.
 _DEFAULT_GAP_TOLERANCE = Decimal("0.02")
 
 
@@ -185,12 +183,10 @@ class BasisSynthesisPolicy:
                 )
                 return self._defective(trade, qty_remaining, alloc_cost_so_far, message)
 
-        # Past here we would commit to IBKR's Basis as the cost figure; require IBKR's
-        # own Realized P/L to vouch for it first. A Basis that breaks the identity is a
-        # typo; an absent Realized leaves the Basis unvalidatable, and since a real IBKR
-        # sell carrying a Basis always reports the derived Realized, its absence signals
-        # a corrupt row rather than a synthesizable gap. Either way refuse, so an
-        # unbounded cost from a bad Basis cannot pass as a synthesized figure.
+        # Past here we commit to IBKR's Basis as cost, so require IBKR's own Realized
+        # P/L to vouch for it first. A real sell carrying a Basis always reports the
+        # derived Realized, so an absent Realized signals a corrupt row, not a
+        # synthesizable gap. Either way refuse: a bad Basis cannot pass as synthesized.
         rejection = self._basis_rejection_reason(trade, basis)
         if rejection is not None:
             return self._defective(trade, qty_remaining, alloc_cost_so_far, rejection)
@@ -258,8 +254,8 @@ class BasisSynthesisPolicy:
           derived Realized (IBKR blanks both together, e.g. on Forex legs that have no
           cost basis), so an absent Realized beside a present Basis signals a corrupt or
           column-shifted row, not a synthesizable gap. Refuse rather than fabricate a
-          cost from an unverifiable cell (the bound CG-03 lacked: without it a corrupt
-          Basis on such a row synthesized an arbitrary cost and only warned).
+          cost from an unverifiable cell: without this bound, a corrupt Basis on such a
+          row would synthesize an arbitrary cost and merely warn.
         - Realized P/L is present and the identity is violated beyond
           _IDENTITY_TOLERANCE, proving the Basis cell corrupt (a typo). The identity,
           not a magnitude factor, distinguishes corruption from a legitimate near-total

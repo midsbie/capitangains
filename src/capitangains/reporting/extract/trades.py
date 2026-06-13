@@ -100,27 +100,21 @@ def parse_trades_stocklike_row(
 
     t_price_s = r.get("T. Price", "").strip()
 
-    # Commission is 'Comm/Fee' in stock trades; 'Comm in EUR' appears in some Forex
-    # tables. Track which label was resolved so a strict-parse failure names it. It is
-    # parsed strictly below: commission
-    # feeds basis on buys and net proceeds on sells, so a silently-zeroed placeholder
-    # ('...', '--', '') would bias the filed gain. A commission-free trade reports '0',
-    # which to_dec_strict parses fine.
+    # Commission is 'Comm/Fee' in stock trades, 'Comm in EUR' in some Forex tables;
+    # track which label resolved so a strict-parse failure names it. Parsed strictly:
+    # commission feeds basis on buys and net proceeds on sells, so a silently-zeroed
+    # placeholder would bias the filed gain (a commission-free trade reports '0').
     comm_col = (
         "Comm in EUR" if ("Comm in EUR" in r and "Comm/Fee" not in r) else "Comm/Fee"
     )
     comm_s = r.get(comm_col, "").strip()
 
-    # Strict vs optional here mirrors the IBKR Trades spec (for more info, consult
-    # doc/IBKR-reporting_guide.txt) and the sample statements. Quantity, T. Price,
-    # Proceeds and Comm/Fee are mandatory transaction columns: every Trades row carries
-    # them for both Stocks and Forex, so a blank or unparseable value is corruption that
-    # must fail closed. Do NOT relax T. Price just because valuation ignores it: a blank
-    # T. Price never occurs in valid input, so the strict parse is a correct integrity
-    # gate, not a spurious abort. Basis and Realized P/L are the only genuinely optional
-    # columns: IBKR leaves them blank on Forex rows (an FX leg has no cost basis or
-    # realized), which is why only those map elision to None via _optional_decimal (a
-    # malformed cell there is still rejected as a defect; CG-07).
+    # Strict vs optional mirrors the IBKR Trades spec (doc/IBKR-reporting_guide.txt).
+    # Quantity, T. Price, Proceeds and Comm/Fee are mandatory on every row (Stocks and
+    # Forex), so a blank fails closed; do NOT relax T. Price just because valuation
+    # ignores it. Basis and Realized P/L are the only optional columns: IBKR blanks them
+    # on Forex rows, so only those map elision to None via _optional_decimal (a
+    # malformed cell there is still rejected as a defect).
     trade = TradeRow(
         section=SEC_TRADES,
         asset_category=asset_category,
@@ -139,7 +133,6 @@ def parse_trades_stocklike_row(
         ),
     )
 
-    # Only track non-zero quantity
     return trade if trade.quantity != 0 else None
 
 
@@ -171,7 +164,6 @@ def parse_trades_stocklike(
                 asset_categories,
             )
 
-        # Try to locate relevant columns (be lenient)
         col: dict[str, int | None] = {k: None for k in TRADE_COLS}
         for name in col:
             for i, h in enumerate(header):
@@ -216,11 +208,9 @@ def parse_trades_stocklike(
             else:
                 skipped_rows += 1
 
-    # Intentionally unsorted: ordering is the pipeline's responsibility, not the
-    # extractor's. The pipeline merges trades with transfers and orders that combined
-    # stream in EventStream (reporting.event_stream), the single source of ordering
-    # truth for FIFO, with a key equivalent to the one this layer used to apply, so
-    # pre-sorting here was moot.
+    # Intentionally unsorted: ordering is the pipeline's job. It merges trades
+    # with transfers and orders the combined stream in EventStream, the single source of
+    # ordering truth for FIFO, so pre-sorting here would be moot.
     if skipped_rows:
         logger.info(
             "Trades (scope=%r): skipped %d row(s) -- out-of-scope asset category "

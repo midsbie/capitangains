@@ -117,9 +117,8 @@ class _MoneyColumn(_Column[_RowT]):
 
     def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
         # The currency selector is a uniform callable (per-row Currency or the EUR
-        # constant), so no isinstance branch is needed and the format follows each row's
-        # currency. money() takes the code string, so unwrap the Currency here, at the
-        # sink boundary.
+        # constant), so no isinstance branch is needed. money() takes the code string,
+        # so unwrap the Currency here, at the sink boundary.
         return formats.money(str(self.currency(row)))
 
 
@@ -542,7 +541,6 @@ class _SheetWriter:
     formats: NumberFormats
 
     def write_summary(self, report: ReportBuilder) -> None:
-        # Summary sheet (totals)
         ws = self.wb.create_sheet(title=self.labels["sheet"]["summary"])
         total_eur = sum(
             (rl.realized_pl_eur or Decimal("0") for rl in report.realized_lines),
@@ -620,7 +618,6 @@ class _SheetWriter:
                 v = sheet.cell(row=row, column=col).value
                 if v is None:
                     continue
-                # Approximate display width using string conversion
                 if hasattr(v, "strftime"):
                     s = (
                         v.strftime("%d/%m/%Y")
@@ -650,7 +647,6 @@ class ExcelReportSink:
         out_path = Path(self.out_path)
         wb = Workbook()
 
-        # Remove the default sheet
         ws_default = wb.active
         if ws_default is not None:
             wb.remove(ws_default)

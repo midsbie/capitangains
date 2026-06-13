@@ -41,8 +41,7 @@ def _build_withholding_row(f: CashFlowFields) -> WithholdingRow:
     code = f.raw.get("Code", "").strip()
 
     dlow = f.description.lower()
-    # Classify withholding tax type with explicit precedence
-    # Most specific patterns first, then generic fallbacks
+    # Classify by description, most specific pattern first (precedence matters).
     if "credit interest" in dlow:
         wtype = "Interest"
     elif "dividend" in dlow:
@@ -53,7 +52,6 @@ def _build_withholding_row(f: CashFlowFields) -> WithholdingRow:
         # Generic interest (not dividend-related, already caught above)
         wtype = "Interest"
     else:
-        # Unknown/other
         logger.warning(
             "Unrecognized withholding tax description: %r. "
             "Classifying as 'Unknown'. Please verify data integrity.",

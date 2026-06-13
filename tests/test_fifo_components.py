@@ -235,7 +235,7 @@ def test_basis_synthesis_policy_refuses_when_realized_absent():
     # A real IBKR sell carrying a Basis always carries the derived Realized P/L, so an
     # absent Realized beside a present Basis is a corrupt/shifted row, not a gap to
     # synthesize. With no Realized to validate the (here corrupt) Basis, synthesis must
-    # refuse -- DEFECTIVE -- rather than fabricate a 9999 cost and merely warn (CG-03).
+    # refuse -- DEFECTIVE -- rather than fabricate a 9999 cost and merely warn.
     trade = Trade(
         symbol="NOR",
         date=dt.date(2024, 3, 7),

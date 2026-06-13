@@ -175,7 +175,7 @@ def test_elided_realized_on_non_forex_sell_is_anomalous(caplog):
 
 
 def test_sibling_elided_sell_does_not_drop_a_valid_sells_mismatch():
-    # CG-11. ABC/USD has two closing sells: one valid (IBKR realized 100.00) and one
+    # ABC/USD has two closing sells: one valid (IBKR realized 100.00) and one
     # whose IBKR realized is elided. Our FIFO is wrong on the *valid* sell (999.00 vs
     # 100.00), which is exactly the kind of error the cross-check exists to catch.
     # Eliding one trade makes only that trade unverifiable; it must not poison the
@@ -205,7 +205,7 @@ def test_sibling_elided_sell_does_not_drop_a_valid_sells_mismatch():
 
 
 def test_synthetic_symbol_with_sibling_elided_sell_is_surfaced(caplog):
-    # CG-14. SYN/USD carries a synthesized-basis sell (gap_fixed) AND a sibling elided
+    # SYN/USD carries a synthesized-basis sell (gap_fixed) AND a sibling elided
     # sell. The synthetic line must still be surfaced as "not independently confirmed",
     # not demoted to the silent `incomplete` skip just because the symbol also has an
     # elided sell -- the operator explicitly asked the tool to fabricate that basis.

@@ -14,17 +14,16 @@ from .money import abs_decimal
 
 logger = logging.getLogger(__name__)
 
-# Our realized P/L is quantized to the cent once per sell (build_realized_line), while
-# IBKR's per-trade column is unrounded. Summing N sells therefore accumulates at most
-# half a cent of rounding each, so a true match must be tolerated to that bound rather
-# than to a flat constant -- otherwise heavily-traded symbols raise false mismatches.
+# Our realized P/L is quantized to the cent once per sell (build_realized_line); IBKR's
+# per-trade column is unrounded. Summing N sells accumulates up to half a cent each, so
+# the match tolerance must scale with the sell count, not be a flat constant, or
+# heavily-traded symbols raise false mismatches.
 _HALF_CENT = Decimal("0.005")
 
 # IBKR omits the per-trade Realized P/L only for Forex rows (an FX leg has no cost
-# basis), so a blank there is expected and merely uncheckable. Every other asset class
-# populates Realized on a closing sell, so a blank on a non-Forex disposal is anomalous
-# (corruption or an unmodeled IBKR format) and is surfaced, even though it too cannot be
-# cross-checked. Matched against TradeRow.asset_category verbatim, as IBKR spells it.
+# basis), so a blank there is expected and merely uncheckable. A blank on any other
+# asset class is anomalous (corruption or unmodeled format) and is surfaced, though it
+# too is uncheckable. Matched against TradeRow.asset_category as IBKR spells it.
 _ELISION_EXPECTED_CATEGORIES = frozenset({"Forex"})
 
 
@@ -148,11 +147,9 @@ def reconcile_realized_against_ibkr(
     agreement with IBKR is tautological, so a "green" reconciliation must not claim it.
     """
     # IBKR side: per (symbol, currency), sum the per-trade Realized P/L over closing
-    # sells that carry a figure. A sell whose Realized IBKR elided contributes no
-    # comparable value -- record only that the key HAS such a sell, so a symbol whose
-    # sells are all elided can be reported as skipped, while one that also has a
-    # comparable sell is still cross-checked on it. Eliding one sell makes only it
-    # unverifiable, never its siblings (per-trade, not per-symbol).
+    # sells that carry a figure. An elided sell contributes no value; record only that
+    # the key has one, so an all-elided symbol is reported as skipped while one with a
+    # comparable sell is still checked on it. Elision is per-trade, not per-symbol.
     ibkr_realized: dict[tuple[str, Currency], Decimal] = defaultdict(Decimal)
     n_sells: dict[tuple[str, Currency], int] = defaultdict(int)
     keys_with_elided_sell: set[tuple[str, Currency]] = set()
@@ -173,11 +170,10 @@ def reconcile_realized_against_ibkr(
         n_sells[key] += 1
         ibkr_realized[key] += t.realized_pl_ccy
 
-    # Our side: sum FIFO realized over the disposals that are independently comparable.
-    # An IBKR-elided disposal is dropped here too (its ibkr_realized_elided line flag,
-    # set at replay), so the same disposals are excluded from both sides and the
-    # remaining sums compare like for like. A synthetic line still contributes to its
-    # key's displayed total: it is surfaced as unconfirmed, not silently dropped.
+    # Our side: sum FIFO realized over the independently comparable disposals. An
+    # IBKR-elided disposal is dropped here too (ibkr_realized_elided, set at replay), so
+    # both sides exclude the same disposals and compare like for like. A synthetic line
+    # still contributes to its key's total, surfaced as unconfirmed rather than dropped.
     computed_realized: dict[tuple[str, Currency], Decimal] = defaultdict(Decimal)
     synthetic_keys: set[tuple[str, Currency]] = set()
     for rl in realized_lines:
@@ -204,13 +200,11 @@ def reconcile_realized_against_ibkr(
         )
 
     # Keys with comparable realized activity on either side. A pure open-buy position
-    # has none and is not a discrepancy. Synthetic keys are surfaced as unconfirmed even
-    # when they also carry an elided sell. The elided-only keys (no comparable or
-    # synthetic sibling) are uncheckable, and incomplete skips the expected-Forex ones
-    # quietly. anomalous_elision is orthogonal, already built above: it alarms every
-    # non-Forex blank, including keys still reconciled on a comparable sell, since a
-    # corrupt cell is worth surfacing even when the symbol otherwise ties out. Only
-    # Forex legitimately omits Realized P/L, so only non-Forex blanks alarm.
+    # has none and is not a discrepancy. Synthetic keys are surfaced as unconfirmed.
+    # Elided-only keys (no comparable or synthetic sibling) are uncheckable; incomplete
+    # skips the expected-Forex ones quietly. anomalous_elision is orthogonal (built
+    # above): it alarms every non-Forex blank, even one still reconciled on a comparable
+    # sell, since a corrupt cell is worth surfacing when the symbol otherwise ties out.
     active = ibkr_realized.keys() | computed_realized.keys()
     reconciled = [_entry(k) for k in sorted(active - synthetic_keys)]
     synthetic = [_entry(k) for k in sorted(synthetic_keys)]

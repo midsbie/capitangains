@@ -63,9 +63,8 @@ class FifoMatcher:
 
         direction = transfer.direction.strip().lower()
         if direction == "in":
-            # Treat as a buy
-            # NOTE: We use market_value as the cost basis. This is an approximation
-            # if the true original cost basis is not preserved in the CSV.
+            # Seed a lot at market_value as its cost basis; the original basis is not
+            # reliably carried in the CSV (see the transfers extractor).
             basis = transfer.market_value
             logger.debug(
                 "Processing transfer IN: %s %s @ %s (basis: %s %s)",
@@ -84,7 +83,6 @@ class FifoMatcher:
             )
             self.positions.append_buy(transfer.symbol, lot)
         elif direction == "out":
-            # Out transfers: consume from FIFO position book
             qty_to_remove = transfer.quantity
             logger.debug(
                 "Processing transfer OUT: %s %s @ %s",

@@ -58,7 +58,6 @@ class ReportBuilder:
     # the IBKR contracting entity's jurisdiction. Default IE (IBKR Ireland),
     # CLI-overridable via --broker-country.
     broker_country: str = "IE"
-    # Collections
     realized_lines: list[RealizedLine] = field(default_factory=list)
     symbol_totals: dict[str, SymbolTotals] = field(default_factory=dict)
     dividends: list[DividendRow] = field(default_factory=list)
@@ -73,7 +72,6 @@ class ReportBuilder:
 
     def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
-        # aggregate per symbol
         if rl.symbol not in self.symbol_totals:
             self.symbol_totals[rl.symbol] = SymbolTotals()
         t = self.symbol_totals[rl.symbol]
@@ -273,7 +271,6 @@ class ReportBuilder:
         return quantize_money(amount * rate)
 
     def _recompute_aggregates(self) -> None:
-        # Recompute EUR aggregates per symbol after conversions
         # Clear prior EUR aggregates (they would have been zero before conversion)
         for totals in self.symbol_totals.values():
             totals.eur = CurrencyTotals()

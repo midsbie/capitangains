@@ -585,7 +585,7 @@ def test_pt_projection_renders_portuguese_labels():
     assert labels_for("XX") == pt
 
 
-# CG-12: allocated cost must reach the sheets cent-quantized regardless of currency.
+# Allocated cost must reach the sheets cent-quantized regardless of currency.
 # FIFO basis allocation (round_cost_piece) emits 8-decimal residuals: 100 * 1/3 is
 # stored as 33.33333333. The FX conversion path quantizes each leg to cents
 # (quantize_money), but the EUR-identity path copies the raw 8-decimal value straight

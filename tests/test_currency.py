@@ -1,4 +1,4 @@
-"""Unit tests for the Currency value object and the CG-15 case-unification it closes."""
+"""Unit tests for the Currency value object and the case-unification it closes."""
 
 from capitangains.conv import EUR, Currency
 from tests.support import buy, ingest, make_matcher, sell
@@ -44,7 +44,7 @@ def test_orders_by_code():
 
 
 def test_mixed_case_currency_unifies_in_fifo_matching():
-    # CG-15 regression: a buy stamped 'usd' and a sell stamped 'USD' are the same
+    # Regression: a buy stamped 'usd' and a sell stamped 'USD' are the same
     # instrument. Normalizing currency into the position-book key makes them one key, so
     # the sell consumes the buy lot rather than recording a phantom gap (the pre-fix
     # behavior, where the raw strings keyed two separate buckets).
