@@ -6,7 +6,7 @@ from decimal import Decimal
 from capitangains.conv import Currency
 
 from .fifo_domain import Lot, SellMatchLeg
-from .money import abs_decimal, quantize_allocation, round_cost_piece
+from .money import is_allocation_negligible, quantize_allocation, round_cost_piece
 
 
 class PositionBook:
@@ -48,9 +48,7 @@ class PositionBook:
 
             lot.qty -= take
             remaining_basis = lot.basis_ccy - cost_piece
-            if remaining_basis < 0 and abs_decimal(
-                remaining_basis
-            ) <= quantize_allocation(Decimal("0.00000001")):
+            if remaining_basis < 0 and is_allocation_negligible(remaining_basis):
                 lot.basis_ccy = quantize_allocation(Decimal("0"))
             else:
                 lot.basis_ccy = remaining_basis

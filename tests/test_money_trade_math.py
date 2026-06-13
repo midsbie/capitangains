@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from capitangains.reporting.money import (
     abs_decimal,
+    is_allocation_negligible,
     quantize_allocation,
     quantize_money,
     round_cost_piece,
@@ -18,6 +19,14 @@ def test_quantize_money_custom_places():
 def test_quantize_allocation_rounding():
     value = Decimal("0.123456789")
     assert quantize_allocation(value) == Decimal("0.12345679")
+
+
+def test_is_allocation_negligible_within_quantum():
+    assert is_allocation_negligible(Decimal("0"))
+    assert is_allocation_negligible(Decimal("0.00000001"))
+    assert is_allocation_negligible(Decimal("-0.00000001"))
+    assert not is_allocation_negligible(Decimal("0.00000002"))
+    assert not is_allocation_negligible(Decimal("-0.00000002"))
 
 
 def test_round_cost_piece_proportional_allocation():

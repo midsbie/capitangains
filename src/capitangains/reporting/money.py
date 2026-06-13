@@ -36,3 +36,13 @@ def round_cost_piece(total_basis: Decimal, take: Decimal, lot_qty: Decimal) -> D
 def abs_decimal(value: Decimal) -> Decimal:
     """Return the absolute value using Decimal.copy_abs for stability."""
     return value.copy_abs()
+
+
+def is_allocation_negligible(value: Decimal) -> bool:
+    """True when ``value`` lies within one allocation quantum of zero (+/-0.00000001).
+
+    Lets callers identify sub-quantum rounding residue from proportional basis
+    allocation (e.g. a tiny negative remainder after the final FIFO take) so they can
+    treat it as exact zero rather than carrying it forward.
+    """
+    return abs_decimal(value) <= _ALLOCATION_Q
