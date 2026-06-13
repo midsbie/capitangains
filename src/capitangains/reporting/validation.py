@@ -12,6 +12,12 @@ of a statement input set, and the built Anexo J Quadro 8A income lines (source-c
 attribution). Each file's account/period identity is validated unconditionally as a
 fail-closed precondition before its contents are trusted, then the cross-file coherence
 of the set (single account, non-overlapping periods) is enforced.
+
+parse_acknowledged_gaps also lives here. It parses the operator's raw
+--auto-fix-sell-gaps spec into a set of keys, raising DataQualityError on a malformed
+token. Its subject is a CLI string rather than parsed statement data, but it keeps the
+detectors' pure, no-logging, no-exit discipline, so the boundary maps its raise to an
+exit exactly as it does a detector's findings.
 """
 
 from __future__ import annotations
@@ -21,12 +27,13 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from capitangains.conv import Currency, has_intraday_time
+from capitangains.conv import Currency, has_intraday_time, parse_date
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 from .extract import StatementMetadata, TradeRow, TransferRow, parse_statement_metadata
 from .extract.sections import CONSUMED_SECTIONS, IGNORED_SECTIONS
+from .fifo_domain import GapKey
 from .quadro_8a import Quadro8ALine
 
 
@@ -300,3 +307,47 @@ def detect_statement_input_conflicts(
                 )
 
     return problems
+
+
+def parse_acknowledged_gaps(spec: str | None) -> frozenset[GapKey]:
+    """Parse the operator's itemized gap-acknowledgment spec into a set of keys.
+
+    The spec is a comma-separated list of SYMBOL@YYYY-MM-DD tokens, each naming one
+    unmatched SELL the operator has reviewed and authorized to be valued from IBKR's
+    per-trade Basis. Symbols are case-sensitive and compared verbatim (only surrounding
+    whitespace is stripped); a single key authorizes every gap sharing that (symbol,
+    date). Empty tokens (from a leading, trailing, or doubled comma) are skipped; None
+    or an all-empty spec yields an empty set; zero acknowledgments.  Every malformed
+    token is collected and reported together as one DataQualityError so the spec can be
+    fixed in a single pass.
+    """
+    if spec is None:
+        return frozenset()
+
+    keys: set[GapKey] = set()
+    malformed: list[str] = []
+    for raw in spec.split(","):
+        token = raw.strip()
+        if not token:
+            continue
+        parts = token.split("@")
+        if len(parts) != 2:
+            malformed.append(token)
+            continue
+        symbol, date_str = parts[0].strip(), parts[1].strip()
+        if not symbol or not date_str:
+            malformed.append(token)
+            continue
+        try:
+            key_date = parse_date(date_str)
+        except ValueError:
+            malformed.append(token)
+            continue
+        keys.add((symbol, key_date))
+
+    if malformed:
+        raise DataQualityError(
+            "Malformed --auto-fix-sell-gaps acknowledgment(s) "
+            f"(expected SYMBOL@YYYY-MM-DD): {', '.join(malformed)}"
+        )
+    return frozenset(keys)

@@ -18,8 +18,8 @@ import datetime as dt
 import logging
 from collections.abc import Mapping, Sequence
 
-from .conv import Currency, parse_date
-from .errors import EXIT_DATA_QUALITY, DataQualityError
+from .conv import Currency
+from .errors import EXIT_DATA_QUALITY
 from .reporting import (
     ExtractionDefect,
     OrderingCollision,
@@ -29,50 +29,6 @@ from .reporting import (
     UnrecognizedSection,
 )
 from .reporting.fifo_domain import GapEvent, GapKey, GapResolution
-
-
-def parse_acknowledged_gaps(spec: str | None) -> frozenset[GapKey]:
-    """Parse the operator's itemized gap-acknowledgment spec into a set of keys.
-
-    The spec is a comma-separated list of SYMBOL@YYYY-MM-DD tokens, each naming one
-    unmatched SELL the operator has reviewed and authorized to be valued from IBKR's
-    per-trade Basis. Symbols are case-sensitive and compared verbatim (only surrounding
-    whitespace is stripped); a single key authorizes every gap sharing that (symbol,
-    date). Empty tokens (from a leading, trailing, or doubled comma) are skipped; None
-    or an all-empty spec yields an empty set; zero acknowledgments.  Every malformed
-    token is collected and reported together as one DataQualityError so the spec can be
-    fixed in a single pass.
-    """
-    if spec is None:
-        return frozenset()
-
-    keys: set[GapKey] = set()
-    malformed: list[str] = []
-    for raw in spec.split(","):
-        token = raw.strip()
-        if not token:
-            continue
-        parts = token.split("@")
-        if len(parts) != 2:
-            malformed.append(token)
-            continue
-        symbol, date_str = parts[0].strip(), parts[1].strip()
-        if not symbol or not date_str:
-            malformed.append(token)
-            continue
-        try:
-            key_date = parse_date(date_str)
-        except ValueError:
-            malformed.append(token)
-            continue
-        keys.add((symbol, key_date))
-
-    if malformed:
-        raise DataQualityError(
-            "Malformed --auto-fix-sell-gaps acknowledgment(s) "
-            f"(expected SYMBOL@YYYY-MM-DD): {', '.join(malformed)}"
-        )
-    return frozenset(keys)
 
 
 def report_gap_acknowledgments(

@@ -34,6 +34,7 @@ from .validation import (
     detect_symbol_currency_violations,
     detect_unattributed_income,
     detect_unrecognized_sections,
+    parse_acknowledged_gaps,
     partition_statements_by_metadata,
 )
 
@@ -72,5 +73,6 @@ __all__ = [
     "detect_unattributed_income",
     "detect_orphaned_foreign_tax",
     "detect_unrecognized_sections",
+    "parse_acknowledged_gaps",
     "partition_statements_by_metadata",
 ]

@@ -30,7 +30,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .diagnostics import (
-    parse_acknowledged_gaps,
     report_extraction_defects,
     report_gap_acknowledgments,
     report_invalid_statements,
@@ -57,6 +56,7 @@ from .reporting import (
     detect_symbol_currency_violations,
     detect_unattributed_income,
     detect_unrecognized_sections,
+    parse_acknowledged_gaps,
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
 )

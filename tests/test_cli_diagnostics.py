@@ -1,6 +1,7 @@
 """Aggregate diagnostics and full-pipeline behavior.
 
-Exercises capitangains.diagnostics (the boundary report helpers) and
+Exercises capitangains.diagnostics (the boundary report helpers),
+capitangains.reporting.validation.parse_acknowledged_gaps (the pure spec parser), and
 capitangains.pipeline.run (the orchestration) together:
 
 - parse_acknowledged_gaps: parse the itemized SYMBOL@YYYY-MM-DD acknowledgment spec;
@@ -27,7 +28,6 @@ from capitangains.cmd.cli import build_argparser
 from capitangains.conv import Currency
 from capitangains.diagnostics import (
     format_reconciliation_sample,
-    parse_acknowledged_gaps,
     report_gap_acknowledgments,
     report_invalid_statements,
     report_ordering_collisions,
@@ -53,6 +53,7 @@ from capitangains.reporting import (
     detect_statement_input_conflicts,
     detect_unattributed_income,
     detect_unrecognized_sections,
+    parse_acknowledged_gaps,
     partition_statements_by_metadata,
 )
 from capitangains.reporting.extract import StatementMetadata, StatementPeriod
