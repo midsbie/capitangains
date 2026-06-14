@@ -36,25 +36,6 @@ ALL_SCOPES_SET: dict[AssetScope, set[str] | None] = {
     "all": None,
 }
 
-TRADE_COLS = [
-    "DataDiscriminator",
-    "Asset Category",
-    "Currency",
-    "Symbol",
-    "Date/Time",
-    "Quantity",
-    "T. Price",
-    "Proceeds",
-    "Comm/Fee",
-    "Code",
-    "C. Price",
-    "Comm in EUR",
-    "MTM P/L",
-    "MTM in EUR",
-    "Basis",
-    "Realized P/L",
-]
-
 NEED_TRADE_COLS = [
     "Asset Category",
     "Currency",
@@ -151,7 +132,7 @@ def parse_trades_stocklike(
     skipped_rows = 0
 
     for sub in model.get_subtables(SEC_TRADES):
-        header = [h.strip() for h in sub.header]
+        header = {h.strip() for h in sub.header}
         rows = sub.rows
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -164,27 +145,14 @@ def parse_trades_stocklike(
                 asset_categories,
             )
 
-        col: dict[str, int | None] = {k: None for k in TRADE_COLS}
-        for name in col:
-            for i, h in enumerate(header):
-                if h == name:
-                    col[name] = i
-                    break
-
         # Skip subtables without essential columns. Losing a whole subtable is material,
         # so warn (default-visible) rather than logging at debug.
-        missing_cols = [n for n in NEED_TRADE_COLS if col[n] is None]
+        missing_cols = [n for n in NEED_TRADE_COLS if n not in header]
         if missing_cols:
             logger.warning(
                 "Skipping Trades subtable: missing required column(s) %s", missing_cols
             )
             continue
-
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug(
-                "Mapped Trades columns: %s",
-                {k: header[v] for k, v in col.items() if v is not None},
-            )
 
         for r in rows:
             # Per-row granularity: the _require_* helpers raise on the first bad field,

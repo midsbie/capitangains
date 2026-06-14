@@ -14,10 +14,10 @@ import csv
 from collections.abc import Sequence
 from pathlib import Path
 
-# Payload columns only (the parser prepends [section, kind]); see header_row.
-# The trade header carries DataDiscriminator: it is in TRADE_COLS but not
-# NEED_TRADE_COLS, so the extractor never reads it, yet keeping one canonical shape
-# removes the with/without-discriminator drift the suite had accumulated.
+# Payload columns only (the parser prepends [section, kind]); see header_row.  The trade
+# header carries DataDiscriminator even though the extractor never reads it; keeping one
+# canonical shape removes the with/without-discriminator drift the suite had
+# accumulated.
 TRADES_COLUMNS = [
     "DataDiscriminator",
     "Asset Category",
