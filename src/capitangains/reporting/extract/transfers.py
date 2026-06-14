@@ -58,7 +58,7 @@ def parse_transfers(
 
         # Column-variant fallbacks are applied per row below; surface which alternate a
         # subtable relies on once, from its header, rather than per row.
-        sub_header = {h.strip() for h in sub.header}
+        sub_header = set(sub.header)
         if "Qty" not in sub_header and "Quantity" in sub_header:
             logger.info("Transfers subtable: using 'Quantity' column (no 'Qty')")
         if "Market Value" not in sub_header and "Cost Basis" in sub_header:

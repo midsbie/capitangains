@@ -137,8 +137,11 @@ class IbkrStatementCsvParser:
             payload = list(row[2:])
 
             if kind == "Header":
-                # Start a new subtable with this header under the given section
-                header = tuple(payload)
+                # Start a new subtable with this header under the given section Strip
+                # cells once here: row dicts zip against this header, so a clean header
+                # gives every consumer clean keys and presence checks, removing the
+                # raw-vs-stripped drift each extractor used to handle on its own.
+                header = tuple(cell.strip() for cell in payload)
                 if not header:
                     report.warn(
                         line_no,

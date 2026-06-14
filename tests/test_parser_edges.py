@@ -39,6 +39,25 @@ def test_parser_bom_and_data_before_header():
     assert r["Currency"] == "EUR" and Decimal(r["Amount"]) == Decimal("10.00")
 
 
+def test_header_cells_are_stripped_so_consumers_read_clean_names():
+    # IBKR headers occasionally carry surrounding whitespace. The model normalizes
+    # header names at the boundary, so Subtable.header and the row dicts zipped against
+    # it both carry clean keys: extractors read by clean name and their presence checks
+    # cannot drift from the raw row-dict keys.
+    rows = [
+        ["Trades", "Header", " Currency ", "Symbol", " Quantity"],
+        ["Trades", "Data", "EUR", "ASML", "10"],
+    ]
+    model, report = IbkrStatementCsvParser().parse_rows(rows)
+
+    (sub,) = model.get_subtables("Trades")
+    assert sub.header == ("Currency", "Symbol", "Quantity")
+    assert list(model.iter_rows("Trades")) == [
+        {"Currency": "EUR", "Symbol": "ASML", "Quantity": "10"},
+    ]
+    assert not report.has_errors
+
+
 def test_total_and_subtotal_rows_are_silently_skipped():
     rows = [
         ["Trades", "Header", "Currency", "Symbol", "Quantity"],

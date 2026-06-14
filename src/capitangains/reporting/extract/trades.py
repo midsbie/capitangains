@@ -132,7 +132,7 @@ def parse_trades_stocklike(
     skipped_rows = 0
 
     for sub in model.get_subtables(SEC_TRADES):
-        header = {h.strip() for h in sub.header}
+        header = set(sub.header)
         rows = sub.rows
 
         if logger.isEnabledFor(logging.DEBUG):
