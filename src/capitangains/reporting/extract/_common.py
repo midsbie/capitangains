@@ -18,9 +18,14 @@ from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 
+def _is_total_label(value: str) -> bool:
+    """Return True if a Currency cell labels a 'Total' summary row."""
+    return value.lower().startswith("total")
+
+
 def _is_total_or_empty(value: str) -> bool:
     """Return True if value is empty or a 'Total' summary row."""
-    return not value or value.lower().startswith("total")
+    return not value or _is_total_label(value)
 
 
 def _require_fields(label: str, **fields: str) -> None:
@@ -91,6 +96,30 @@ class ExtractionDefect:
     symbol: str | None
     date: str | None
     reason: str
+
+
+def defect_from_row(
+    section: str,
+    row: dict[str, str],
+    reason: str,
+    *,
+    symbol_key: str = "Symbol",
+    date_key: str = "Date",
+) -> ExtractionDefect:
+    """Locate a rejected row by reading its semantic keys at the catch site.
+
+    The three flat extractors (trades, transfers, syep) share the same catch-and-locate
+    after a per-row parse failure: read the symbol/date cells straight from the row dict
+    (so the locator survives even when one of those cells is itself the malformed value)
+    and pair them with the DataQualityError text. Only the column keys differ per
+    section.
+    """
+    return ExtractionDefect(
+        section,
+        row.get(symbol_key, "").strip() or None,
+        row.get(date_key, "").strip() or None,
+        reason,
+    )
 
 
 _CashFlowRowT = TypeVar("_CashFlowRowT")
@@ -193,7 +222,7 @@ def _extract_cashflow_section(
         # labelled in the Currency cell, or the fully blank separator between subtables.
         # A date-less row carrying any other content (an amount that lost its Date and
         # Currency) is not a trailer; it falls through to the field gate as a defect.
-        is_trailer = cur.lower().startswith("total") or not (cur or desc or amount_s)
+        is_trailer = _is_total_label(cur) or not (cur or desc or amount_s)
         if not date_s and is_trailer:
             skipped_totals += 1
             continue

@@ -16,6 +16,7 @@ from ._common import (
     _is_total_or_empty,
     _require_date,
     _require_decimal,
+    defect_from_row,
 )
 from .sections import SEC_SYEP
 
@@ -112,9 +113,7 @@ def parse_syep_interest_details(
             )
         except DataQualityError as e:
             defects.append(
-                ExtractionDefect(
-                    "SYEP Interest", sym or None, value_date_s or None, str(e)
-                )
+                defect_from_row("SYEP Interest", r, str(e), date_key="Value Date")
             )
 
     if logger.isEnabledFor(logging.DEBUG):

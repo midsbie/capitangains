@@ -11,7 +11,13 @@ from capitangains.conv import Currency, to_dec
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
-from ._common import ExtractionDefect, _require_date, _require_decimal, _require_fields
+from ._common import (
+    ExtractionDefect,
+    _require_date,
+    _require_decimal,
+    _require_fields,
+    defect_from_row,
+)
 from .sections import SEC_TRANSFERS
 
 logger = logging.getLogger(__name__)
@@ -149,14 +155,7 @@ def parse_transfers(
                     )
                 )
             except DataQualityError as e:
-                defects.append(
-                    ExtractionDefect(
-                        SEC_TRANSFERS,
-                        r.get("Symbol", "").strip() or None,
-                        r.get("Date", "").strip() or None,
-                        str(e),
-                    )
-                )
+                defects.append(defect_from_row(SEC_TRANSFERS, r, str(e)))
                 continue
 
     out.sort(key=lambda x: x.date)

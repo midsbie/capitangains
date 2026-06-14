@@ -8,11 +8,7 @@ from typing import ClassVar
 
 from capitangains.model import IbkrModel
 
-from ._common import (
-    CashFlowRow,
-    ExtractionDefect,
-    _extract_cashflow_section,
-)
+from ._common import CashFlowRow, ExtractionDefect, _extract_cashflow_section
 from .sections import SEC_DIVIDENDS
 
 logger = logging.getLogger(__name__)

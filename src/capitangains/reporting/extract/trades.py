@@ -18,6 +18,7 @@ from ._common import (
     _require_date,
     _require_decimal,
     _require_fields,
+    defect_from_row,
 )
 from .sections import SEC_TRADES
 
@@ -162,12 +163,7 @@ def parse_trades_stocklike(
                 trade = parse_trades_stocklike_row(scope_set, r)
             except DataQualityError as e:
                 defects.append(
-                    ExtractionDefect(
-                        SEC_TRADES,
-                        r.get("Symbol", "").strip() or None,
-                        r.get("Date/Time", "").strip() or None,
-                        str(e),
-                    )
+                    defect_from_row(SEC_TRADES, r, str(e), date_key="Date/Time")
                 )
                 continue
 
