@@ -36,7 +36,7 @@ Prior-year statements matter for the same reason: a sale's cost basis comes from
 
 * CLI Usage
 
-After installation, run the =capitangains= command. Pass one or more Activity Statement CSV files as arguments. Include prior years so FIFO can match sales with earlier buys. If sales reference missing buys, the tool aborts unless auto-fix is enabled. Output defaults to =report_<year>.xlsx= in the current directory.
+After installation, run the =capitangains= command. Provide statements either as positional CSV path(s) or via =--statements-dir DIR= (auto-discovery); the two are mutually exclusive. A multi-file run must be a single account with one statement per year and non-overlapping periods; otherwise it aborts (exit 2) to avoid double-counting. Include prior years so FIFO can match sales with earlier buys. Unmatched SELLs abort the run (exit 2) unless each is itemized in =--auto-fix-sell-gaps=. Output defaults to =report_<year>.xlsx= in the current directory.
 
 ** Examples
 - Single year:
@@ -59,6 +59,15 @@ After installation, run the =capitangains= command. Pass one or more Activity St
         ./U1234567_2023_2023.csv ./U1234567_2024_2024.csv
   #+end_src
 
+- Directory auto-discovery (dry run, no workbook written):
+  #+begin_src sh
+    capitangains \
+        --year 2024 \
+        --statements-dir ./statements \
+        --fx-table ./fx_rates.csv \
+        --dry-run
+  #+end_src
+
 You can also run the CLI module directly from the source checkout:
 
 #+begin_src sh
@@ -67,30 +76,37 @@ You can also run the CLI module directly from the source checkout:
 
 ** Options
 
-- =--year YYYY=: calendar year to report.
+- =--year YYYY=: calendar year to report (required).
+- =--statements-dir DIR=: auto-discover IBKR Activity Statement CSVs in a directory, selecting those whose reporting period starts in =--year= or earlier; non-statement files are ignored. Mutually exclusive with positional path(s).
 - =--fx-table PATH=: FX rates CSV (see FX Data section).
 - =--locale {EN,PT}=: locale for sheet names and headers (default EN).
 - =--broker-country CC=: ISO 2-letter jurisdiction of the IBKR contracting entity; the source country for broker-paid interest (credit + SYEP) on the Annex J Box 8A sheet (default IE, IBKR Ireland).
 - =--output PATH=: output XLSX file path (default =report_<year>.xlsx=).
-- =--auto-fix-sell-gaps=: synthesize residual lots when SELLS exceed available buys.
+- =-n= / =--dry-run=: run the full preflight (parse, extract, FIFO-match, convert, reconcile) and report any defect, but stop before writing the workbook; exit 0 if the run would succeed.
+- =--auto-fix-sell-gaps SYMBOL@YYYY-MM-DD[,...]=: itemized acknowledgment of unmatched SELLs whose cost basis is synthesized from IBKR per-trade /Basis/ (see Handling unmatched SELLs).
 - =-v= / =-vv=: increase logging verbosity (INFO / DEBUG).
 
 ** Handling unmatched SELLs
 
-By default, the tool aborts on unmatched SELLs. With =--auto-fix-sell-gaps=, it synthesizes residual lots using IBKR per-trade /Basis/ values. Synthetic legs are marked in the Realized Trades sheet for auditability. If Basis is missing or inconsistent, zero-cost allocation is applied with logged warnings.
+By default, the tool aborts (exit 2) on unmatched SELLs. To proceed, acknowledge each gap explicitly via =--auto-fix-sell-gaps SYMBOL@YYYY-MM-DD[,...]= (symbols are case-sensitive). Listed gaps get residual lots synthesized from IBKR per-trade /Basis/ values, marked in the Realized Trades sheet for auditability. The run stays fatal if any gap is left unlisted, an acknowledged gap has a missing or corrupt Basis, or an acknowledgment matches no gap found this run.
 
 ** Handling transfers
 
 Transfers replay in the same chronological stream as trades: a transfer /in/ seeds a lot, a transfer /out/ consumes lots, so later sales match the correct basis. A transfer /in/ adopts the transfer market value as its cost basis, an approximation, since IBKR's CSV does not preserve the original acquisition cost. Gains on transferred-in shares may therefore differ from broker or tax figures.
 
+** Handling multiple statements
+
+Multi-file runs (positional or auto-discovered) must be one account, one statement per year, with non-overlapping periods; otherwise the run aborts (exit 2, no workbook). Every input must also carry a readable account number and reporting period, or the run aborts the same way.
+
 * FX Data
 
-EUR conversion requires a CSV with columns: =date=, =currency=, =rate=. Rate is expressed as target currency units per EUR. The tool computes EUR per unit and applies fallback to prior dates when exact rates are missing. Compatible datasets can be extracted from Banco de Portugal using [[https://github.com/midsbie/bdpfxtract/][bdpfxtract]].
+EUR conversion requires a CSV with columns: =date=, =currency=, =rate=. Rate is expressed as target currency units per EUR. The tool computes EUR per unit and falls back to the nearest prior date when an exact rate is missing, bounded to a 7-day staleness window; a wider gap is treated as missing. A supplied FX table must cover every required (date, currency): any missing rate aborts the run (exit 2) rather than blanking or substituting cells. Compatible datasets can be extracted from Banco de Portugal using [[https://github.com/midsbie/bdpfxtract/][bdpfxtract]].
 
 * Notes
 
 - Input must be an Activity Statement CSV from IBKR, not Flex queries
-- Missing or elided values are treated as zero with warnings
+- Malformed or incomplete rows (bad numbers or dates, missing required fields, a Basis its own Realized P/L contradicts) are rejected as data-quality defects (exit 2), not silently zeroed
+- Exit codes: data-quality defects exit 2; setup failures (e.g. an unusable or missing FX table) exit 1
 - SYEP totals rows are ignored; per-day details are included
 
 * License
