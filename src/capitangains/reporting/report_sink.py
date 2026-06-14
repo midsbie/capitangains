@@ -529,43 +529,38 @@ class _SheetWriter:
 
     def write_summary(self, report: ReportBuilder) -> None:
         ws = self.wb.create_sheet(title=self.labels["sheet"]["summary"])
-        total_eur = sum(
-            (rl.realized_pl_eur or Decimal("0") for rl in report.realized_lines),
-            Decimal("0"),
-        )
-        proceeds_total_eur = sum(
-            (rl.sell_net_eur or Decimal("0") for rl in report.realized_lines),
-            Decimal("0"),
-        )
-        alloc_total_eur = sum(
-            (rl.alloc_cost_eur or Decimal("0") for rl in report.realized_lines),
-            Decimal("0"),
-        )
+        summary_labels = self.labels["summary"]
+        ws.append([summary_labels["metric"], summary_labels["amount"]])
 
-        totals_by_cur: dict[str, Decimal] = {}
-        for rl in report.realized_lines:
-            # Exclude EUR from by-currency totals to avoid duplicate label confusion
-            if rl.currency.is_base:
+        # Primary EUR totals come from the builder's aggregation, not a re-scan here.
+        eur = report.eur_totals
+        for key, amount in (
+            ("total_eur", eur.realized),
+            ("proceeds_eur", eur.proceeds),
+            ("alloc_eur", eur.alloc_cost),
+        ):
+            self._append_money_row(ws, summary_labels[key], amount, EUR)
+
+        # One realized-P/L row per native trade currency, EUR excluded so it does not
+        # duplicate the primary totals. order=True on Currency gives a stable by-code
+        # sort with no key function.
+        for cur, totals in sorted(report.totals_by_currency.items()):
+            if cur.is_base:
                 continue
-            code = str(rl.currency)
-            totals_by_cur[code] = (
-                totals_by_cur.get(code, Decimal("0")) + rl.realized_pl_ccy
-            )
-        ws.append([self.labels["summary"]["metric"], self.labels["summary"]["amount"]])
+            label = summary_labels["total_cur_tpl"].format(cur=cur)
+            self._append_money_row(ws, label, totals.realized, cur)
 
-        # Primary EUR totals
-        ws.append([self.labels["summary"]["total_eur"], float(total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(str(EUR))
-        ws.append([self.labels["summary"]["proceeds_eur"], float(proceeds_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(str(EUR))
-        ws.append([self.labels["summary"]["alloc_eur"], float(alloc_total_eur)])
-        ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(str(EUR))
+    def _append_money_row(
+        self, ws: Worksheet, label: str, amount: Decimal, currency: Currency
+    ) -> None:
+        """Append a [label, amount] metric row and apply the currency's money format.
 
-        for cur, amt in sorted(totals_by_cur.items()):
-            ws.append(
-                [self.labels["summary"]["total_cur_tpl"].format(cur=cur), float(amt)]
-            )
-            ws.cell(row=ws.max_row, column=2).number_format = self.formats.money(cur)
+        Mirrors _MoneyColumn (quantize at the sink boundary, then formats.money on the
+        code) so a summary metric cell formats identically to the data tables' cells.
+        """
+        ws.append([label, float(quantize_money(amount))])
+        cell = ws.cell(row=ws.max_row, column=2)
+        cell.number_format = self.formats.money(str(currency))
 
     def write_table(self, spec: _SheetSpec[_RowT], report: ReportBuilder) -> None:
         """Write one uniform table sheet from its spec.

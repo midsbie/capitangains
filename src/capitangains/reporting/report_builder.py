@@ -288,6 +288,38 @@ class ReportBuilder:
                 t.eur.alloc_cost += rl.alloc_cost_eur
 
     @property
+    def eur_totals(self) -> CurrencyTotals:
+        """Report-wide EUR totals, folded from the per-symbol aggregates.
+
+        Sums each symbol's converted-to-EUR realized, proceeds, and allocated cost, so
+        the summary sheet can read them from the aggregator rather than re-scan rows.
+        """
+        grand = CurrencyTotals()
+        for t in self.symbol_totals.values():
+            grand.realized += t.eur.realized
+            grand.proceeds += t.eur.proceeds
+            grand.alloc_cost += t.eur.alloc_cost
+        return grand
+
+    @property
+    def totals_by_currency(self) -> dict[Currency, CurrencyTotals]:
+        """Report-wide totals per native trade currency, folded across symbols.
+
+        Regroups the per-symbol native-currency totals by currency. The base currency is
+        included; omitting it from a view is the caller's display choice.
+        """
+        grand: dict[Currency, CurrencyTotals] = {}
+        for t in self.symbol_totals.values():
+            for cur, ct in t.by_currency.items():
+                if cur not in grand:
+                    grand[cur] = CurrencyTotals()
+                g = grand[cur]
+                g.realized += ct.realized
+                g.proceeds += ct.proceeds
+                g.alloc_cost += ct.alloc_cost
+        return grand
+
+    @property
     def quadro_8a(self) -> list[Quadro8ALine]:
         """Anexo J Quadro 8A income lines grouped from the already-converted rows.
 
