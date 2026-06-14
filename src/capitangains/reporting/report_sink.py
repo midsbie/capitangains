@@ -15,6 +15,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from capitangains.conv import EUR, Currency
 
+from .converted import ConvertedRealizedLine
 from .extract import CashFlowRow, SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
 from .i18n import NumberFormats, labels_for
@@ -147,33 +148,27 @@ class _AnexoJRow:
     buy_date: dt.date | None
     sell_date: dt.date
     qty: Decimal
-    alloc_eur: Decimal | None
-    proceeds_eur: Decimal | None
-    pl_eur: Decimal | None
+    alloc_eur: Decimal
+    proceeds_eur: Decimal
+    pl_eur: Decimal
     transferred: bool
     synthetic: bool
 
 
 def _anexo_j_rows(report: ReportBuilder) -> Iterator[_AnexoJRow]:
-    for rl in report.realized_lines:
-        for leg in rl.legs:
-            alloc_eur = leg.alloc_cost_eur
-            proceeds_eur = leg.proceeds_share_eur
-            # P/L only when both EUR operands exist; keep the proceeds - alloc order.
-            pl_eur = (
-                quantize_money(proceeds_eur - alloc_eur)
-                if alloc_eur is not None and proceeds_eur is not None
-                else None
-            )
+    for crl in report.converted_lines:
+        for cleg in crl.legs:
+            leg = cleg.leg
             yield _AnexoJRow(
-                symbol=rl.symbol,
-                currency=rl.currency,
+                symbol=crl.line.symbol,
+                currency=crl.line.currency,
                 buy_date=leg.buy_date,
-                sell_date=rl.sell_date,
+                sell_date=crl.line.sell_date,
                 qty=leg.qty,
-                alloc_eur=alloc_eur,
-                proceeds_eur=proceeds_eur,
-                pl_eur=pl_eur,
+                alloc_eur=cleg.alloc_cost_eur,
+                proceeds_eur=cleg.proceeds_share_eur,
+                # proceeds - alloc (both non-optional EUR cents); keep the sign order.
+                pl_eur=quantize_money(cleg.proceeds_share_eur - cleg.alloc_cost_eur),
                 transferred=leg.transferred,
                 synthetic=leg.synthetic,
             )
@@ -240,67 +235,77 @@ class _SheetSpec(Generic[_RowT]):
     skip_if_empty: bool = False
 
 
-_REALIZED_SPEC: _SheetSpec[RealizedLine] = _SheetSpec(
+_REALIZED_SPEC: _SheetSpec[ConvertedRealizedLine] = _SheetSpec(
     sheet_key="realized",
     label_section="realized",
-    rows=lambda report: report.realized_lines,
+    rows=lambda report: report.converted_lines,
     columns=(
-        _TextColumn[RealizedLine]("ticker", value=lambda rl: rl.symbol),
-        _TextColumn[RealizedLine]("trade_currency", value=lambda rl: str(rl.currency)),
-        _DateColumn[RealizedLine]("sell_date", value=lambda rl: rl.sell_date),
-        _QtyColumn[RealizedLine]("qty_sold", value=lambda rl: rl.sell_qty),
-        _MoneyColumn[RealizedLine](
+        _TextColumn[ConvertedRealizedLine]("ticker", value=lambda crl: crl.line.symbol),
+        _TextColumn[ConvertedRealizedLine](
+            "trade_currency", value=lambda crl: str(crl.line.currency)
+        ),
+        _DateColumn[ConvertedRealizedLine](
+            "sell_date", value=lambda crl: crl.line.sell_date
+        ),
+        _QtyColumn[ConvertedRealizedLine](
+            "qty_sold", value=lambda crl: crl.line.sell_qty
+        ),
+        _MoneyColumn[ConvertedRealizedLine](
             "gross_tcy",
-            value=lambda rl: rl.sell_gross_ccy,
-            currency=lambda rl: rl.currency,
+            value=lambda crl: crl.line.sell_gross_ccy,
+            currency=lambda crl: crl.line.currency,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "fees_tcy",
-            value=lambda rl: rl.sell_comm_ccy,
-            currency=lambda rl: rl.currency,
+            value=lambda crl: crl.line.sell_comm_ccy,
+            currency=lambda crl: crl.line.currency,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "net_tcy",
-            value=lambda rl: rl.sell_net_ccy,
-            currency=lambda rl: rl.currency,
+            value=lambda crl: crl.line.sell_net_ccy,
+            currency=lambda crl: crl.line.currency,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "alloc_tcy",
-            value=lambda rl: rl.alloc_cost_ccy,
-            currency=lambda rl: rl.currency,
+            value=lambda crl: crl.line.alloc_cost_ccy,
+            currency=lambda crl: crl.line.currency,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "pl_tcy",
-            value=lambda rl: rl.realized_pl_ccy,
-            currency=lambda rl: rl.currency,
+            value=lambda crl: crl.line.realized_pl_ccy,
+            currency=lambda crl: crl.line.currency,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "gross_eur",
-            value=lambda rl: rl.sell_gross_eur,
+            value=lambda crl: crl.sell_gross_eur,
             currency=lambda _r: EUR,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "fees_eur",
-            value=lambda rl: rl.sell_comm_eur,
+            value=lambda crl: crl.sell_comm_eur,
             currency=lambda _r: EUR,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "net_eur",
-            value=lambda rl: rl.sell_net_eur,
+            value=lambda crl: crl.sell_net_eur,
             currency=lambda _r: EUR,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "alloc_eur",
-            value=lambda rl: rl.alloc_cost_eur,
+            value=lambda crl: crl.alloc_cost_eur,
             currency=lambda _r: EUR,
         ),
-        _MoneyColumn[RealizedLine](
+        _MoneyColumn[ConvertedRealizedLine](
             "pl_eur",
-            value=lambda rl: rl.realized_pl_eur,
+            value=lambda crl: crl.realized_pl_eur,
             currency=lambda _r: EUR,
         ),
-        _TextColumn[RealizedLine]("legs_json", value=_legs_json),
-        _TextColumn[RealizedLine]("gap_status", value=_gap_status),
+        _TextColumn[ConvertedRealizedLine](
+            "legs_json", value=lambda crl: _legs_json(crl.line)
+        ),
+        _TextColumn[ConvertedRealizedLine](
+            "gap_status", value=lambda crl: _gap_status(crl.line)
+        ),
     ),
 )
 

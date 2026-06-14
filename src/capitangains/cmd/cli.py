@@ -42,11 +42,7 @@ from pathlib import Path
 from capitangains.logging import configure_logging
 from capitangains.pipeline import RunOptions, run
 
-from .discovery import (
-    DiscoveredStatement,
-    DiscoveryResult,
-    discover_statements,
-)
+from .discovery import DiscoveredStatement, DiscoveryResult, discover_statements
 
 
 def _broker_country(value: str) -> str:

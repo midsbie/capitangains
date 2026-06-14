@@ -156,15 +156,15 @@ def test_fifo_synthetic_leg_fx_conversion_and_annex_dates():
         }
     )
     rb.convert_eur(fx)
+    (converted,) = rb.converted_lines
 
     # EUR alloc = 1000 * 0.9 + 200 * 0.8 = 900 + 160 = 1060 -> 2 decimals
-    assert rl.alloc_cost_eur == Decimal("1060.00")
+    assert converted.alloc_cost_eur == Decimal("1060.00")
     # EUR proceeds = (1200) * 0.8 = 960.00; realized = 960 - 1060 = -100.00
-    assert rl.sell_net_eur == Decimal("960.00")
-    assert rl.realized_pl_eur == Decimal("-100.00")
-    # Legs should have per-leg EUR alloc and proceeds share
-    assert all(leg.alloc_cost_eur is not None for leg in rl.legs)
-    assert all(leg.proceeds_share_eur is not None for leg in rl.legs)
+    assert converted.sell_net_eur == Decimal("960.00")
+    assert converted.realized_pl_eur == Decimal("-100.00")
+    # One converted leg per source leg, each with its own EUR alloc and proceeds.
+    assert len(converted.legs) == len(rl.legs)
 
 
 def test_fifo_auto_fix_rejects_basis_inconsistent_with_realized():

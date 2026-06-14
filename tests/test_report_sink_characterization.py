@@ -45,8 +45,9 @@ def _build_report() -> ReportBuilder:
     multi-leg realized line (two anexo_j rows + a proceeds split) with one transferred
     and one synthetic leg; a gap line (gap_status + per_symbol has_gap) whose single leg
     has a None buy date (a nullable date in anexo_j); a line left unconverted because
-    its currency has no FX rate (nullable EUR cells in realized + anexo_j); and nullable
-    cash-flow EUR amounts (GBP dividend/withholding with no rate).
+    its currency has no FX rate (absent from realized + anexo_j, which source the
+    converted lines, but still contributing its zero EUR aggregate to per_symbol); and
+    nullable cash-flow EUR amounts (GBP dividend/withholding with no rate).
     """
     rb = ReportBuilder(year=2024)
 
@@ -317,27 +318,6 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 ('[{"buy_date": null, "qty": "5", "alloc_cost_ccy": "0"}]', "General"),
                 ("zero-cost gap", "General"),
             ],
-            [
-                ("NOC", "General"),
-                ("GBP", "General"),
-                (dt.datetime(2024, 6, 30, 0, 0), "YYYY-MM-DD"),
-                (2, "0.########"),
-                (100, "\xa3#,##0.00"),
-                (0, "\xa3#,##0.00"),
-                (100, "\xa3#,##0.00"),
-                (20, "\xa3#,##0.00"),
-                (80, "\xa3#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                (
-                    '[{"buy_date": "2023-05-01", "qty": "2", "alloc_cost_ccy": "20"}]',
-                    "General",
-                ),
-                (None, "General"),
-            ],
         ],
         "Lot-Level EUR Breakdown": [
             [
@@ -385,18 +365,6 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 (0, "\u20ac#,##0.00"),
                 (90, "\u20ac#,##0.00"),
                 (90, "\u20ac#,##0.00"),
-                (None, "General"),
-                (None, "General"),
-            ],
-            [
-                ("NOC", "General"),
-                ("GBP", "General"),
-                (dt.datetime(2023, 5, 1, 0, 0), "YYYY-MM-DD"),
-                (dt.datetime(2024, 6, 30, 0, 0), "YYYY-MM-DD"),
-                (2, "0.########"),
-                (None, "\u20ac#,##0.00"),
-                (None, "\u20ac#,##0.00"),
-                (None, "\u20ac#,##0.00"),
                 (None, "General"),
                 (None, "General"),
             ],
@@ -704,27 +672,6 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 ('[{"buy_date": null, "qty": "5", "alloc_cost_ccy": "0"}]', "General"),
                 ("zero-cost gap", "General"),
             ],
-            [
-                ("NOC", "General"),
-                ("GBP", "General"),
-                (dt.datetime(2024, 6, 30, 0, 0), "DD/MM/YYYY"),
-                (2, "0.########"),
-                (100, "\xa3#,##0.00"),
-                (0, "\xa3#,##0.00"),
-                (100, "\xa3#,##0.00"),
-                (20, "\xa3#,##0.00"),
-                (80, "\xa3#,##0.00"),
-                (None, '#,##0.00 "\u20ac"'),
-                (None, '#,##0.00 "\u20ac"'),
-                (None, '#,##0.00 "\u20ac"'),
-                (None, '#,##0.00 "\u20ac"'),
-                (None, '#,##0.00 "\u20ac"'),
-                (
-                    '[{"buy_date": "2023-05-01", "qty": "2", "alloc_cost_ccy": "20"}]',
-                    "General",
-                ),
-                (None, "General"),
-            ],
         ],
         "Opera\xe7\xf5es por Lote (Anexo J)": [
             [
@@ -772,18 +719,6 @@ _EXPECTED: dict[str, dict[str, list]] = {
                 (0, '#,##0.00 "\u20ac"'),
                 (90, '#,##0.00 "\u20ac"'),
                 (90, '#,##0.00 "\u20ac"'),
-                (None, "General"),
-                (None, "General"),
-            ],
-            [
-                ("NOC", "General"),
-                ("GBP", "General"),
-                (dt.datetime(2023, 5, 1, 0, 0), "DD/MM/YYYY"),
-                (dt.datetime(2024, 6, 30, 0, 0), "DD/MM/YYYY"),
-                (2, "0.########"),
-                (None, '#,##0.00 "\u20ac"'),
-                (None, '#,##0.00 "\u20ac"'),
-                (None, '#,##0.00 "\u20ac"'),
                 (None, "General"),
                 (None, "General"),
             ],

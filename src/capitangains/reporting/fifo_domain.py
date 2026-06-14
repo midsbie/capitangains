@@ -41,8 +41,6 @@ class SellMatchLeg:
     alloc_cost_ccy: Decimal
     synthetic: bool = False
     transferred: bool = False
-    alloc_cost_eur: Decimal | None = None
-    proceeds_share_eur: Decimal | None = None
 
 
 @dataclass
@@ -71,18 +69,14 @@ class RealizedLine:
     # cell), so it carries no IBKR figure and is dropped from the cross-check on BOTH
     # sides. Set at event-stream replay; see reconcile.reconcile_realized_against_ibkr.
     ibkr_realized_elided: bool = False
-    sell_gross_eur: Decimal | None = None
-    sell_comm_eur: Decimal | None = None
-    sell_net_eur: Decimal | None = None
-    alloc_cost_eur: Decimal | None = None
-    realized_pl_eur: Decimal | None = None
 
     @property
     def alloc_cost_ccy(self) -> Decimal:
         """Total allocated cost in trade currency: the sum of the legs' pieces.
 
-        The trade-currency counterpart to the stored ``alloc_cost_eur``; derived rather
-        than stored because the legs already carry the authoritative per-lot pieces.
+        Derived rather than stored because the legs already carry the authoritative
+        per-lot pieces. The EUR counterpart lives on ConvertedRealizedLine, built by the
+        FX pass; this object stays a pure trade-currency value.
         """
         return sum((leg.alloc_cost_ccy for leg in self.legs), Decimal("0"))
 

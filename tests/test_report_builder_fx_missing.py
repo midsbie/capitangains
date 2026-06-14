@@ -36,8 +36,7 @@ def test_missing_sell_rate_records_gap_and_leaves_line_unconverted():
     rb.convert_eur(make_fx({}))  # no USD rates at all
 
     assert (dt.date(2024, 6, 10), Currency("USD")) in rb.fx_missing
-    assert rl.sell_net_eur is None
-    assert rl.realized_pl_eur is None
+    assert rb.converted_lines == []
 
 
 def test_missing_buy_rate_records_gap_without_substituting_sell_rate():
@@ -51,9 +50,7 @@ def test_missing_buy_rate_records_gap_without_substituting_sell_rate():
     # The buy-date gap is recorded and the whole line is left unconverted -- the
     # sell-date rate is never substituted for the missing acquisition rate.
     assert rb.fx_missing == {(dt.date(2023, 1, 1), Currency("USD"))}
-    assert rl.legs[0].alloc_cost_eur is None
-    assert rl.alloc_cost_eur is None
-    assert rl.realized_pl_eur is None
+    assert rb.converted_lines == []
 
 
 def test_missing_amount_rate_records_gap_and_leaves_amount_unconverted():
@@ -90,5 +87,6 @@ def test_complete_table_records_no_gap_and_converts_each_leg_at_its_own_date():
     assert not rb.fx_missing
     # Cost basis at the buy-date rate (1.1 gives 990), proceeds at the sell-date rate
     # (0.9 gives 90); the sell rate is not applied to the acquisition leg.
-    assert rl.legs[0].alloc_cost_eur == Decimal("990.00")
-    assert rl.sell_net_eur == Decimal("90.00")
+    (converted,) = rb.converted_lines
+    assert converted.legs[0].alloc_cost_eur == Decimal("990.00")
+    assert converted.sell_net_eur == Decimal("90.00")

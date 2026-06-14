@@ -23,7 +23,7 @@ from capitangains.reporting.report_sink import (
     _anexo_j_rows,
     _gap_status,
 )
-from tests.support import make_fx, realized_line, trade_row
+from tests.support import convert, make_fx, realized_line, trade_row
 
 
 def _realized(
@@ -108,12 +108,9 @@ def test_convert_eur_leaves_line_unconverted_when_any_rate_missing():
 
     rb.convert_eur(make_fx({("USD", "2024-03-01"): Decimal("0.9")}))
 
-    # USD line left wholly unconverted because one leg's buy-date rate is missing,
-    # even though the sell-date rate was available.
-    assert all(leg.alloc_cost_eur is None for leg in rl_usd.legs)
-    assert rl_usd.alloc_cost_eur is None
-    assert rl_usd.realized_pl_eur is None
-    assert rl_usd.sell_net_eur is None
+    # Neither line is converted: the USD line because one leg's buy-date rate is missing
+    # (even though its sell-date rate was available), the GBP line for want of any rate.
+    assert rb.converted_lines == []
     # Every unresolved lookup is recorded for the CLI to abort on.
     assert rb.fx_missing == {
         (dt.date(2023, 6, 1), Currency("USD")),
@@ -144,7 +141,8 @@ def test_convert_eur_zero_sell_qty_skips_proceeds_allocation():
     rb.add_realized(zero_qty_rl)
     rb.convert_eur(make_fx({("USD", "2024-04-01"): Decimal("0.9")}))
     assert not rb.fx_missing
-    assert zero_qty_rl.legs[0].proceeds_share_eur is None
+    (converted,) = rb.converted_lines
+    assert converted.legs[0].proceeds_share_eur == Decimal("0")
 
 
 def test_report_builder_income_conversion():
@@ -339,7 +337,14 @@ def test_excel_report_sink_serializes_legs(tmp_path):
     }
     rl = _realized("ABC", "USD", dt.date(2024, 1, 1), [leg])
     rb.add_realized(rl)
-    rb.convert_eur(make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
+    rb.convert_eur(
+        make_fx(
+            {
+                ("USD", "2023-01-01"): Decimal("0.9"),
+                ("USD", "2024-01-01"): Decimal("0.9"),
+            }
+        )
+    )
 
     out_path = tmp_path / "report_with_leg.xlsx"
     sink = ExcelReportSink(out_path=out_path, locale="EN")
@@ -380,7 +385,14 @@ def test_realized_sheet_flags_synthesized_basis(tmp_path):
             "SYN", "USD", dt.date(2024, 1, 1), [leg], has_gap=True, gap_fixed=True
         )
     )
-    rb.convert_eur(make_fx({("USD", "2024-01-01"): Decimal("0.9")}))
+    rb.convert_eur(
+        make_fx(
+            {
+                ("USD", "2023-01-01"): Decimal("0.9"),
+                ("USD", "2024-01-01"): Decimal("0.9"),
+            }
+        )
+    )
 
     out_path = tmp_path / "synth.xlsx"
     ExcelReportSink(out_path=out_path, locale="EN").write(rb)
@@ -485,9 +497,9 @@ def test_proceeds_allocation_sums_to_sell_net_eur(currency, fx_rates):
     fx = make_fx(fx_rates) if fx_rates else None
     rb.convert_eur(fx)
 
-    shares = [leg.proceeds_share_eur for leg in rl.legs]
-    assert all(s is not None for s in shares)
-    assert sum(shares) == rl.sell_net_eur
+    (converted,) = rb.converted_lines
+    shares = [cleg.proceeds_share_eur for cleg in converted.legs]
+    assert sum(shares, Decimal("0")) == converted.sell_net_eur
 
 
 def test_excel_report_sink_sorts_withholding(tmp_path):
@@ -585,11 +597,11 @@ def test_pt_projection_renders_portuguese_labels():
     assert labels_for("XX") == pt
 
 
-# Allocated cost must reach the sheets cent-quantized regardless of currency.
-# FIFO basis allocation (round_cost_piece) emits 8-decimal residuals: 100 * 1/3 is
-# stored as 33.33333333. The FX conversion path quantizes each leg to cents
-# (quantize_money), but the EUR-identity path copies the raw 8-decimal value straight
-# onto leg.alloc_cost_eur, and the trade-currency columns sum the raw pieces unrounded.
+# Allocated cost must reach the sheets cent-quantized regardless of currency.  FIFO
+# basis allocation (round_cost_piece) emits 8-decimal residuals: 100 * 1/3 is stored as
+# 33.33333333. convert_eur quantizes each leg's EUR alloc to cents on every path (an FX
+# rate, or EUR-native at rate 1); the trade-currency columns instead sum the raw pieces,
+# quantized only at the sink's _MoneyColumn boundary.
 _BASIS_RESIDUAL = Decimal("33.33333333")  # == round_cost_piece(Decimal("100"), 1, 3)
 
 _RESIDUAL_LEG = {
@@ -599,7 +611,7 @@ _RESIDUAL_LEG = {
 }
 
 
-def _anexo_j_alloc_eur(currency: str, fx) -> Decimal | None:
+def _anexo_j_alloc_eur(currency: str, fx) -> Decimal:
     """The single Anexo J row's stored EUR acquisition cost for a one-leg sell."""
     rb = ReportBuilder(year=2024)
     rb.add_realized(
@@ -630,8 +642,8 @@ def test_anexo_j_eur_alloc_cost_is_cent_quantized_like_the_fx_path():
     )
     assert usd == Decimal("33.33")
 
-    # Defect: the economically identical EUR lot leaks the raw 8-decimal residual into
-    # the filer-facing Anexo J tax sheet instead of the same cent-exact 33.33.
+    # The economically identical EUR-native lot reaches the filer-facing Anexo J sheet
+    # at the same cent-exact 33.33, not leaked as the raw 8-decimal residual.
     assert _anexo_j_alloc_eur("EUR", None) == usd
 
 
@@ -647,4 +659,4 @@ def test_realized_sheet_alloc_tcy_cell_is_cent_quantized():
         legs=[_RESIDUAL_LEG],
     )
     (alloc_tcy,) = [c for c in _REALIZED_SPEC.columns if c.header_key == "alloc_tcy"]
-    assert alloc_tcy.cell_value(rl) == float(Decimal("33.33"))
+    assert alloc_tcy.cell_value(convert(rl)) == float(Decimal("33.33"))

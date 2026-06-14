@@ -1,8 +1,8 @@
 """Domain-object layer: build the real production dataclasses tests assert against.
 
 One canonical builder per concept (parse_model, trade_row, transfer_row, buy, sell,
-realized_line, sell_match_leg, make_fx, make_matcher, ingest, make_gap_event). Numeric
-params accept ``Decimal | str`` and dates accept ``dt.date | str``; both coerce
+realized_line, sell_match_leg, convert, make_fx, make_matcher, ingest, make_gap_event).
+Numeric params accept ``Decimal | str`` and dates accept ``dt.date | str``; both coerce
 internally so call sites stay terse. Defaults are chosen so the single builder subsumes
 every legacy per-file variant, and a call site overrides only what it cares about.
 
@@ -18,6 +18,7 @@ from typing import Any
 
 from capitangains.conv import Currency
 from capitangains.model import IbkrModel, IbkrStatementCsvParser
+from capitangains.reporting.converted import ConvertedRealizedLine
 from capitangains.reporting.extract import TradeRow, TransferRow
 from capitangains.reporting.fifo import FifoMatcher
 from capitangains.reporting.fifo_domain import (
@@ -30,6 +31,7 @@ from capitangains.reporting.fifo_domain import (
 )
 from capitangains.reporting.fx import FxTable
 from capitangains.reporting.gap_policy import build_gap_policy
+from capitangains.reporting.report_builder import ReportBuilder
 
 LegSpec = SellMatchLeg | Mapping[str, Any]
 
@@ -249,6 +251,20 @@ def realized_line(
         gap_fixed=gap_fixed,
         ibkr_realized_elided=ibkr_realized_elided,
     )
+
+
+def convert(rl: RealizedLine, fx: FxTable | None = None) -> ConvertedRealizedLine:
+    """Run one realized line through ReportBuilder.convert_eur and return its EUR view.
+
+    The default fx=None is the EUR-native path (every rate is 1); pass an FxTable for a
+    non-EUR line. The line must be fully convertible (every required rate present): a
+    convert_eur that drops an unconvertible line would leave converted_lines empty.
+    """
+    rb = ReportBuilder(year=rl.sell_date.year)
+    rb.add_realized(rl)
+    rb.convert_eur(fx)
+    (converted,) = rb.converted_lines
+    return converted
 
 
 def make_fx(rates: Mapping[tuple[str, str], Decimal]) -> FxTable:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .builders import (
     buy,
+    convert,
     ingest,
     make_fx,
     make_gap_event,
@@ -45,6 +46,7 @@ from .statement_rows import (
 __all__ = [
     # builders.py
     "buy",
+    "convert",
     "ingest",
     "make_fx",
     "make_gap_event",

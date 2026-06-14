@@ -8,6 +8,7 @@ from typing import Protocol, TypeVar
 
 from capitangains.conv import Currency
 
+from .converted import ConvertedLeg, ConvertedRealizedLine
 from .extract import DividendRow, InterestRow, SyepInterestRow, WithholdingRow
 from .fifo import RealizedLine
 from .fifo_domain import SellMatchLeg, TransferProtocol
@@ -73,6 +74,10 @@ class ReportBuilder:
     # CLI-overridable via --broker-country.
     broker_country: str = "IE"
     realized_lines: list[RealizedLine] = field(default_factory=list)
+    # The EUR-converted views of realized_lines, built by convert_eur. Empty until then;
+    # 1:1 with realized_lines once converted (a line with any missing rate is dropped
+    # and recorded in fx_missing, which the pipeline aborts on before the sink).
+    converted_lines: list[ConvertedRealizedLine] = field(default_factory=list)
     symbol_totals: dict[str, SymbolTotals] = field(default_factory=dict)
     dividends: list[DividendRow] = field(default_factory=list)
     withholding: list[WithholdingRow] = field(default_factory=list)
@@ -150,18 +155,23 @@ class ReportBuilder:
         self._recompute_aggregates()
 
     def _convert_realized_lines(self, fx: FxTable | None) -> None:
-        for rl in self.realized_lines:
-            self._convert_realized_line(rl, fx)
+        self.converted_lines = [
+            converted
+            for rl in self.realized_lines
+            if (converted := self._convert_realized_line(rl, fx)) is not None
+        ]
 
-    def _convert_realized_line(self, rl: RealizedLine, fx: FxTable | None) -> None:
+    def _convert_realized_line(
+        self, rl: RealizedLine, fx: FxTable | None
+    ) -> ConvertedRealizedLine | None:
         # PT practice: proceeds convert at the sell-date rate, each acquisition leg at
         # its own buy-date rate. EUR is not special-cased: _rate_or_record returns 1 for
         # the base currency, so an EUR line flows through the same cent-quantizing
-        # arithmetic as a converted one (value * 1). That keeps every *_eur field
+        # arithmetic as a converted one (value * 1). That keeps every EUR amount
         # cent-exact for any currency, the per-leg alloc_cost_eur in particular, which
-        # feeds the filer-facing Anexo J cost. If ANY required rate is missing the whole
-        # line is left unconverted (and the gap recorded); a rate from another date is
-        # never substituted, as that would silently misstate cost basis or proceeds.
+        # feeds the filer-facing Anexo J cost. If ANY required rate is missing the line
+        # is left unconverted (None returned, the gap recorded); a rate from another
+        # date is never substituted, as that would silently misstate cost or proceeds.
         sell_rate = self._rate_or_record(rl.sell_date, rl.currency, fx)
         leg_rates = [
             sell_rate
@@ -170,20 +180,34 @@ class ReportBuilder:
             for leg in rl.legs
         ]
         if sell_rate is None or any(rate is None for rate in leg_rates):
-            return
+            return None
 
-        rl.sell_gross_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
-        rl.sell_comm_eur = quantize_money(rl.sell_comm_ccy * sell_rate)
-        rl.sell_net_eur = quantize_money(rl.sell_net_ccy * sell_rate)
+        sell_net_eur = quantize_money(rl.sell_net_ccy * sell_rate)
 
-        alloc_eur = Decimal("0")
+        leg_alloc_eur: list[Decimal] = []
         for leg, rate in zip(rl.legs, leg_rates, strict=True):
             assert rate is not None  # guaranteed by the guard above; narrows for mypy
-            leg.alloc_cost_eur = quantize_money(leg.alloc_cost_ccy * rate)
-            alloc_eur += leg.alloc_cost_eur
-        rl.alloc_cost_eur = quantize_money(alloc_eur)
-        rl.realized_pl_eur = quantize_money(rl.sell_net_eur - rl.alloc_cost_eur)
-        self._allocate_proceeds_to_legs(rl.legs, rl.sell_qty, rl.sell_net_eur)
+            leg_alloc_eur.append(quantize_money(leg.alloc_cost_ccy * rate))
+        alloc_cost_eur = quantize_money(sum(leg_alloc_eur, Decimal("0")))
+
+        proceeds_shares = self._allocate_proceeds_to_legs(
+            rl.legs, rl.sell_qty, sell_net_eur
+        )
+        converted_legs = [
+            ConvertedLeg(leg, alloc_cost_eur=alloc, proceeds_share_eur=share)
+            for leg, alloc, share in zip(
+                rl.legs, leg_alloc_eur, proceeds_shares, strict=True
+            )
+        ]
+        return ConvertedRealizedLine(
+            line=rl,
+            legs=converted_legs,
+            sell_gross_eur=quantize_money(rl.sell_gross_ccy * sell_rate),
+            sell_comm_eur=quantize_money(rl.sell_comm_ccy * sell_rate),
+            sell_net_eur=sell_net_eur,
+            alloc_cost_eur=alloc_cost_eur,
+            realized_pl_eur=quantize_money(sell_net_eur - alloc_cost_eur),
+        )
 
     def _rate_or_record(
         self, date: dt.date, currency: Currency, fx: FxTable | None
@@ -207,21 +231,22 @@ class ReportBuilder:
     def _allocate_proceeds_to_legs(
         legs: list[SellMatchLeg],
         sell_qty: Decimal,
-        sell_net_eur: Decimal | None,
-    ) -> None:
-        """Allocate sale proceeds EUR across legs by quantity share, cent-exact.
+        sell_net_eur: Decimal,
+    ) -> list[Decimal]:
+        """Split sale proceeds EUR across legs by quantity share, cent-exact.
 
-        Last leg absorbs the rounding residual so the sum equals sell_net_eur.
+        Returns one share per leg, in leg order; the last leg absorbs the rounding
+        residual so the shares sum exactly to sell_net_eur. A zero sell quantity (or no
+        legs) allocates nothing, returning a zero per leg.
         """
-        if sell_qty == 0 or sell_net_eur is None or not legs:
-            return
+        if sell_qty == 0 or not legs:
+            return [Decimal("0")] * len(legs)
 
-        allocated = Decimal("0")
-        for leg in legs[:-1]:
-            leg.proceeds_share_eur = quantize_money(sell_net_eur * leg.qty / sell_qty)
-            allocated += leg.proceeds_share_eur
-
-        legs[-1].proceeds_share_eur = sell_net_eur - allocated
+        shares = [
+            quantize_money(sell_net_eur * leg.qty / sell_qty) for leg in legs[:-1]
+        ]
+        shares.append(sell_net_eur - sum(shares, Decimal("0")))
+        return shares
 
     def _convert_syep_interest(self, fx: FxTable | None) -> None:
         if not self.syep_interest:
@@ -275,17 +300,15 @@ class ReportBuilder:
         for totals in self.symbol_totals.values():
             totals.eur = CurrencyTotals()
 
-        for rl in self.realized_lines:
-            if rl.symbol not in self.symbol_totals:
-                self.symbol_totals[rl.symbol] = SymbolTotals()
+        for crl in self.converted_lines:
+            symbol = crl.line.symbol
+            if symbol not in self.symbol_totals:
+                self.symbol_totals[symbol] = SymbolTotals()
 
-            t = self.symbol_totals[rl.symbol]
-            if rl.realized_pl_eur is not None:
-                t.eur.realized += rl.realized_pl_eur
-            if rl.sell_net_eur is not None:
-                t.eur.proceeds += rl.sell_net_eur
-            if rl.alloc_cost_eur is not None:
-                t.eur.alloc_cost += rl.alloc_cost_eur
+            t = self.symbol_totals[symbol]
+            t.eur.realized += crl.realized_pl_eur
+            t.eur.proceeds += crl.sell_net_eur
+            t.eur.alloc_cost += crl.alloc_cost_eur
 
     @property
     def eur_totals(self) -> CurrencyTotals:
