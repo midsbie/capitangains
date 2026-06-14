@@ -35,6 +35,7 @@ from capitangains.diagnostics import (
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_transfer_shortfalls,
     report_unattributed_income,
     report_unrecognized_sections,
 )
@@ -67,7 +68,7 @@ from capitangains.reporting.extract.sections import (
     SEC_TRANSFERS,
     SEC_WITHHOLDING,
 )
-from capitangains.reporting.fifo_domain import GapResolution
+from capitangains.reporting.fifo_domain import GapResolution, TransferShortfall
 from capitangains.reporting.quadro_8a import IncomeKind
 from tests.support import (
     SYEP_SECTION,
@@ -199,6 +200,38 @@ def test_report_gap_acknowledgments_accumulates_every_fatal_category(caplog):
     assert any("defective IBKR Basis" in m and "CORRUPT" in m for m in messages)
     assert any("Orphan acknowledgment" in m and "GHOST" in m for m in messages)
     assert any("tie-out failed" in m for m in messages)
+
+
+# --- transfer-OUT shortfalls: reporter -----------------------------------------------
+
+
+def test_report_transfer_shortfalls_silent_when_empty(caplog):
+    logger = logging.getLogger("shortfalls_none")
+    with caplog.at_level(logging.WARNING):
+        report_transfer_shortfalls([], logger)
+    assert caplog.records == []
+
+
+def test_report_transfer_shortfalls_warns_without_exiting(caplog):
+    # Unlike the gap tie-out, a transfer-OUT shortfall is WARN-only and never halts: one
+    # WARNING states the covered (requested - remaining) and short amounts, then a
+    # summary. The covered/short split comes straight off remaining_qty, so the old
+    # consumed-vs-available message confusion cannot recur.
+    logger = logging.getLogger("shortfalls_warn")
+    shortfall = TransferShortfall(
+        symbol="ABC",
+        date=dt.date(2024, 2, 1),
+        requested_qty=Decimal("100"),
+        remaining_qty=Decimal("30"),
+        currency=Currency("USD"),
+    )
+    with caplog.at_level(logging.WARNING):
+        report_transfer_shortfalls([shortfall], logger)
+
+    assert all(r.levelno == logging.WARNING for r in caplog.records)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("ABC" in m and "70 available" in m and "30 short" in m for m in messages)
+    assert any("1 transfer OUT(s) exceeded" in m for m in messages)
 
 
 # --- symbol-currency violations: reporter --------------------------------------------
@@ -974,6 +1007,45 @@ def test_process_files_exits_2_on_unacknowledged_gap(tmp_path, out_path, caplog)
     assert exc.value.code == 2
     assert not out_path.exists()
     assert any("Unacknowledged SELL gap" in r.getMessage() for r in caplog.records)
+
+
+def test_process_files_reports_transfer_shortfall_before_gap_abort(
+    write_statement, out_path, caplog
+):
+    # A transfer OUT depletes more than the book holds (recording a shortfall), while a
+    # separate unacknowledged SELL gap makes the run fatal. The shortfall is advisory
+    # and is sequenced before the gap tie-out, so it still surfaces in this one pass
+    # rather than being hidden by the abort until a later acknowledged re-run. All EUR,
+    # so the run reaches FIFO replay without an FX table.
+    stmt = write_statement(
+        _statement_meta_rows("U1", Y2024)
+        + [
+            _TRANSFERS_HEADER,
+            _transfer_data("XFEROUT", "EUR", "2024-03-01", direction="Out", qty="100"),
+            _TRADES_HEADER,
+            trade_data(
+                symbol="ORPH",
+                currency="EUR",
+                datetime_str="2024-06-10, 10:00:00",
+                quantity="-10",
+                t_price="120",
+                proceeds="1200",
+                comm_fee="0",
+                code="C",
+                basis="-1000",
+                realized="200",
+            ),
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out_path))
+
+    assert exc.value.code == 2  # the unacknowledged gap is fatal
+    assert not out_path.exists()
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("XFEROUT" in m and "exceeded the position book" in m for m in messages)
+    assert any("Unacknowledged SELL gap" in m for m in messages)
 
 
 def test_process_files_exits_2_on_orphan_acknowledgment(tmp_path, out_path, caplog):

@@ -12,6 +12,7 @@ from capitangains.reporting.fifo_domain import (
     Lot,
     ResolvedGap,
     SellMatchLeg,
+    TransferShortfall,
 )
 from capitangains.reporting.gap_policy import GapPolicy, UnacknowledgedGapPolicy
 from capitangains.reporting.positions import PositionBook
@@ -149,6 +150,40 @@ def test_transfer_out_after_buy_depletes_lots_before_sell():
 
     assert line is not None
     assert line.has_gap is True
+
+
+def test_transfer_out_exceeding_position_records_shortfall():
+    """transfer-out(100) against only 50 held: the matcher records a TransferShortfall
+    carrying the unmatched remainder; the 50 held are still consumed, so a later sell
+    gaps."""
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
+
+    matcher.ingest_trade(
+        _trade("ABC", Decimal("50"), proceeds=Decimal("-500"), comm=Decimal("0"))
+    )
+    matcher.ingest_transfer(_transfer("ABC", dt.date(2024, 2, 1), "100", "Out", "1000"))
+
+    assert matcher.transfer_shortfalls == [
+        TransferShortfall(
+            symbol="ABC",
+            date=dt.date(2024, 2, 1),
+            requested_qty=Decimal("100"),
+            remaining_qty=Decimal("50"),
+            currency=_USD,
+        )
+    ]
+    # The 50 held shares were still consumed, so a later sell finds no lots and gaps.
+    line = matcher.ingest_trade(
+        Trade(
+            date=dt.date(2024, 3, 1),
+            symbol="ABC",
+            quantity=Decimal("-50"),
+            currency=_USD,
+            proceeds=Decimal("600"),
+            comm_fee=Decimal("0"),
+        )
+    )
+    assert line is not None and line.has_gap is True
 
 
 def test_transfer_in_before_sell_funds_sell():

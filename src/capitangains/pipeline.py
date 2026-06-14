@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .diagnostics import (
+    parse_acknowledged_gaps_or_exit,
     report_extraction_defects,
     report_gap_acknowledgments,
     report_invalid_statements,
@@ -39,10 +40,11 @@ from .diagnostics import (
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_transfer_shortfalls,
     report_unattributed_income,
     report_unrecognized_sections,
 )
-from .errors import EXIT_DATA_QUALITY, EXIT_SETUP, DataQualityError
+from .errors import EXIT_DATA_QUALITY, EXIT_SETUP
 from .model import IbkrStatementCsvParser, merge_models, merge_reports
 from .reporting import (
     EventStream,
@@ -56,7 +58,6 @@ from .reporting import (
     detect_symbol_currency_violations,
     detect_unattributed_income,
     detect_unrecognized_sections,
-    parse_acknowledged_gaps,
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
 )
@@ -87,12 +88,9 @@ def run(options: RunOptions) -> None:
     logger = logging.getLogger(__name__)
 
     # Parse the gap-acknowledgment spec before any file I/O so a malformed spec fails
-    # fast (exit 2) without touching the statements.
-    try:
-        acknowledged = parse_acknowledged_gaps(options.auto_fix_sell_gaps)
-    except DataQualityError as e:
-        logger.error("%s", e)
-        raise SystemExit(EXIT_DATA_QUALITY) from e
+    # fast (exit 2) without touching the statements. A parse-and-gate boundary call: it
+    # returns the parsed set, unlike the void report_* helpers below.
+    acknowledged = parse_acknowledged_gaps_or_exit(options.auto_fix_sell_gaps, logger)
 
     # Parse one or more CSVs
     inputs = options.inputs
@@ -176,6 +174,10 @@ def run(options: RunOptions) -> None:
         len(realized),
     )
 
+    # Report transfer-OUT shortfalls before the gap tie-out below: a shortfall is
+    # advisory (never aborts) and often explains a later SELL gap, while the tie-out can
+    # exit, so ordering it first keeps it visible in the same pass.
+    report_transfer_shortfalls(matcher.transfer_shortfalls, logger)
     report_gap_acknowledgments(matcher.gap_events, acknowledged, logger)
 
     # Build the year-scoped report. ReportBuilder owns its year invariant: each ingest

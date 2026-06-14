@@ -10,6 +10,7 @@ from .fifo_domain import (
     RealizedLine,
     TradeProtocol,
     TransferProtocol,
+    TransferShortfall,
 )
 from .gap_policy import GapPolicy
 from .money import abs_decimal
@@ -35,6 +36,10 @@ class FifoMatcher:
     @property
     def gap_events(self) -> list[GapEvent]:
         return self.recorder.gap_events
+
+    @property
+    def transfer_shortfalls(self) -> list[TransferShortfall]:
+        return self.recorder.transfer_shortfalls
 
     def ingest_trade(self, trade: TradeProtocol) -> RealizedLine | None:
         qty = trade.quantity
@@ -103,13 +108,16 @@ class FifoMatcher:
                     transfer.currency,
                 )
                 if qty_remaining > 0:
-                    logger.warning(
-                        "Transfer OUT of %s shares of %s on %s, but only %s shares "
-                        "available. Position book may be incomplete.",
-                        qty_to_remove,
-                        transfer.symbol,
-                        transfer.date,
-                        qty_to_remove - qty_remaining,
+                    # Record the shortfall for the boundary to report; the lots that did
+                    # exist are already consumed (above), so a later sell still gaps.
+                    self.recorder.record_transfer_shortfall(
+                        TransferShortfall(
+                            symbol=transfer.symbol,
+                            date=transfer.date,
+                            requested_qty=qty_to_remove,
+                            remaining_qty=qty_remaining,
+                            currency=transfer.currency,
+                        )
                     )
             except Exception:
                 logger.warning(

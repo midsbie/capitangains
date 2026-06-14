@@ -108,7 +108,7 @@ class GapResolution(enum.Enum):
 GapKey = tuple[str, dt.date]
 
 
-@dataclass
+@dataclass(frozen=True)
 class GapEvent:
     symbol: str
     date: dt.date
@@ -121,11 +121,30 @@ class GapEvent:
 class ResolvedGap(NamedTuple):
     """How a gap policy valued one unmatched SELL quantity.
 
-    ``leg`` is the single gap leg to append -- a zero-cost placeholder or a synthetic
-    lot; ``alloc_cost`` is the resulting total allocated cost; ``event`` is the audit
-    record of the resolution.
+    leg is the single gap leg to append -- a zero-cost placeholder or a synthetic lot;
+    alloc_cost is the resulting total allocated cost; event is the audit record of the
+    resolution.
     """
 
     leg: SellMatchLeg
     alloc_cost: Decimal
     event: GapEvent
+
+
+@dataclass(frozen=True)
+class TransferShortfall:
+    """A transfer-OUT the position book could not fully cover.
+
+    Recorded by FifoMatcher when an OUT transfer requests more shares than the symbol's
+    lots hold (consume_fifo leaves remaining_qty unmatched). A sibling of GapEvent: the
+    engine only records it, and the boundary (diagnostics.report_transfer_shortfalls)
+    decides visibility. Carrying remaining_qty (the shortfall) directly, alongside the
+    requested_qty, lets the boundary state both the shortfall and the covered amount
+    (requested_qty - remaining_qty) without re-deriving either.
+    """
+
+    symbol: str
+    date: dt.date
+    requested_qty: Decimal
+    remaining_qty: Decimal
+    currency: Currency

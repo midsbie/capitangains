@@ -9,7 +9,9 @@ The report_* helpers take already-computed findings (and a logger), never raw fi
 argparse: pure detection lives in capitangains.reporting.validation and the per-stage
 producers, and this module only renders the result and sets the exit.
 capitangains.pipeline sequences detection and reporting between the stages whose output
-they check.
+they check. The one parse-and-gate helper, parse_acknowledged_gaps_or_exit, is the
+exception in shape only: it returns the parsed set rather than None, yet still delegates
+the parsing to validation and merely adds the boundary exit on a malformed spec.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import logging
 from collections.abc import Mapping, Sequence
 
 from .conv import Currency
-from .errors import EXIT_DATA_QUALITY
+from .errors import EXIT_DATA_QUALITY, DataQualityError
 from .reporting import (
     ExtractionDefect,
     OrderingCollision,
@@ -27,8 +29,27 @@ from .reporting import (
     ReconciliationReport,
     SymbolReconciliation,
     UnrecognizedSection,
+    parse_acknowledged_gaps,
 )
-from .reporting.fifo_domain import GapEvent, GapKey, GapResolution
+from .reporting.fifo_domain import GapEvent, GapKey, GapResolution, TransferShortfall
+
+
+def parse_acknowledged_gaps_or_exit(
+    spec: str | None, logger: logging.Logger
+) -> frozenset[GapKey]:
+    """Parse the --auto-fix-sell-gaps spec; exit cleanly on a malformed value.
+
+    A parse-and-gate, not a void report_*: it returns the parsed acknowledgment set on
+    success, or logs one ERROR and raises SystemExit(EXIT_DATA_QUALITY) on a malformed
+    spec. The parsing itself stays in validation.parse_acknowledged_gaps; this only adds
+    the boundary disposition so the pipeline can fail fast on a bad spec before any file
+    I/O, reading as one more boundary call beside the report_* helpers.
+    """
+    try:
+        return parse_acknowledged_gaps(spec)
+    except DataQualityError as e:
+        logger.error("%s", e)
+        raise SystemExit(EXIT_DATA_QUALITY) from e
 
 
 def report_gap_acknowledgments(
@@ -38,8 +59,8 @@ def report_gap_acknowledgments(
 ) -> None:
     """Tie out the gaps found against the operator's acknowledgments, at the boundary.
 
-    A SELL gap is always a real, in-scope disposal that must be reported; the only
-    open question is the valuation of its cost basis, and that valuation is never
+    A SELL gap is always a real, in-scope disposal that must be reported; the only open
+    question is the valuation of its cost basis, and that valuation is never
     auto-applied without explicit, audited sign-off. So this reconciles two ways:
 
     - Every gap must be acknowledged: an UNACKNOWLEDGED gap is fatal.
@@ -113,6 +134,38 @@ def report_gap_acknowledgments(
                 ge.currency,
                 ge.message,
             )
+
+
+def report_transfer_shortfalls(
+    shortfalls: Sequence[TransferShortfall], logger: logging.Logger
+) -> None:
+    """Warn (do NOT abort) on transfer-OUT shortfalls the position book could not cover.
+
+    FifoMatcher records a shortfall when an OUT transfer requests more shares than the
+    symbol's lots hold (usually an incomplete prior-history import). Unlike the
+    fail-closed reporters here this never raises: the depletion itself is handled
+    correctly (the lots that existed are consumed, so a later sell still gaps), so the
+    run continues. One WARNING per shortfall, naming the covered and short amounts, plus
+    a summary; empty == silent.
+    """
+    if not shortfalls:
+        return
+    for s in shortfalls:
+        logger.warning(
+            "Transfer OUT of %s share(s) of %s (%s) on %s exceeded the position book: "
+            "only %s available, %s short. The position history is likely incomplete.",
+            s.requested_qty,
+            s.symbol,
+            s.currency,
+            s.date,
+            s.requested_qty - s.remaining_qty,
+            s.remaining_qty,
+        )
+    logger.warning(
+        "%d transfer OUT(s) exceeded the available position; not fatal, but verify the "
+        "opening positions / prior-year statements so cost basis is not understated.",
+        len(shortfalls),
+    )
 
 
 def report_extraction_defects(
