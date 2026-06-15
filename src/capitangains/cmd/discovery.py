@@ -57,7 +57,8 @@ class DiscoveryResult:
 def discover_statements(directory: Path, year: int) -> DiscoveryResult:
     """Classify a directory's *.csv into selected / future / ignored, by period.
 
-    Walks sorted(directory.glob("*.csv"))and parses each file once. For each:
+    Walks the directory's .csv files (matched case-insensitively, non-recursively) in
+    sorted path order and parses each once. For each:
 
     1. No 'Statement' section -> ignored. The presence of that section is the
        structural discriminator between an IBKR Activity Statement and an unrelated csv
@@ -71,14 +72,18 @@ def discover_statements(directory: Path, year: int) -> DiscoveryResult:
 
     selected is sorted by (period start, path) with identity-unreadable entries last;
     the None period is kept out of the comparison rather than ordered against a
-    date. excluded_future and ignored retain glob (path) order.
+    date. excluded_future and ignored retain discovery (sorted path) order.
     """
     parser = IbkrStatementCsvParser()
     selected: list[DiscoveredStatement] = []
     excluded_future: list[DiscoveredStatement] = []
     ignored: list[Path] = []
 
-    for path in sorted(directory.glob("*.csv")):
+    # Match the .csv suffix case-insensitively so a .CSV export is not silently dropped,
+    # and uniformly across case-sensitive/insensitive filesystems (which
+    # directory.glob("*.csv") is not). iterdir is non-recursive, like the prior glob.
+    csv_paths = sorted(p for p in directory.iterdir() if p.suffix.casefold() == ".csv")
+    for path in csv_paths:
         model, _ = parser.parse_file(path)
         if "Statement" not in model.sections:
             ignored.append(path)

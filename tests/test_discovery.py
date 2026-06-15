@@ -102,6 +102,18 @@ def test_non_recursive_and_csv_only(tmp_path):
     assert result.ignored == ()
 
 
+def test_discovers_uppercase_csv_extension(tmp_path):
+    # A statement exported as .CSV must be matched too: a case-sensitive *.csv glob
+    # drops it from every bucket on a case-sensitive filesystem, with no diagnostic.
+    _write_statement(tmp_path / "2024.CSV", period=Y2024, year=2024)
+
+    result = discover_statements(tmp_path, 2024)
+
+    assert [s.path.name for s in result.selected] == ["2024.CSV"]
+    assert result.excluded_future == ()
+    assert result.ignored == ()
+
+
 def test_empty_directory(tmp_path):
     assert discover_statements(tmp_path, 2024) == DiscoveryResult(
         selected=(), excluded_future=(), ignored=()
