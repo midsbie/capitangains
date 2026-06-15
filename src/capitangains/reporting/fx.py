@@ -97,9 +97,14 @@ class FxTable:
                     raise ValueError(
                         f"FX table has an unparseable date {raw_date!r}"
                     ) from exc
-                ccy = Currency(row["currency"])
-                if not ccy.code:
+                # A short row leaves the currency cell None; guard before constructing,
+                # since Currency(None) raises AttributeError from its normalizing
+                # strip()/upper() instead of this clean error. Blank/whitespace-only is
+                # the same defect (it normalizes to an empty code), so reject it too.
+                raw_ccy = row["currency"]
+                if not raw_ccy or not raw_ccy.strip():
                     raise ValueError(f"FX row missing currency for date {d}")
+                ccy = Currency(raw_ccy)
                 if ccy.is_base:
                     eur_per_unit = Decimal("1")
                 else:

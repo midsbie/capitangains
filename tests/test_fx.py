@@ -130,6 +130,15 @@ def test_fx_from_csv_rejects_row_missing_rate(tmp_path):
         FxTable.from_csv(path)
 
 
+def test_fx_from_csv_rejects_row_missing_currency(tmp_path):
+    # A row missing the currency cell leaves row["currency"] as None. It must surface
+    # as a clean, row-located ValueError, not a raw AttributeError from Currency(None)
+    # running None.strip().upper() in its normalizing __post_init__.
+    path = _write_csv(tmp_path, [["2024-01-01"]])
+    with pytest.raises(ValueError, match="missing currency"):
+        FxTable.from_csv(path)
+
+
 def test_fx_get_rate_weekend_fallback(tmp_path):
     path = _write_csv(
         tmp_path,
