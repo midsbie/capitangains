@@ -81,21 +81,44 @@ def to_dec(
     return to_decimal(value, default)
 
 
-def has_intraday_time(d: str) -> bool:
-    """Whether an IBKR Date/Time string carries a time after its date.
+def _split_datetime(d: str) -> tuple[str, str]:
+    """Split an IBKR Date/Time on its separating comma into stripped (date, time) parts.
 
-    IBKR renders a date-only value as 'YYYY-MM-DD' and a timestamped one as
-    'YYYY-MM-DD, HH:MM:SS' (or '..., HH:MM'). The comma is the date/time separator, so
-    its presence is exactly the presence of an intraday time. This is the single home
-    for that format fact; parse_date and the ordering-collision detector defer here.
+    The comma is IBKR's date/time separator: 'YYYY-MM-DD' has none, 'YYYY-MM-DD,
+    HH:MM:SS' has one. Either part may be empty (no comma at all, or a bare
+    'YYYY-MM-DD,' trailer with nothing after it). The single home for that separator
+    fact, so has_intraday_time and parse_date read one split rather than each
+    rediscovering the comma and diverging on it.
     """
-    return "," in d
+    date_part, _, time_part = d.partition(",")
+    return date_part.strip(), time_part.strip()
+
+
+def has_intraday_time(d: str) -> bool:
+    """Whether an IBKR Date/Time string carries an orderable intraday time.
+
+    IBKR renders a date-only value as 'YYYY-MM-DD' and a timestamped one as 'YYYY-MM-DD,
+    HH:MM:SS' (or '..., HH:MM'). True only when the comma is followed by a parseable
+    time, not merely present: a bare or whitespace-only trailer ('YYYY-MM-DD,') carries
+    no order. The ordering-collision gate counts a row this returns False for as
+    untimed, so a missing or malformed time fails closed (the run aborts) rather than
+    sorting on an empty time and fabricating a FIFO order the data does not determine.
+
+    """
+    _, time_part = _split_datetime(d)
+    try:
+        dt.time.fromisoformat(time_part)
+    except ValueError:
+        return False
+    return True
 
 
 def parse_date(d: str) -> dt.date:
-    """Parse date-like strings.
-    Handles 'YYYY-MM-DD' or 'YYYY-MM-DD, HH:MM:SS' or 'YYYY-MM-DD, HH:MM' etc.
+    """Parse the date from an IBKR Date/Time string, ignoring any intraday time.
+
+    Handles 'YYYY-MM-DD', 'YYYY-MM-DD, HH:MM:SS', 'YYYY-MM-DD, HH:MM', and a bare
+    'YYYY-MM-DD,' trailer alike. Raises ValueError on a missing or malformed date, which
+    the extract layer turns into a row defect rather than a crash (see _require_date).
     """
-    if has_intraday_time(d):
-        d = d.split(",")[0].strip()
-    return dt.date.fromisoformat(d)
+    date_part, _ = _split_datetime(d)
+    return dt.date.fromisoformat(date_part)

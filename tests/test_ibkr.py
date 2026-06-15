@@ -1,9 +1,10 @@
+import datetime as dt
 import logging
 from decimal import Decimal
 
 import pytest
 
-from capitangains.conv.ibkr import to_dec, to_dec_strict
+from capitangains.conv.ibkr import has_intraday_time, parse_date, to_dec, to_dec_strict
 
 
 def test_strips_ibkr_thousands_separators():
@@ -61,3 +62,35 @@ def test_strict_rejects_currency_symbols():
         to_dec_strict("$100.00")
     with pytest.raises(ValueError, match="Invalid decimal format"):
         to_dec_strict("€100.00")
+
+
+def test_has_intraday_time_true_for_parseable_time():
+    for value in ("2024-01-15, 10:30:00", "2024-01-15, 10:30"):
+        assert has_intraday_time(value)
+
+
+def test_has_intraday_time_false_without_parseable_time():
+    # The comma alone is not a time. A row IBKR left timeless -- a bare trailing comma,
+    # a whitespace-only or unparseable tail -- must read as untimed so the ordering
+    # collision gate fails closed instead of sorting on an empty/garbage time (F4).
+    for value in ("2024-01-15", "2024-01-15,", "2024-01-15, ", "2024-01-15, noon", ""):
+        assert not has_intraday_time(value)
+
+
+def test_parse_date_extracts_date_regardless_of_time():
+    # parse_date keeps the date even for the timeless trailing-comma form that
+    # has_intraday_time now rejects; the two functions no longer share a truth value.
+    for value in (
+        "2024-01-15",
+        "2024-01-15, 10:30:00",
+        "2024-01-15, 10:30",
+        "2024-01-15,",
+    ):
+        assert parse_date(value) == dt.date(2024, 1, 15)
+
+
+def test_parse_date_rejects_missing_date():
+    # The extract layer relies on this ValueError to turn a blank Date/Time into a row
+    # defect rather than a crash (see _require_date).
+    with pytest.raises(ValueError):
+        parse_date("")
