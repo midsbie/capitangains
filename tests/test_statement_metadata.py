@@ -7,6 +7,7 @@
 """
 
 import datetime as dt
+import locale
 
 import pytest
 
@@ -53,6 +54,34 @@ def test_parse_rejects_extra_separator():
 def test_parse_rejects_reversed_range():
     with pytest.raises(ValueError, match="ends before it starts"):
         StatementPeriod.parse("December 31, 2024 - January 1, 2024")
+
+
+def test_parse_rejects_non_english_month_name():
+    # The month table is English-only by design (it replaces locale-dependent %B), so
+    # a 'Month D, YYYY' shape with a non-English month is rejected, not parsed.
+    with pytest.raises(ValueError, match="Unparseable statement period"):
+        StatementPeriod.parse("Janeiro 1, 2024")
+
+
+def test_parse_independent_of_lc_time_locale():
+    # Regression: the Period was parsed with strptime("%B ..."), whose month names
+    # follow the process LC_TIME locale, so IBKR's English names raised ValueError on a
+    # non-English host (this tool's own PT audience). Parsing must succeed under any
+    # locale. Skips where no non-English locale is installed to switch into.
+    saved = locale.setlocale(locale.LC_TIME)
+    try:
+        for candidate in ("pt_PT.UTF-8", "pt_PT", "de_DE.UTF-8", "fr_FR.UTF-8"):
+            try:
+                locale.setlocale(locale.LC_TIME, candidate)
+            except locale.Error:
+                continue
+            assert StatementPeriod.parse("January 1, 2024 - December 31, 2024") == (
+                StatementPeriod(dt.date(2024, 1, 1), dt.date(2024, 12, 31))
+            )
+            return
+        pytest.skip("no non-English LC_TIME locale available on this host")
+    finally:
+        locale.setlocale(locale.LC_TIME, saved)
 
 
 # --- StatementPeriod invariant + overlap ----------------------------------------------

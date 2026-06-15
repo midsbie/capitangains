@@ -9,15 +9,59 @@ that reads them out of the raw model.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass
 
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
-# IBKR renders the Statement 'Period' field with a full month name, e.g.
-# "January 1, 2024" -- distinct from the ISO Date/Time carried on trade rows.
-_PERIOD_DATE_FORMAT = "%B %d, %Y"
+# IBKR renders the Statement 'Period' field with an English full month name, e.g.
+# "January 1, 2024" -- distinct from the ISO Date/Time carried on trade rows. Months are
+# resolved against this fixed English table, not strptime("%B"): %B follows the process
+# LC_TIME locale, so on a non-English host (plausible for this tool's PT audience) it
+# would reject IBKR's English names and fail every statement's identity gate.
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        (
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        ),
+        start=1,
+    )
+}
+# 'Month D, YYYY' with an English month name. Day/year widths are permissive (IBKR
+# emits an unpadded day); _parse_period_date's dt.date construction rejects an out-of-
+# range day or a well-formed token that is not a real month.
+_PERIOD_DATE_RE = re.compile(r"^([A-Za-z]+) (\d{1,2}), (\d{4})$")
 _PERIOD_SEPARATOR = " - "
+
+
+def _parse_period_date(text: str) -> dt.date:
+    """Parse one 'Month D, YYYY' side of a Period field, independent of process locale.
+
+    Raises ValueError on a non-matching shape, an unrecognized month name, or an
+    out-of-range calendar date; StatementPeriod.parse wraps that into its 'Unparseable'
+    message naming the whole field.
+    """
+    match = _PERIOD_DATE_RE.match(text)
+    if match is None:
+        raise ValueError(f"not a 'Month D, YYYY' date: {text!r}")
+    month_name, day, year = match.groups()
+    month = _MONTHS.get(month_name.lower())
+    if month is None:
+        raise ValueError(f"unrecognized month name: {month_name!r}")
+    return dt.date(int(year), month, int(day))
 
 
 @dataclass(frozen=True)
@@ -60,8 +104,8 @@ class StatementPeriod:
             )
 
         try:
-            start = dt.datetime.strptime(start_str, _PERIOD_DATE_FORMAT).date()
-            end = dt.datetime.strptime(end_str, _PERIOD_DATE_FORMAT).date()
+            start = _parse_period_date(start_str)
+            end = _parse_period_date(end_str)
         except ValueError as e:
             raise ValueError(f"Unparseable statement period: {text!r}") from e
 
