@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import ClassVar, Self, TypeVar
 
-from capitangains.conv import ELISION_PLACEHOLDERS, Currency, parse_date, to_dec_strict
+from capitangains.conv import Currency
+from capitangains.conv.ibkr import ELISION_PLACEHOLDERS, parse_date, to_dec_strict
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 

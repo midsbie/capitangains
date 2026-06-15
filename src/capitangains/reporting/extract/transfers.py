@@ -7,7 +7,8 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
-from capitangains.conv import Currency, to_dec
+from capitangains.conv import Currency
+from capitangains.conv.ibkr import to_dec
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 

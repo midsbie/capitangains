@@ -27,7 +27,8 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from capitangains.conv import Currency, has_intraday_time, parse_date
+from capitangains.conv import Currency
+from capitangains.conv.ibkr import has_intraday_time, parse_date
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 

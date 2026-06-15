@@ -9,7 +9,8 @@ from collections import defaultdict
 from decimal import Decimal, DivisionByZero
 from pathlib import Path
 
-from capitangains.conv import Currency, parse_date, to_dec_strict
+from capitangains.conv import Currency
+from capitangains.conv.numeric import to_decimal_strict
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,8 @@ _MAX_FX_LOOKBACK_DAYS = 7
 # An operator FX rate must be a plain decimal-point number; a comma or any interior
 # whitespace is ambiguous digit grouping (a thousands separator vs a decimal mark,
 # ~10000x apart). This is fx's own precondition on operator input, deliberately
-# independent of conv's IBKR-number cleaner: the character overlap with NUM_CLEAN_RE is
-# incidental, so the two must not be coupled. See _parse_fx_rate.
+# independent of the IBKR-number cleaner in conv.ibkr: the character overlap with its
+# NUM_CLEAN_RE is incidental, so the two must not be coupled. See _parse_fx_rate.
 _AMBIGUOUS_GROUPING_RE = re.compile(r"[,\s]")
 
 
@@ -40,14 +41,14 @@ def _parse_fx_rate(raw: str | None, ccy: Currency, date: dt.date) -> Decimal:
     the silent error onto US-formatted input). A comma and whitespace are also what the
     IBKR-grammar cleaner silently strips from statement numbers, which is exactly why an
     operator rate must not be run through that cleaner; this guard rejects them first.
-    With grouping excluded, to_dec_strict handles the rest (sign, decimal point,
-    non-finite, and the missing/placeholder/malformed cases).
+    With grouping excluded, to_decimal_strict handles the rest (sign, decimal point,
+    non-finite, and the missing/malformed cases).
     """
     # Guard on an actual string: a short CSV row leaves row["rate"] as None, which would
     # make the membership test raise a raw TypeError. The None, empty, non-finite, and
-    # malformed cases are what to_dec_strict reports as a clean domain ValueError, so
-    # let them fall through to it. Leading and trailing whitespace is benign
-    # (to_dec_strict trims it), so test the trimmed token for an interior comma or
+    # malformed cases are what to_decimal_strict reports as a clean domain ValueError,
+    # so let them fall through to it. Leading and trailing whitespace is benign
+    # (to_decimal_strict trims it), so test the trimmed token for an interior comma or
     # whitespace.
     if isinstance(raw, str) and _AMBIGUOUS_GROUPING_RE.search(raw.strip()):
         raise ValueError(
@@ -55,7 +56,7 @@ def _parse_fx_rate(raw: str | None, ccy: Currency, date: dt.date) -> Decimal:
             f"FX table must use a plain decimal point with no digit grouping (a comma "
             f"or space is ambiguous between a thousands separator and a decimal mark)."
         )
-    return to_dec_strict(raw)
+    return to_decimal_strict(raw)
 
 
 class FxTable:
@@ -89,7 +90,7 @@ class FxTable:
             for row in reader:
                 raw_date = row["date"]
                 try:
-                    d = parse_date(raw_date)
+                    d = dt.date.fromisoformat(raw_date)
                 except (ValueError, TypeError) as exc:
                     # Reject a malformed date here rather than store an untrusted string
                     # and mis-sort it later. A valid ISO date is a precondition.
