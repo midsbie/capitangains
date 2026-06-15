@@ -35,6 +35,7 @@ from capitangains.diagnostics import (
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_timestamp_tie_collisions,
     report_transfer_shortfalls,
     report_unattributed_income,
     report_unrecognized_sections,
@@ -48,10 +49,12 @@ from capitangains.reporting import (
     ReconciliationReport,
     StatementInput,
     SymbolReconciliation,
+    TimestampTieCollision,
     UnrecognizedSection,
     detect_ordering_collisions,
     detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
+    detect_timestamp_tie_collisions,
     detect_unattributed_income,
     detect_unrecognized_sections,
     parse_acknowledged_gaps,
@@ -390,6 +393,56 @@ def test_detect_ordering_collisions_lone_date_only_trade_is_silent():
     assert detect_ordering_collisions(trades, []) == []
 
 
+# --- identical-timestamp buy/sell ties: detector -------------------------------------
+
+
+def _timed_trade(datetime_str, quantity, *, symbol="AAPL", currency="USD"):
+    """A fully timestamped trade; date taken from the Date/Time so the two agree."""
+    return trade_row(
+        symbol=symbol,
+        currency=Currency(currency),
+        date=datetime_str.split(",")[0],
+        datetime_str=datetime_str,
+        quantity=quantity,
+    )
+
+
+def test_detect_timestamp_tie_buy_and_sell_collide():
+    # A buy and a sell of one symbol carry a byte-identical Date/Time. The shared
+    # timestamp orders neither, yet the choice flips a gap into a clean match, so it is
+    # unorderable -- the F2 case the untimed gate above does not cover.
+    ts = "2024-06-15, 14:30:00"
+    trades = [_timed_trade(ts, "100"), _timed_trade(ts, "-100")]
+    assert detect_timestamp_tie_collisions(trades) == [
+        TimestampTieCollision("AAPL", Currency("USD"), ts, 1, 1)
+    ]
+
+
+def test_detect_timestamp_tie_same_sign_is_not_a_collision():
+    # Two buys at one timestamp (a single order filled in parts) cannot flip a gap into
+    # a match, so the scoped gate leaves them to the tie-break, not an abort.
+    ts = "2024-06-15, 14:30:00"
+    trades = [_timed_trade(ts, "100"), _timed_trade(ts, "50")]
+    assert detect_timestamp_tie_collisions(trades) == []
+
+
+def test_detect_timestamp_tie_keys_on_the_full_timestamp_not_the_date():
+    # A buy and a sell on one day at different times are ordered by those times; the tie
+    # is on the whole Date/Time, so distinct intraday times are not a collision.
+    trades = [
+        _timed_trade("2024-06-15, 09:30:00", "100"),
+        _timed_trade("2024-06-15, 15:00:00", "-100"),
+    ]
+    assert detect_timestamp_tie_collisions(trades) == []
+
+
+def test_detect_timestamp_tie_ignores_untimed_trades():
+    # Date-only rows are the untimed gate's concern (detect_ordering_collisions); this
+    # detector skips them so the two gates never double-report one symbol-day.
+    trades = [_timed_trade("2024-06-15", "100"), _timed_trade("2024-06-15", "-100")]
+    assert detect_timestamp_tie_collisions(trades) == []
+
+
 # --- same-day event ordering: reporter -----------------------------------------------
 
 
@@ -417,6 +470,34 @@ def test_report_ordering_collisions_lists_and_exits(caplog):
     assert any("Unorderable same-day events" in m and "AAPL" in m for m in messages)
     assert any("VOD" in m for m in messages)
     assert any("2 symbol-day(s)" in m for m in messages)
+
+
+# --- identical-timestamp buy/sell ties: reporter -------------------------------------
+
+
+def test_report_timestamp_tie_collisions_silent_when_empty(caplog):
+    logger = logging.getLogger("tie_report_none")
+    with caplog.at_level(logging.ERROR):
+        report_timestamp_tie_collisions([], logger)
+    assert caplog.records == []
+
+
+def test_report_timestamp_tie_collisions_lists_and_exits(caplog):
+    # Each tie is named with its timestamp and buy/sell counts, then one summary and a
+    # single exit 2 -- the same fail-closed shape as the untimed-ordering reporter.
+    logger = logging.getLogger("tie_report_fatal")
+    collisions = [
+        TimestampTieCollision("AAPL", Currency("USD"), "2024-06-15, 14:30:00", 1, 1),
+        TimestampTieCollision("VOD", Currency("GBP"), "2024-07-01, 10:00:00", 2, 1),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        report_timestamp_tie_collisions(collisions, logger)
+
+    assert exc.value.code == 2
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("Unorderable simultaneous trades" in m and "AAPL" in m for m in messages)
+    assert any("VOD" in m for m in messages)
+    assert any("2 symbol-timestamp(s)" in m for m in messages)
 
 
 # --- statement input conflicts: detector --------------------------------------------
@@ -732,6 +813,50 @@ def test_run_exits_2_on_unorderable_same_day_trades(tmp_path, out_path, caplog):
 
     assert exc.value.code == 2
     assert not out_path.exists()
+
+
+def test_run_exits_2_on_identical_timestamp_buy_sell(tmp_path, out_path, caplog):
+    # Two EUR trades for one symbol carry a byte-identical Date/Time: a BUY and a SELL
+    # in the same instant. Their FIFO order is not in the data (it decides gap vs
+    # match), so the run aborts (exit 2, no workbook) rather than resolve it
+    # buy-before-sell. EUR converts by identity, so the run reaches the ordering stage
+    # without an FX table.
+    stmt = tmp_path / "stmt.csv"
+    rows = _statement_meta_rows("U1", Y2024) + [
+        _TRADES_HEADER,
+        trade_data(
+            symbol="AAA",
+            currency="EUR",
+            datetime_str="2024-06-15, 09:30:00",
+            quantity="10",
+            proceeds="-1000",
+            comm_fee="0",
+            code="O",
+        ),
+        trade_data(
+            symbol="AAA",
+            currency="EUR",
+            datetime_str="2024-06-15, 09:30:00",
+            quantity="-10",
+            t_price="110",
+            proceeds="1100",
+            comm_fee="0",
+            code="C",
+            basis="-1000",
+            realized="100",
+        ),
+    ]
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out_path))
+
+    assert exc.value.code == 2
+    assert not out_path.exists()
+    assert any(
+        "Unorderable simultaneous trades" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_run_does_not_swallow_a_reconciliation_crash(

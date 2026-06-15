@@ -101,8 +101,9 @@ def detect_ordering_collisions(
     Scope. Only same (symbol, currency, date) matters, since consumption is keyed that
     way; an untimed event sharing a day with unrelated symbols is independent and is not
     reported. A group collides when it holds at least two order-sensitive events and at
-    least one is untimed (a transfer or a date-only trade): two fully timestamped trades
-    remain orderable by their times and are not a collision.
+    least one is untimed (a transfer or a date-only trade). Two fully timestamped trades
+    are orderable by their differing times; an identical-timestamp tie
+    is detect_timestamp_tie_collisions' concern, not this gate's.
 
     Returns every collision (sorted); an empty list means every event is orderable. The
     decision to halt rather than fabricate an order is the boundary's (see
@@ -140,6 +141,74 @@ def detect_ordering_collisions(
                     n_transfers=n_transfers,
                 )
             )
+
+    return sorted(collisions)
+
+
+@dataclass(frozen=True, order=True)
+class TimestampTieCollision:
+    """One (symbol, currency, timestamp) where a buy and a sell share one Date/Time.
+
+    Sibling to OrderingCollision for the case its scope excludes: here every event is
+    timed, but two or more trades of the same symbol and currency carry a byte-identical
+    Date/Time, and that group nets a buy against a sell. The shared timestamp orders
+    neither against the other, yet the choice decides whether the sell consumes the
+    same-instant buy's lot (a clean match) or finds no inventory (a gap), and so moves
+    the cost basis. _event_sort_key would otherwise break the tie buy-before-sell, an
+    order the data does not support. datetime_str is the raw IBKR cell, the exact value
+    _event_sort_key ties on; n_buys and n_sells quantify the tied group. (symbol,
+    currency, datetime_str) is unique per collision, so order=True sorts
+    deterministically, and a report over a set of collisions is stable.
+    """
+
+    symbol: str
+    currency: Currency
+    datetime_str: str
+    n_buys: int
+    n_sells: int
+
+
+def detect_timestamp_tie_collisions(
+    trades: Sequence[TradeRow],
+) -> list[TimestampTieCollision]:
+    """Find identical-timestamp trade groups whose FIFO order the data cannot determine.
+
+    The complement to detect_ordering_collisions: that gate handles an untimed event (a
+    transfer or a date-only trade) sharing a day; this one handles fully timed trades
+    that share a byte-identical Date/Time. _event_sort_key resolves such a tie
+    buy-before-sell, but when the tied group holds both a buy and a sell that is a
+    fabricated order, deciding gap versus clean match, and so the cost basis, on an
+    assumption rather than the data.
+
+    Scope. Only a buy-against-sell tie of one (symbol, currency) is reported. Two
+    same-instant buys (a single order filled in parts) or two sells do not flip a gap
+    into a match, so they are left to the deterministic tie-break, not aborting an
+    ordinary fill. Untimed trades are skipped here; they are detect_ordering_collisions'
+    concern. Returns every tie (sorted); an empty list means no buy/sell timestamp tie.
+    """
+    buys_by_tie: dict[tuple[str, Currency, str], int] = defaultdict(int)
+    sells_by_tie: dict[tuple[str, Currency, str], int] = defaultdict(int)
+    for t in trades:
+        if not has_intraday_time(t.datetime_str):
+            continue  # untimed: detect_ordering_collisions owns this case
+        tie = (t.symbol, t.currency, t.datetime_str)
+        if t.quantity > 0:
+            buys_by_tie[tie] += 1
+        else:
+            sells_by_tie[tie] += 1
+
+    collisions: list[TimestampTieCollision] = []
+    for tie in buys_by_tie.keys() & sells_by_tie.keys():
+        symbol, currency, datetime_str = tie
+        collisions.append(
+            TimestampTieCollision(
+                symbol=symbol,
+                currency=currency,
+                datetime_str=datetime_str,
+                n_buys=buys_by_tie[tie],
+                n_sells=sells_by_tie[tie],
+            )
+        )
 
     return sorted(collisions)
 

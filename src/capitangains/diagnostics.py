@@ -28,6 +28,7 @@ from .reporting import (
     Quadro8ALine,
     ReconciliationReport,
     SymbolReconciliation,
+    TimestampTieCollision,
     UnrecognizedSection,
     parse_acknowledged_gaps,
 )
@@ -289,6 +290,47 @@ def report_ordering_collisions(
         "activity in the same symbol cannot be ordered against it, and the cost basis "
         "would depend on an assumption the data does not support. Resolve the affected "
         "symbol(s) by hand, or adjust the inputs so the events do not coincide.",
+        len(collisions),
+    )
+    raise SystemExit(EXIT_DATA_QUALITY)
+
+
+def report_timestamp_tie_collisions(
+    collisions: Sequence[TimestampTieCollision], logger: logging.Logger
+) -> None:
+    """Abort if a buy and a sell of one symbol share an identical timestamp.
+
+    Sibling to report_ordering_collisions for the timed case its scope excludes; the
+    detector (reporting.validation.detect_timestamp_tie_collisions) owns the why. The
+    boundary policy is the same fail-closed stance: _event_sort_key resolves the tie
+    buy-before-sell, but when a buy and a sell coincide that choice decides gap versus
+    clean match, and the cost basis with it, on an order the data does not support. So
+    every tie is listed, then a single SystemExit(EXIT_DATA_QUALITY), and no workbook is
+    written. Such ties are rare (a buy and a sell of one symbol to the same second), so
+    no override is built; an empty list is silent.
+    """
+    if not collisions:
+        return
+
+    for c in collisions:
+        logger.error(
+            "Unorderable simultaneous trades for %s (%s) at %s: %d buy(s) and %d "
+            "sell(s) share one timestamp, so which lot the FIFO match consumes is not "
+            "in the data.",
+            c.symbol,
+            c.currency,
+            c.datetime_str,
+            c.n_buys,
+            c.n_sells,
+        )
+
+    logger.error(
+        "Buy/sell timestamp ties make FIFO order ambiguous for %d symbol-timestamp(s); "
+        "no workbook written. A buy and a sell of the same symbol carry an identical "
+        "Date/Time, so whether the sell consumes the buy (a match) or finds "
+        "no lot (a gap), and thus the cost basis, rests on an assumption the data does "
+        "not support. Resolve the affected trade(s) by hand, or adjust the inputs so "
+        "the events do not coincide.",
         len(collisions),
     )
     raise SystemExit(EXIT_DATA_QUALITY)

@@ -25,7 +25,12 @@ def test_intraday_sell_before_buy_preserves_chronological_order():
 
 
 def test_same_timestamp_buy_before_sell():
-    """When trades share an identical timestamp, buys should sort before sells."""
+    """An identical-timestamp tie breaks buys before sells: a deterministic fallback.
+
+    A real buy-vs-sell tie is aborted upstream by report_timestamp_tie_collisions, so
+    this tie-break never decides a cost basis; it only keeps the sort stable for the
+    cases the gate leaves through. The order itself must stay buys-first regardless.
+    """
     buy = _trade("2024-06-15, 12:00:00", "100")
     sell = _trade("2024-06-15, 12:00:00", "-50")
 

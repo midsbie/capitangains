@@ -13,14 +13,16 @@ def _event_sort_key(
 ) -> tuple[dt.date, str, int]:
     """Order the merged trade/transfer stream for FIFO ingestion.
 
-    Trades sort by IBKR's Date/Time, with buys before sells only as a tie-break for an
-    identical timestamp; transfers carry no intraday time, so they sort by date alone.
-    That is sound because report_ordering_collisions has already aborted the run if any
-    untimed event, such as a transfer, or a trade with a date-only Date/Time, shared a
-    (symbol, currency) day with other order-sensitive activity. The only same-day
-    pairings that can still reach this sort are either fully timestamped (ordered by
-    their times) or in independent symbols, whose relative order does not affect FIFO
-    (consumption is keyed per symbol).
+    Trades sort by IBKR's Date/Time; transfers carry no intraday time, so they sort by
+    date alone. An identical-timestamp tie breaks buys before sells, but two gates run
+    before this sort make that tie-break a deterministic fallback rather than a basis
+    decision: report_ordering_collisions aborts if an untimed event (a transfer or a
+    date-only trade) shares a (symbol, currency) day with other activity, and
+    report_timestamp_tie_collisions aborts if a buy and a sell of one symbol share an
+    identical timestamp. What still reaches this sort is therefore ordered by differing
+    times, is a same-sign timestamp tie (left to this stable order by that gate's
+    buy-vs-sell scope), or is in independent symbols (immaterial to FIFO, which is keyed
+    per symbol).
     """
     if isinstance(event, TransferRow):
         return (event.date, "", 0)

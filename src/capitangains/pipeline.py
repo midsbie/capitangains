@@ -40,6 +40,7 @@ from .diagnostics import (
     report_reconciliation,
     report_statement_input_conflicts,
     report_symbol_currency_violations,
+    report_timestamp_tie_collisions,
     report_transfer_shortfalls,
     report_unattributed_income,
     report_unrecognized_sections,
@@ -56,6 +57,7 @@ from .reporting import (
     detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
     detect_symbol_currency_violations,
+    detect_timestamp_tie_collisions,
     detect_unattributed_income,
     detect_unrecognized_sections,
     partition_statements_by_metadata,
@@ -157,6 +159,12 @@ def run(options: RunOptions) -> None:
     # and halt rather than guess; see the detector's rationale.
     collisions = detect_ordering_collisions(parsed.trades, parsed.transfers)
     report_ordering_collisions(collisions, logger)
+
+    # The companion case to the gate above: every event is timed, but a buy and a sell
+    # of one symbol carry an identical Date/Time, so their FIFO order is still a guess.
+    # Halt rather than resolve it buy-before-sell (which silently decides gap vs match).
+    ties = detect_timestamp_tie_collisions(parsed.trades)
+    report_timestamp_tie_collisions(ties, logger)
 
     # Build FIFO realized. The composition root owns gap-policy assembly: the matcher
     # itself stays agnostic of how gaps are resolved.
