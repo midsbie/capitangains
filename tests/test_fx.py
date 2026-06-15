@@ -94,6 +94,33 @@ def test_fx_from_csv_accepts_large_rate_without_separator(tmp_path):
     assert table.get_rate(dt.date(2024, 1, 1), Currency("IDR")) == expected
 
 
+def test_fx_from_csv_rejects_infinite_rate(tmp_path):
+    # "Infinity" constructs as a valid Decimal and slips the `<= 0` positive-rate gate
+    # (Infinity is not <= 0); 1/Infinity then silently yields a 0 EUR-per-unit rate that
+    # zeroes every figure in the currency. A non-finite rate must abort, not convert.
+    path = _write_csv(tmp_path, [["2024-01-01", "USD", "Infinity"]])
+    with pytest.raises(ValueError):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_rejects_nan_rate(tmp_path):
+    # "NaN" also constructs as a valid Decimal; today it reaches the `<= 0` gate and
+    # raises a raw decimal.InvalidOperation (a NaN traps on ordering comparison), an
+    # uncaught crash. It must instead fail closed as a clean domain ValueError.
+    path = _write_csv(tmp_path, [["2024-01-01", "USD", "NaN"]])
+    with pytest.raises(ValueError):
+        FxTable.from_csv(path)
+
+
+def test_fx_from_csv_rejects_whitespace_in_rate(tmp_path):
+    # Internal whitespace is silently stripped by the IBKR-grammar cleaner just like a
+    # comma, so "1 0850" becomes 10850: the same ~10000x misprice the comma guard exists
+    # to prevent. Operator rates declare no locale, so reject it outright.
+    path = _write_csv(tmp_path, [["2024-01-01", "USD", "1 0850"]])
+    with pytest.raises(ValueError, match="whitespace"):
+        FxTable.from_csv(path)
+
+
 def test_fx_from_csv_rejects_row_missing_rate(tmp_path):
     # A short row leaves row["rate"] as None. It must surface as a clean ValueError (the
     # same precondition failure as any other unparseable cell), not a raw TypeError from

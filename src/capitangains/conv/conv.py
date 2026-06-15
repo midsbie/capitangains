@@ -20,30 +20,47 @@ ELISION_PLACEHOLDERS = frozenset({"-", "--", "...", "N/A", "n/a"})
 logger = logging.getLogger(__name__)
 
 
+def _reject_non_finite(value: Decimal, source: object) -> Decimal:
+    """Reject a non-finite Decimal (NaN or Infinity), returning a finite one unchanged.
+
+    Both construct as valid Decimals but are never valid IBKR figures, and each silently
+    corrupts downstream money math: a NaN traps on every later ordering comparison, and
+    an Infinity zeroes a converted figure via 1/Infinity. Raising InvalidOperation (the
+    same failure a malformed string raises) lets each caller map it to its own
+    disposition: default for to_dec, ValueError for to_dec_strict.
+    """
+    if not value.is_finite():
+        raise InvalidOperation(f"non-finite numeric value: {source!r}")
+    return value
+
+
 def _coerce_or_text(s: str | float | int | Decimal | None) -> Decimal | str | None:
     """Resolve the numeric fast-paths shared by to_dec and to_dec_strict.
 
-    Returns None for a None input, a Decimal when the value is already numeric (a
+    Returns None for a None input, a finite Decimal when the value is already numeric (a
     Decimal passes through, an int/float widens), or the stripped text otherwise. A
-    returned str still needs the IBKR number grammar; each caller layers its own empty,
-    placeholder, and malformed policy on top.
+    non-finite numeric input raises InvalidOperation here (see _reject_non_finite) so
+    the numeric fast-path cannot slip a NaN/Infinity past the string-path guard in
+    _parse_clean. A returned str still needs the IBKR number grammar; each caller layers
+    its own empty, placeholder, and malformed policy on top.
     """
     if s is None:
         return None
     if isinstance(s, Decimal):
-        return s
+        return _reject_non_finite(s, s)
     if isinstance(s, (int, float)):
-        return Decimal(str(s))
+        return _reject_non_finite(Decimal(str(s)), s)
     return s.strip()
 
 
 def _parse_clean(text: str) -> Decimal:
     """Apply IBKR number grammar: drop thousands separators, then parse.
 
-    Raises InvalidOperation on malformed input; the caller maps that to its own
-    disposition (default for to_dec, ValueError for to_dec_strict).
+    Raises InvalidOperation on malformed input, including a non-finite NaN/Infinity (see
+    _reject_non_finite). The caller maps that to its own disposition (default for
+    to_dec, ValueError for to_dec_strict).
     """
-    return Decimal(NUM_CLEAN_RE.sub("", text))
+    return _reject_non_finite(Decimal(NUM_CLEAN_RE.sub("", text)), text)
 
 
 def to_dec(
@@ -57,28 +74,30 @@ def to_dec(
     - "...", "N/A" -> default (with warning for elided data)
     - "1,234.56" -> Decimal("1234.56")
     """
-    coerced = _coerce_or_text(s)
-    if coerced is None:
-        return default
-    if isinstance(coerced, Decimal):
-        return coerced
-    if not coerced:
-        return default
-
-    # Silent placeholders
-    if coerced in {"-", "--"}:
-        return default
-
-    # Warn on elided/missing data
-    if coerced in {"...", "N/A", "n/a"}:
-        logger.warning(
-            'Encountered elided/unavailable value "%s"; treating as %s.',
-            coerced,
-            default,
-        )
-        return default
-
+    # InvalidOperation (a non-finite numeric input, or a malformed string from
+    # _parse_clean) maps to the default, the same disposition as any unparseable cell.
     try:
+        coerced = _coerce_or_text(s)
+        if coerced is None:
+            return default
+        if isinstance(coerced, Decimal):
+            return coerced
+        if not coerced:
+            return default
+
+        # Silent placeholders
+        if coerced in {"-", "--"}:
+            return default
+
+        # Warn on elided/missing data
+        if coerced in {"...", "N/A", "n/a"}:
+            logger.warning(
+                'Encountered elided/unavailable value "%s"; treating as %s.',
+                coerced,
+                default,
+            )
+            return default
+
         return _parse_clean(coerced)
     except InvalidOperation:
         logger.error("Failed to parse number from: %r; using %s", s, default)
@@ -95,18 +114,20 @@ def to_dec_strict(s: str | float | int | Decimal | None) -> Decimal:
     it is not suitable for operator-supplied numbers of unknown locale; the --fx-table
     rate is parsed strictly on both axes by fx._parse_fx_rate.
     """
-    coerced = _coerce_or_text(s)
-    if coerced is None:
-        raise ValueError("Value is None")
-    if isinstance(coerced, Decimal):
-        return coerced
-    if not coerced:
-        raise ValueError("Value is empty string")
-
-    if coerced in ELISION_PLACEHOLDERS:
-        raise ValueError(f"Value is a placeholder: {coerced!r}")
-
+    # InvalidOperation is the only arithmetic failure here: a non-finite numeric input
+    # (rejected in _coerce_or_text) or a malformed string (rejected in _parse_clean).
+    # Map it to the domain ValueError. The missing/empty/placeholder ValueErrors raised
+    # below are not InvalidOperation, so they pass through this handler untouched.
     try:
+        coerced = _coerce_or_text(s)
+        if coerced is None:
+            raise ValueError("Value is None")
+        if isinstance(coerced, Decimal):
+            return coerced
+        if not coerced:
+            raise ValueError("Value is empty string")
+        if coerced in ELISION_PLACEHOLDERS:
+            raise ValueError(f"Value is a placeholder: {coerced!r}")
         return _parse_clean(coerced)
     except InvalidOperation as e:
         raise ValueError(f"Invalid decimal format: {s!r}") from e

@@ -4,6 +4,7 @@ import bisect
 import csv
 import datetime as dt
 import logging
+import re
 from collections import defaultdict
 from decimal import Decimal, DivisionByZero
 from pathlib import Path
@@ -17,31 +18,42 @@ logger = logging.getLogger(__name__)
 # None so the rate is reported missing rather than silently extrapolated.
 _MAX_FX_LOOKBACK_DAYS = 7
 
+# An operator FX rate must be a plain decimal-point number; a comma or any interior
+# whitespace is ambiguous digit grouping (a thousands separator vs a decimal mark,
+# ~10000x apart). This is fx's own precondition on operator input, deliberately
+# independent of conv's IBKR-number cleaner: the character overlap with NUM_CLEAN_RE is
+# incidental, so the two must not be coupled. See _parse_fx_rate.
+_AMBIGUOUS_GROUPING_RE = re.compile(r"[,\s]")
+
 
 def _parse_fx_rate(raw: str | None, ccy: Currency, date: dt.date) -> Decimal:
-    """Parse one operator-supplied FX rate strictly, rejecting an ambiguous comma.
+    """Parse one operator-supplied FX rate strictly, rejecting ambiguous digit grouping.
 
-    The --fx-table CSV declares no locale, so a comma in the rate is irrecoverably
-    ambiguous: "1,0850" could be 10850 (thousands separator) or 1.0850 (decimal comma),
-    readings that differ by ~10000x. Magnitude cannot disambiguate, since a rate may
-    legitimately exceed 1000 (e.g. ~17000 IDR per EUR). The rate multiplies every
-    foreign figure and a wrong-but-positive value trips no later guard, so guessing
-    would silently misprice the whole report. A rate is always expressible without a
-    comma, so reject one outright rather than pick an interpretation (re-interpreting it
-    as a decimal comma would just move the silent error onto US-formatted input). With
-    the comma excluded, to_dec_strict handles the rest (sign, decimal point, and the
-    missing/placeholder/malformed cases). This is why operator rates do not go through
-    the IBKR-grammar cleaner; see conv.NUM_CLEAN_RE.
+    The --fx-table CSV declares no locale, so a comma or internal whitespace in the
+    rate is irrecoverably ambiguous: "1,0850" (or "1 0850") could be 10850 (a thousands
+    group) or 1.0850 (a decimal mark), readings that differ by ~10000x. Magnitude cannot
+    disambiguate, since a rate may legitimately exceed 1000 (e.g. ~17000 IDR per EUR).
+    The rate multiplies every foreign figure and a wrong-but-positive value trips no
+    later guard, so guessing would silently misprice the whole report. A rate is always
+    expressible as a plain decimal-point number, so reject any grouping outright rather
+    than pick an interpretation (re-reading the comma as a decimal mark would just move
+    the silent error onto US-formatted input). A comma and whitespace are also what the
+    IBKR-grammar cleaner silently strips from statement numbers, which is exactly why an
+    operator rate must not be run through that cleaner; this guard rejects them first.
+    With grouping excluded, to_dec_strict handles the rest (sign, decimal point,
+    non-finite, and the missing/placeholder/malformed cases).
     """
-    # Guard the comma test on an actual string: a short CSV row leaves row["rate"] as
-    # None, which would make `"," in raw` raise a raw TypeError. The None, empty, and
+    # Guard on an actual string: a short CSV row leaves row["rate"] as None, which would
+    # make the membership test raise a raw TypeError. The None, empty, non-finite, and
     # malformed cases are what to_dec_strict reports as a clean domain ValueError, so
-    # let them fall through to it.
-    if isinstance(raw, str) and "," in raw:
+    # let them fall through to it. Leading and trailing whitespace is benign
+    # (to_dec_strict trims it), so test the trimmed token for an interior comma or
+    # whitespace.
+    if isinstance(raw, str) and _AMBIGUOUS_GROUPING_RE.search(raw.strip()):
         raise ValueError(
-            f"FX rate {raw!r} for {ccy} on {date} contains a comma; the FX table must "
-            f"use a plain decimal point (a comma is ambiguous between a thousands "
-            f"separator and a decimal comma)."
+            f"FX rate {raw!r} for {ccy} on {date} contains a comma or whitespace; the "
+            f"FX table must use a plain decimal point with no digit grouping (a comma "
+            f"or space is ambiguous between a thousands separator and a decimal mark)."
         )
     return to_dec_strict(raw)
 

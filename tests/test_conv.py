@@ -103,3 +103,44 @@ def test_to_dec_strict_scientific_notation():
     # Decimal supports scientific notation, verify it passes
     assert to_dec_strict("1.5E2") == Decimal("150")
     assert to_dec_strict("1E-2") == Decimal("0.01")
+
+
+def test_to_dec_strict_rejects_non_finite():
+    # NaN/Infinity are valid Decimal constructions but never valid IBKR figures. In a
+    # critical field (Quantity, Proceeds, an FX rate) a NaN traps on later comparisons
+    # and an Infinity zeroes a converted value via 1/Infinity, so the strict path must
+    # refuse them as malformed rather than pass them through. This holds on every input
+    # axis -- a string token, a float, or an already-built Decimal can each carry one --
+    # so the numeric fast-path must not slip a non-finite value past the string guard.
+    non_finite = (
+        "NaN",
+        "Infinity",
+        "inf",
+        "-inf",
+        "-Infinity",
+        float("inf"),
+        float("nan"),
+        Decimal("NaN"),
+        Decimal("-Infinity"),
+    )
+    for value in non_finite:
+        with pytest.raises(ValueError, match="Invalid decimal format"):
+            to_dec_strict(value)
+
+
+def test_to_dec_non_finite_uses_default(caplog):
+    # The lenient path treats a non-finite value as malformed too, on every input axis
+    # (string, float, Decimal): log an error and fall back to the default instead of
+    # returning a NaN/Infinity that silently corrupts downstream sums.
+    non_finite = (
+        "Infinity",
+        "NaN",
+        float("inf"),
+        float("nan"),
+        Decimal("Infinity"),
+        Decimal("NaN"),
+    )
+    with caplog.at_level(logging.ERROR):
+        for value in non_finite:
+            assert to_dec(value) == Decimal("0")
+    assert "Failed to parse number" in caplog.text
