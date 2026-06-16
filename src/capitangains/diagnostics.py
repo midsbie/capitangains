@@ -426,6 +426,50 @@ def report_orphaned_foreign_tax(
     )
 
 
+def report_negative_foreign_tax(
+    lines: Sequence[Quadro8ALine], logger: logging.Logger
+) -> None:
+    """Abort if any Quadro 8A group's foreign tax nets below zero (a net credit).
+
+    Unlike its WARN-only Quadro 8A siblings, this is fail-closed. The detector
+    (reporting.validation.detect_negative_foreign_tax) owns the why-impossible
+    rationale; the boundary policy lives here. "Imposto Pago no Estrangeiro" has no
+    negative representation on Anexo J, and a group that nets to a credit means a refund
+    exceeded the year's withholding (typically a prior-year refund, or a stray positive
+    row). So the correct current-year tax-paid figure is not the negative net, and the
+    data does not let us reconstruct it. Rather than emit an unfileable figure or
+    silently clamp it to zero (which would discard a real refund), every offending group
+    is listed, then a single SystemExit(EXIT_DATA_QUALITY), and no workbook is
+    written.
+    """
+    if not lines:
+        return
+
+    for line in lines:
+        logger.error(
+            "Quadro 8A foreign tax nets below zero: kind=%s code=%s country=%s "
+            "gross=%s EUR foreign_tax=%s EUR. A refund exceeded this group's "
+            "withholding, so the net is not a fileable tax-paid figure; resolve it "
+            "by hand (most likely a prior-year refund that belongs on a correction "
+            "to that year's return).",
+            line.kind.name,
+            line.income_code,
+            line.country,
+            line.gross_eur,
+            line.tax_eur,
+        )
+
+    logger.error(
+        "%d Quadro 8A line(s) carry a net foreign-tax credit (tax below zero); no "
+        "workbook written. Foreign tax paid abroad cannot be negative on Anexo J, "
+        "so a group whose refunds exceed its withholding cannot be reported as "
+        "filed. Resolve the affected group(s) by hand, or adjust the inputs so each "
+        "year's refunds net against that year's withholding.",
+        len(lines),
+    )
+    raise SystemExit(EXIT_DATA_QUALITY)
+
+
 def _list_then_abort(
     problems: Sequence[str], summary: str, logger: logging.Logger
 ) -> None:

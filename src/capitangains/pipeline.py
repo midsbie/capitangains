@@ -35,6 +35,7 @@ from .diagnostics import (
     report_gap_acknowledgments,
     report_invalid_statements,
     report_missing_fx,
+    report_negative_foreign_tax,
     report_ordering_collisions,
     report_orphaned_foreign_tax,
     report_reconciliation,
@@ -53,6 +54,7 @@ from .reporting import (
     FxTable,
     IbkrActivityStatementSource,
     ReportBuilder,
+    detect_negative_foreign_tax,
     detect_ordering_collisions,
     detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
@@ -222,13 +224,16 @@ def run(options: RunOptions) -> None:
     rb.convert_eur(fx)
     report_missing_fx(rb.fx_missing, logger)
 
-    # Soft coverage checks on the Quadro 8A lines (warn, do not abort): income whose
-    # source country is unknown, and foreign tax with no matching gross. The figures
-    # are correct, only the attribution is incomplete, so the operator fills the gaps by
-    # hand. Bind once so both detectors fold the rows a single time.
+    # Coverage checks on the Quadro 8A lines. The first two warn (the figures are
+    # correct, only the attribution is incomplete, so the operator fills the gaps by
+    # hand): income whose source country is unknown, and foreign tax with no matching
+    # gross. The last is fail-closed: a group whose foreign tax nets below zero is not a
+    # fileable tax-paid figure, so it aborts rather than emit it. Bind once so every
+    # detector folds the rows a single time.
     quadro_8a = rb.quadro_8a
     report_unattributed_income(detect_unattributed_income(quadro_8a), logger)
     report_orphaned_foreign_tax(detect_orphaned_foreign_tax(quadro_8a), logger)
+    report_negative_foreign_tax(detect_negative_foreign_tax(quadro_8a), logger)
 
     # Soft cross-check of our realized P/L against IBKR's per-trade Realized P/L, per
     # (symbol, currency). Both sides are in the trade currency with no FX between them,

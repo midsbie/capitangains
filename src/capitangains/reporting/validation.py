@@ -279,6 +279,24 @@ def detect_orphaned_foreign_tax(lines: Sequence[Quadro8ALine]) -> list[Quadro8AL
     return [line for line in lines if line.gross_eur == 0 and line.tax_eur != 0]
 
 
+def detect_negative_foreign_tax(lines: Sequence[Quadro8ALine]) -> list[Quadro8ALine]:
+    """Quadro 8A lines whose foreign tax nets below zero (a net credit).
+
+    Foreign tax accumulates signed so a within-year reversal nets against that year's
+    withholding (see aggregate_quadro_8a); the expected result is a non-negative tax per
+    group, because a group cannot be refunded more tax than was withheld on its income
+    in the same year. A negative net therefore means the netting assumption has broken:
+    a refund of tax withheld (and reported) in a prior year, or a stray/misclassified
+    positive row. Either way "Imposto Pago no Estrangeiro" has no negative
+    representation on Anexo J, and the correct current-year figure is not the negative
+    net (which the data does not let us reconstruct), so this is fail-closed, not a
+    warning: the boundary aborts (see diagnostics.report_negative_foreign_tax).  Returns
+    the offending lines in the builder's order; empty means every group nets to a
+    fileable non-negative tax.
+    """
+    return [line for line in lines if line.tax_eur < 0]
+
+
 @dataclass(frozen=True)
 class StatementInput:
     """One input file paired with its parsed statement identity.

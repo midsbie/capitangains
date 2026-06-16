@@ -30,6 +30,7 @@ from capitangains.diagnostics import (
     format_reconciliation_sample,
     report_gap_acknowledgments,
     report_invalid_statements,
+    report_negative_foreign_tax,
     report_ordering_collisions,
     report_orphaned_foreign_tax,
     report_reconciliation,
@@ -51,6 +52,7 @@ from capitangains.reporting import (
     SymbolReconciliation,
     TimestampTieCollision,
     UnrecognizedSection,
+    detect_negative_foreign_tax,
     detect_ordering_collisions,
     detect_orphaned_foreign_tax,
     detect_statement_input_conflicts,
@@ -74,6 +76,7 @@ from capitangains.reporting.extract.sections import (
 from capitangains.reporting.fifo_domain import GapResolution, TransferShortfall
 from capitangains.reporting.quadro_8a import IncomeKind
 from tests.support import (
+    DIVIDENDS_COLUMNS,
     SYEP_SECTION,
     TRADES_COLUMNS,
     TRANSFERS_COLUMNS,
@@ -857,6 +860,51 @@ def test_run_exits_2_on_identical_timestamp_buy_sell(tmp_path, out_path, caplog)
     assert any(
         "Unorderable simultaneous trades" in r.getMessage() for r in caplog.records
     )
+
+
+def test_run_exits_2_on_negative_foreign_tax(tmp_path, out_path, caplog):
+    # A US dividend whose withholding nets to a credit this year: -1.20 tax then a +2.00
+    # refund (e.g. a prior-year over-withholding corrected now) leaves -0.80 of foreign
+    # tax, which has no representation on Anexo J. The run reaches the Quadro 8A stage
+    # (EUR converts by identity, no FX table) and aborts (exit 2, no workbook) rather
+    # than write a negative tax-paid cell. Gross income is present, so the orphaned-tax
+    # gate does not fire; the negative-tax gate is what stops the run.
+    stmt = tmp_path / "stmt.csv"
+    rows = (
+        _statement_meta_rows("U1", Y2024)
+        + section_table(
+            SEC_DIVIDENDS,
+            DIVIDENDS_COLUMNS,
+            ["EUR", "2024-03-15", "PACW(US6952631033) Cash Dividend", "10.00"],
+        )
+        + section_table(
+            SEC_WITHHOLDING,
+            WITHHOLDING_COLUMNS,
+            [
+                "EUR",
+                "2024-03-15",
+                "PACW(US6952631033) Cash Dividend - US Tax",
+                "-1.20",
+                "",
+            ],
+            [
+                "EUR",
+                "2024-09-20",
+                "PACW(US6952631033) Cash Dividend - US Tax",
+                "2.00",
+                "",
+            ],
+        )
+    )
+    with open(stmt, "w", newline="", encoding="utf-8") as fp:
+        csv.writer(fp).writerows(rows)
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out_path))
+
+    assert exc.value.code == 2
+    assert not out_path.exists()
+    assert any("nets below zero" in r.getMessage() for r in caplog.records)
 
 
 def test_run_does_not_swallow_a_reconciliation_crash(
@@ -1773,6 +1821,57 @@ def test_report_orphaned_foreign_tax_warns_without_exiting(caplog):
         "DIVIDEND" in m and "E11" in m and "US" in m and "1.80" in m for m in messages
     )
     assert any("1 Quadro 8A line(s)" in m for m in messages)
+
+
+# --- Quadro 8A negative foreign tax: detector + reporter (fail-closed) ---------------
+
+
+def test_detect_negative_foreign_tax_flags_net_credit_lines():
+    lines = [
+        _q8a(IncomeKind.DIVIDEND, "US", gross="10.00", tax="1.50"),  # normal
+        _q8a(IncomeKind.DIVIDEND, "NL", gross="10.00", tax="-0.80"),  # net credit
+        _q8a(IncomeKind.INTEREST, "IE", gross="2.00", tax="0.00"),  # 0% WHT, fine
+    ]
+    assert detect_negative_foreign_tax(lines) == [
+        _q8a(IncomeKind.DIVIDEND, "NL", gross="10.00", tax="-0.80"),
+    ]
+
+
+def test_detect_negative_foreign_tax_silent_when_every_line_is_non_negative():
+    # A zero-tax line (e.g. UK 0% dividend WHT) is legitimate and must not trip the
+    # gate; only a strictly-negative net does.
+    lines = [
+        _q8a(IncomeKind.DIVIDEND, "GB", gross="10.00", tax="0.00"),
+        _q8a(IncomeKind.DIVIDEND, "US", gross="10.00", tax="1.50"),
+    ]
+    assert detect_negative_foreign_tax(lines) == []
+
+
+def test_report_negative_foreign_tax_silent_when_empty(caplog):
+    logger = logging.getLogger("negative_tax_report_none")
+    with caplog.at_level(logging.ERROR):
+        report_negative_foreign_tax([], logger)
+    assert caplog.records == []
+
+
+def test_report_negative_foreign_tax_lists_and_exits(caplog):
+    # The contract that separates this from the WARN-only Quadro 8A reporters: a net
+    # credit is unfileable, so each offending group is named, then one summary and a
+    # single exit 2 -- the same fail-closed shape as the ordering reporters.
+    logger = logging.getLogger("negative_tax_report_fatal")
+    lines = [
+        Quadro8ALine(IncomeKind.DIVIDEND, "NL", Decimal("10.00"), Decimal("-0.80")),
+        Quadro8ALine(IncomeKind.INTEREST, "IE", Decimal("2.00"), Decimal("-3.10")),
+    ]
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        report_negative_foreign_tax(lines, logger)
+
+    assert exc.value.code == 2
+    assert all(r.levelno == logging.ERROR for r in caplog.records)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("nets below zero" in m and "NL" in m and "-0.80" in m for m in messages)
+    assert any("IE" in m and "-3.10" in m for m in messages)
+    assert any("2 Quadro 8A line(s)" in m for m in messages)
 
 
 # --- unrecognized-section coverage sweep: sync guards --------------------------------

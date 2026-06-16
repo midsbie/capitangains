@@ -224,6 +224,22 @@ def test_withholding_reversal_nets_against_tax():
     assert lines[0].tax_eur == Decimal("1.50")
 
 
+def test_withholding_refund_exceeding_tax_yields_a_negative_line():
+    # The case detect_negative_foreign_tax gates: a refund larger than the group's
+    # withholding (e.g. a prior-year over-withholding corrected this year) drives the
+    # signed accumulation positive, so the negated tax_eur lands below zero. The fold
+    # stays faithful (it does not clamp); the boundary refuses the unfileable figure.
+    lines = _aggregate(
+        dividends=[_div("PACW(US6952631033) Cash Dividend", Decimal("10.00"))],
+        withholding=[
+            _wh("PACW(US6952631033) Cash Dividend", "Dividend", "US", Decimal("-1.20")),
+            _wh("PACW(US6952631033) Cash Dividend", "Dividend", "US", Decimal("2.00")),
+        ],
+    )
+    assert len(lines) == 1
+    assert lines[0].tax_eur == Decimal("-0.80")
+
+
 def test_unknown_withholding_is_skipped():
     lines = _aggregate(
         withholding=[_wh("Some mystery line", "Unknown", "GB", Decimal("-3.00"))]
