@@ -220,13 +220,14 @@ def realized_line(
     sell_comm_ccy: Decimal | str = "0",
     sell_net_ccy: Decimal | str | None = None,
     sell_qty: Decimal | str | None = None,
-    realized_pl_ccy: Decimal | str | None = None,
     has_gap: bool = False,
     gap_fixed: bool = False,
     ibkr_realized_elided: bool = False,
 ) -> RealizedLine:
     """Build a RealizedLine. Derived defaults: sell_net == sell_gross; sell_qty == sum
-    of leg qtys; realized_pl_ccy == sell_net minus sum of allocated costs."""
+    of leg qtys. Allocated cost and realized P/L are RealizedLine properties (cost from
+    the legs, P/L == sell_net minus cost), so a caller shapes the P/L through the legs
+    and sell_net, never by setting it directly."""
     leg_objs = _normalize_legs(legs)
     gross = _dec(sell_gross_ccy)
     net = gross if sell_net_ccy is None else _dec(sell_net_ccy)
@@ -235,8 +236,6 @@ def realized_line(
         if sell_qty is None
         else _dec(sell_qty)
     )
-    alloc = sum((leg.alloc_cost_ccy for leg in leg_objs), Decimal("0"))
-    realized = net - alloc if realized_pl_ccy is None else _dec(realized_pl_ccy)
     return RealizedLine(
         symbol=symbol,
         currency=_ccy(currency),
@@ -246,7 +245,6 @@ def realized_line(
         sell_comm_ccy=_dec(sell_comm_ccy),
         sell_net_ccy=net,
         legs=leg_objs,
-        realized_pl_ccy=realized,
         has_gap=has_gap,
         gap_fixed=gap_fixed,
         ibkr_realized_elided=ibkr_realized_elided,

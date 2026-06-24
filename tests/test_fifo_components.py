@@ -273,9 +273,13 @@ def test_realized_line_builder_rounds_realized_pl():
             alloc_cost_ccy=Decimal("420.56789012"),
         )
     ]
-    line = build_realized_line(trade, legs, Decimal("420.56789012"))
+    line = build_realized_line(trade, legs)
     assert line.sell_qty == Decimal("50")
     assert line.sell_gross_ccy == Decimal("500.1234")
     assert line.sell_net_ccy == Decimal("498.8934")
-    assert line.realized_pl_ccy == Decimal("78.33")
+    # Allocated cost rounds the raw leg sum to the cent (420.56789012 -> 420.57), and
+    # realized P/L is net minus that rounded cost (498.89 - 420.57), so the two foot
+    # together on the sheet. (Quantizing the raw difference instead would read 78.33.)
+    assert line.alloc_cost_ccy == Decimal("420.57")
+    assert line.realized_pl_ccy == Decimal("78.32")
     assert line.legs is not legs

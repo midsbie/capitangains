@@ -199,11 +199,17 @@ class ReportBuilder:
                 rl.legs, leg_alloc_eur, proceeds_shares, strict=True
             )
         ]
+        sell_gross_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
         return ConvertedRealizedLine(
             line=rl,
             legs=converted_legs,
-            sell_gross_eur=quantize_money(rl.sell_gross_ccy * sell_rate),
-            sell_comm_eur=quantize_money(rl.sell_comm_ccy * sell_rate),
+            sell_gross_eur=sell_gross_eur,
+            # Commission is the residual net - gross (the EUR image of comm = net -
+            # gross), not comm * rate rounded alone: pricing all three independently
+            # rounds them apart so gross + fees != net (F5). Net is the load-bearing
+            # figure (it drives realized P/L and the proceeds split), so it stays the
+            # faithful conversion and the fee column absorbs the cent residual.
+            sell_comm_eur=sell_net_eur - sell_gross_eur,
             sell_net_eur=sell_net_eur,
             alloc_cost_eur=alloc_cost_eur,
             realized_pl_eur=quantize_money(sell_net_eur - alloc_cost_eur),

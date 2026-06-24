@@ -14,10 +14,11 @@ from .money import abs_decimal
 
 logger = logging.getLogger(__name__)
 
-# Our realized P/L is quantized to the cent once per sell (build_realized_line); IBKR's
-# per-trade column is unrounded. Summing N sells accumulates up to half a cent each, so
-# the match tolerance must scale with the sell count, not be a flat constant, or
-# heavily-traded symbols raise false mismatches.
+# Our realized P/L is a cent figure: net proceeds minus the cent-rounded allocated cost
+# (RealizedLine.realized_pl_ccy), so it carries up to half a cent of rounding per sell.
+# IBKR's per-trade column is unrounded. Summing N sells accumulates up to half a cent
+# each, so the match tolerance must scale with the sell count, not be a flat constant,
+# or heavily-traded symbols raise false mismatches.
 _HALF_CENT = Decimal("0.005")
 
 # IBKR omits the per-trade Realized P/L only for Forex rows (an FX leg has no cost

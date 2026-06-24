@@ -176,7 +176,6 @@ def test_per_symbol_summary_trade_and_eur(tmp_path):
         sell_comm_ccy=Decimal("0"),
         sell_net_ccy=Decimal("1000"),
         legs=legs,
-        realized_pl_ccy=Decimal("200.00"),
     )
     rb.add_realized(rl)
 

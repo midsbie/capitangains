@@ -8,6 +8,8 @@ from typing import NamedTuple, Protocol, runtime_checkable
 
 from capitangains.conv import Currency
 
+from .money import quantize_money
+
 
 @runtime_checkable
 class TradeProtocol(Protocol):
@@ -62,7 +64,6 @@ class RealizedLine:
     sell_comm_ccy: Decimal  # signed (typically negative)
     sell_net_ccy: Decimal  # gross + comm (fees reduce proceeds)
     legs: list[SellMatchLeg]
-    realized_pl_ccy: Decimal
     has_gap: bool = False
     gap_fixed: bool = False
     # True when IBKR elided this disposal's per-trade Realized P/L (Forex, or a corrupt
@@ -72,13 +73,28 @@ class RealizedLine:
 
     @property
     def alloc_cost_ccy(self) -> Decimal:
-        """Total allocated cost in trade currency: the sum of the legs' pieces.
+        """Total allocated cost in trade currency, rounded to the cent.
 
-        Derived rather than stored because the legs already carry the authoritative
-        per-lot pieces. The EUR counterpart lives on ConvertedRealizedLine, built by the
-        FX pass; this object stays a pure trade-currency value.
+        The legs carry the authoritative per-lot pieces at allocation (1e-8) precision;
+        summing them and rounding once here is the line's single cent boundary for cost
+        basis, so the Realized sheet renders one consistent value instead of re-rounding
+        a raw sub-cent sum. realized_pl_ccy derives from this rounded cost (not the raw
+        sum), which is what makes the sheet's net - alloc == pl cross-foot hold. The EUR
+        counterpart (ConvertedRealizedLine.alloc_cost_eur) is built the same way.
         """
-        return sum((leg.alloc_cost_ccy for leg in self.legs), Decimal("0"))
+        raw = sum((leg.alloc_cost_ccy for leg in self.legs), Decimal("0"))
+        return quantize_money(raw)
+
+    @property
+    def realized_pl_ccy(self) -> Decimal:
+        """Realized P/L in trade currency: net proceeds minus allocated cost.
+
+        Derived, never stored: P/L is definitionally net minus cost, and both operands
+        are cent figures, so the difference is exactly the value the sheet shows and
+        net - alloc == pl holds by construction. This mirrors realized_pl_eur; storing
+        it independently is what let the displayed P/L disagree with net - alloc (F5).
+        """
+        return quantize_money(self.sell_net_ccy - self.alloc_cost_ccy)
 
 
 class GapResolution(enum.Enum):

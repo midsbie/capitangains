@@ -29,7 +29,6 @@ def build_rb_for_summary():
                 alloc_cost_ccy=Decimal("800.00"),
             )
         ],
-        realized_pl_ccy=Decimal("199.00"),
     )
     rb.add_realized(rl_eur)
 
@@ -49,7 +48,6 @@ def build_rb_for_summary():
                 alloc_cost_ccy=Decimal("400.00"),
             )
         ],
-        realized_pl_ccy=Decimal("100.00"),
     )
     rb.add_realized(rl_usd)
 

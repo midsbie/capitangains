@@ -43,17 +43,17 @@ def _line(symbol, ccy, realized, *, gap_fixed=False, elided=False, year=2024):
     """A minimal RealizedLine carrying only what the reconciler reads.
 
     The reconciler keys off symbol/currency, sums realized_pl_ccy, filters on
-    sell_date.year, and partitions on gap_fixed/ibkr_realized_elided; the rest are
-    zeroed. elided mirrors the source sell's missing IBKR Realized P/L (set at replay in
-    production); keep it consistent with the paired _trade.
+    sell_date.year, and partitions on gap_fixed/ibkr_realized_elided. realized_pl_ccy is
+    a property (net minus allocated cost), so with no legs the cost is zero and sell_net
+    carries the figure the reconciler sums. elided mirrors the source sell's missing
+    IBKR Realized P/L (set at replay in production); keep it consistent with its _trade.
     """
     return realized_line(
         symbol=symbol,
         currency=ccy,
         sell_date=dt.date(year, 6, 1),
         legs=[],
-        sell_gross_ccy="0",
-        realized_pl_ccy=realized,
+        sell_net_ccy=realized,
         has_gap=gap_fixed,  # synthesis only happens on a gap; keep the pair consistent
         gap_fixed=gap_fixed,
         ibkr_realized_elided=elided,

@@ -136,7 +136,6 @@ def test_convert_eur_zero_sell_qty_skips_proceeds_allocation():
                 alloc_cost_ccy=Decimal("0"),
             )
         ],
-        realized_pl_ccy=Decimal("0"),
     )
     rb.add_realized(zero_qty_rl)
     rb.convert_eur(make_fx({("USD", "2024-04-01"): Decimal("0.9")}))

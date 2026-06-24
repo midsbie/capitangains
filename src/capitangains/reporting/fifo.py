@@ -201,7 +201,6 @@ class FifoMatcher:
             logger.debug("Invoking gap policy: %s", type(self._gap_policy).__name__)
             result = self._gap_policy.resolve(trade, qty_remaining, alloc_cost_ccy)
             legs.append(result.leg)
-            alloc_cost_ccy = result.alloc_cost
             gap_event = result.event
             gap_fixed = gap_event.outcome is GapResolution.SYNTHESIZED
             if gap_fixed:
@@ -217,7 +216,7 @@ class FifoMatcher:
                 logger.debug("Gap NOT resolved: %s", gap_event.message)
             self.recorder.record_gap(gap_event)
 
-        line = build_realized_line(trade, legs, alloc_cost_ccy)
+        line = build_realized_line(trade, legs)
         if has_gap:
             line.has_gap = True
             line.gap_fixed = gap_fixed
