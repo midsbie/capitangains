@@ -247,8 +247,8 @@ def test_parse_percentage_fields_as_decimal():
 # =============================================================================
 
 
-def test_skip_total_rows_no_currency():
-    """Test that rows with empty currency are skipped (total rows)."""
+def test_skip_total_row():
+    """A 'Total' summary row (IBKR labels it in the Currency cell) is skipped."""
     rows = [
         [
             "Stock Yield Enhancement Program Securities Lent Interest Details",
@@ -281,9 +281,9 @@ def test_skip_total_rows_no_currency():
         [
             "Stock Yield Enhancement Program Securities Lent Interest Details",
             "Data",
-            "",  # Empty currency (total row)
+            "Total",  # IBKR labels the running total in the Currency cell
             "",
-            "Total",
+            "",
             "",
             "",
             "",
@@ -295,11 +295,62 @@ def test_skip_total_rows_no_currency():
     ]
 
     model = parse_model(rows)
-    syep, _ = parse_syep_interest_details(model)
+    syep, defects = parse_syep_interest_details(model)
 
-    # Total row should be skipped
+    # Total row should be skipped, not surfaced as a defect.
     assert len(syep) == 1
     assert syep[0].symbol == "AAPL"
+    assert not defects
+
+
+def test_data_row_missing_currency_is_a_defect_not_a_skipped_trailer():
+    """A column-shifted row that lost its Currency fails closed, it does not vanish.
+
+    Regression (F13): the trailer filter keyed on an empty Currency, so a real
+    disposal whose Currency cell was lost to a column shift, yet still carrying
+    quantity/collateral/rate/interest data, was silently dropped as if it were a
+    'Total' trailer instead of surfacing as a defect. Empty Currency alone no longer
+    means trailer; only a 'Total'-labelled or fully blank row is skipped.
+    """
+    rows = [
+        [
+            "Stock Yield Enhancement Program Securities Lent Interest Details",
+            "Header",
+            "Currency",
+            "Value Date",
+            "Symbol",
+            "Start Date",
+            "Quantity",
+            "Collateral Amount",
+            "Market-based Rate (%)",
+            "Interest Rate on Customer Collateral (%)",
+            "Interest Paid to Customer",
+            "Code",
+        ],
+        [
+            "Stock Yield Enhancement Program Securities Lent Interest Details",
+            "Data",
+            "",  # Currency lost to a column shift; the rest is real data
+            "2024-01-15",
+            "AAPL",
+            "2024-01-01",
+            "1000",
+            "150000.00",
+            "5.50",
+            "4.75",
+            "195.83",
+            "SL",
+        ],
+    ]
+
+    model = parse_model(rows)
+    syep, defects = parse_syep_interest_details(model)
+
+    assert not syep
+    assert defects
+    assert "Currency" in defects[0].reason
+    assert defects[0].symbol == "AAPL"
+    assert defects[0].date == "2024-01-15"
 
 
 def test_skip_total_in_eur_rows():

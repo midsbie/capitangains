@@ -36,10 +36,6 @@ def test_round_cost_piece_proportional_allocation():
     assert round_cost_piece(total_basis, take, lot_qty) == Decimal("25.00000000")
 
 
-def test_round_cost_piece_handles_zero_qty_lot():
-    assert round_cost_piece(Decimal("100"), Decimal("10"), Decimal("0")) == Decimal("0")
-
-
 def test_round_cost_piece_does_not_exceed_basis():
     total_basis = Decimal("100.00")
     take = Decimal("33.34")

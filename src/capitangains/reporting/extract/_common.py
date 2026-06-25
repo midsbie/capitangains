@@ -24,11 +24,6 @@ def _is_total_label(value: str) -> bool:
     return value.lower().startswith("total")
 
 
-def _is_total_or_empty(value: str) -> bool:
-    """Return True if value is empty or a 'Total' summary row."""
-    return not value or _is_total_label(value)
-
-
 def _require_fields(label: str, **fields: str) -> None:
     """Raise DataQualityError naming every empty required field."""
     missing = [k for k, v in fields.items() if not v]

@@ -307,11 +307,7 @@ class ReportBuilder:
             totals.eur = CurrencyTotals()
 
         for crl in self.converted_lines:
-            symbol = crl.line.symbol
-            if symbol not in self.symbol_totals:
-                self.symbol_totals[symbol] = SymbolTotals()
-
-            t = self.symbol_totals[symbol]
+            t = self.symbol_totals[crl.line.symbol]
             t.eur.realized += crl.realized_pl_eur
             t.eur.proceeds += crl.sell_net_eur
             t.eur.alloc_cost += crl.alloc_cost_eur

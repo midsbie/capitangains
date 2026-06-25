@@ -25,9 +25,11 @@ def quantize_allocation(value: Decimal) -> Decimal:
 
 
 def round_cost_piece(total_basis: Decimal, take: Decimal, lot_qty: Decimal) -> Decimal:
-    """Allocate a proportional amount of basis with deterministic rounding."""
-    if lot_qty == 0:
-        return Decimal("0")
+    """Allocate a proportional amount of basis with deterministic rounding.
+
+    Caller guarantees lot_qty > 0: PositionBook rejects a non-positive buy lot and drops
+    a lot the moment it is fully consumed, so a zero-qty lot never reaches here.
+    """
     ratio = take / lot_qty
     alloc = total_basis * ratio
     return quantize_allocation(alloc)

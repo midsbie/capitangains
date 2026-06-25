@@ -13,9 +13,10 @@ from capitangains.model import IbkrModel
 
 from ._common import (
     ExtractionDefect,
-    _is_total_or_empty,
+    _is_total_label,
     _require_date,
     _require_decimal,
+    _require_fields,
     defect_from_row,
 )
 from .sections import SEC_SYEP
@@ -63,11 +64,30 @@ def parse_syep_interest_details(
         paid_s = r.get("Interest Paid to Customer", "").strip()
         code = r.get("Code", "").strip()
 
-        # Skip trailing totals like 'Total', 'Total in EUR'.
-        if _is_total_or_empty(cur):
+        # The only rows dropped silently are non-data trailers: IBKR labels its SYEP
+        # totals 'Total'/'Total in EUR' in the Currency cell, and emits a fully blank
+        # separator row between subtables. A row that carries real content but lost its
+        # Currency (a column-shifted disposal) is not a trailer; it falls through to the
+        # field gate below and surfaces as a defect rather than vanishing. The shared
+        # cash-flow extractor fails closed on the same principle, but keys its trailer
+        # on a missing Date; SYEP cannot, since value_date is optional, so a blank
+        # separator row is recognized only when every field is empty.
+        if _is_total_label(cur) or not (
+            cur
+            or value_date_s
+            or sym
+            or start_date_s
+            or qty_s
+            or collat_s
+            or mkt_rate_s
+            or cust_rate_s
+            or paid_s
+            or code
+        ):
             continue
 
         try:
+            _require_fields("SYEP interest row", Currency=cur)
             if not (qty_s and collat_s and mkt_rate_s and cust_rate_s and paid_s):
                 raise DataQualityError(
                     f"Invalid SYEP interest row (missing numeric fields): {r}"

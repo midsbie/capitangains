@@ -4,7 +4,13 @@ from decimal import Decimal
 
 import pytest
 
-from capitangains.conv.ibkr import has_intraday_time, parse_date, to_dec, to_dec_strict
+from capitangains.conv.ibkr import (
+    ELISION_PLACEHOLDERS,
+    has_intraday_time,
+    parse_date,
+    to_dec,
+    to_dec_strict,
+)
 
 
 def test_strips_ibkr_thousands_separators():
@@ -49,8 +55,16 @@ def test_lenient_custom_default():
     assert to_dec("--", default=Decimal("999")) == Decimal("999")
 
 
-def test_strict_rejects_every_placeholder():
-    for placeholder in ("-", "--", "...", "N/A", "n/a"):
+def test_both_coercion_paths_agree_on_every_elision_placeholder():
+    """to_dec (lenient -> default) and to_dec_strict (-> raises) agree on elision.
+
+    Iterates the production ELISION_PLACEHOLDERS frozenset, the single source of truth
+    both paths read, rather than a literal list: a newly added placeholder is covered
+    automatically, so the lenient and strict paths cannot silently drift on what counts
+    as an elided cell.
+    """
+    for placeholder in ELISION_PLACEHOLDERS:
+        assert to_dec(placeholder) == Decimal("0")
         with pytest.raises(ValueError, match="Value is a placeholder"):
             to_dec_strict(placeholder)
 

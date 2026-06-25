@@ -160,7 +160,6 @@ class FifoMatcher:
             self.positions.lot_count(trade.symbol, trade.currency),
             self.positions.total_qty(trade.symbol, trade.currency),
         )
-        return None
 
     def _ingest_sell(self, trade: TradeProtocol) -> RealizedLine:
         if trade.quantity >= 0:

@@ -191,7 +191,7 @@ class BasisSynthesisPolicy:
         if rejection is not None:
             return self._defective(trade, qty_remaining, alloc_cost_so_far, rejection)
 
-        synth_cost = quantize_allocation(residual)
+        synth_cost = residual  # already quantized at every path that reaches here
         avg_price = synth_cost / qty_remaining if qty_remaining > 0 else Decimal("0")
         logger.debug(
             "Synthesized basis: %s shares @ %s per share = %s total cost",
