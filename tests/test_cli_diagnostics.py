@@ -973,6 +973,31 @@ def test_process_files_exits_1_when_fx_table_unreadable(tmp_path, out_path, capl
     )
 
 
+def test_run_does_not_swallow_an_fx_table_programming_bug(
+    tmp_path, out_path, monkeypatch, caplog
+):
+    # A missing or unparseable FX table (OSError/ValueError) is a setup failure and
+    # exits 1 cleanly (see the test above). But a programming bug inside
+    # FxTable.from_csv -- an AttributeError/TypeError/KeyError introduced in fx.py -- is
+    # not an operator setup problem: it must propagate with its traceback, not be
+    # reframed as a clean "setup failure" exit 1 that hides the defect. A USD statement
+    # with an fx_table set reaches the FX-build stage; the loader is forced to raise a
+    # programming error there.
+    stmt = tmp_path / "stmt.csv"
+    _write_statement(stmt)  # USD: needs the FX table to convert
+    args = _args(stmt, out_path, fx_table=str(tmp_path / "rates.csv"))
+
+    def _boom(*args, **kwargs):
+        raise AttributeError("fx parser bug")
+
+    monkeypatch.setattr("capitangains.pipeline.FxTable.from_csv", _boom)
+
+    with pytest.raises(AttributeError, match="fx parser bug"):
+        run(args)
+
+    assert not out_path.exists()
+
+
 def test_process_files_exits_2_on_malformed_acknowledgment_spec(
     tmp_path, out_path, caplog
 ):

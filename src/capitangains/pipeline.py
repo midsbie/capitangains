@@ -213,9 +213,12 @@ def run(options: RunOptions) -> None:
     if options.fx_table:
         try:
             fx = FxTable.from_csv(options.fx_table)
-        except Exception as e:
-            # A missing or unparseable FX table is a setup failure, not a data defect:
-            # exit 1 (apart from the data gates' exit 2), surfaced as one clean ERROR.
+        except (OSError, ValueError) as e:
+            # A missing (OSError) or unparseable (ValueError) FX table is a setup
+            # failure, not a data defect: exit 1 (apart from the data gates' exit 2),
+            # surfaced as one clean ERROR. Any other exception is a programming bug in
+            # the loader, not an operator problem, so it propagates with its traceback
+            # rather than being masked as a clean setup failure.
             logger.error(
                 "Failed to prepare FX conversion from %s: %s", options.fx_table, e
             )
