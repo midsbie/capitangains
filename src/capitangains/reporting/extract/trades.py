@@ -115,7 +115,33 @@ def parse_trades_stocklike_row(
         ),
     )
 
+    _require_trade_sign(trade)
     return trade if trade.quantity != 0 else None
+
+
+def _require_trade_sign(trade: TradeRow) -> None:
+    """Reject a row whose Quantity and Proceeds signs contradict IBKR's booking rule.
+
+    trade_math derives buy cost and net proceeds straight from signed Proceeds, on the
+    invariant that a buy (Quantity > 0) books cash out (Proceeds <= 0) and a sell
+    (Quantity < 0) books cash in (Proceeds >= 0). A column-shifted or sign-flipped row,
+    a buy with positive Proceeds or a sell with negative, would seed a negative cost
+    basis (or negative gross) that propagates into every later disposal of the symbol
+    and silently overstates the filed gain. Nothing downstream re-checks the sign, so it
+    fails closed here like every other extraction defect. Quantity zero is filtered
+    separately; Proceeds zero is admissible on either side, so only a strict sign clash
+    is a defect.
+    """
+    if trade.quantity > 0 and trade.proceeds > 0:
+        raise DataQualityError(
+            f"Invalid trade row: buy of {trade.symbol} has positive Proceeds "
+            f"{trade.proceeds} (a buy books cash out, so Proceeds must be <= 0)"
+        )
+    if trade.quantity < 0 and trade.proceeds < 0:
+        raise DataQualityError(
+            f"Invalid trade row: sell of {trade.symbol} has negative Proceeds "
+            f"{trade.proceeds} (a sell books cash in, so Proceeds must be >= 0)"
+        )
 
 
 def parse_trades_stocklike(

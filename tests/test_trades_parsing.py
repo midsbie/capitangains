@@ -1392,6 +1392,96 @@ def test_malformed_realized_pl_is_rejected_not_treated_as_elided():
     assert "Realized P/L" in defects[0].reason
 
 
+def test_buy_with_positive_proceeds_is_rejected():
+    """A buy (Quantity > 0) whose Proceeds is positive is sign-corrupt and rejected.
+
+    trade_math derives the cost basis from signed Proceeds: a buy books cash out, so
+    Proceeds must be <= 0. A column-shifted or sign-flipped row giving a buy positive
+    Proceeds would seed a negative cost basis (-Proceeds - Comm) that propagates into
+    every later sell of the symbol, overstating the filed gain. Nothing downstream
+    re-checks the sign, so the row must fail closed here like every other defect.
+    """
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "USD",
+            "AAPL",
+            "2024-01-15, 10:00:00",
+            "100",  # buy
+            "150.00",
+            "15000.00",  # positive Proceeds: should be -15000.00 for a buy
+            "-1.00",
+            "P",
+        ],
+    ]
+
+    model = parse_model(rows)
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert not trades  # the sign-corrupt buy is rejected, not seeded as a negative lot
+    assert defects
+    assert "Proceeds" in defects[0].reason
+
+
+def test_sell_with_negative_proceeds_is_rejected():
+    """A sell (Quantity < 0) whose Proceeds is negative is sign-corrupt and rejected.
+
+    Mirror of the buy case: a sell books cash in, so Proceeds must be >= 0. A negative
+    Proceeds on a sell would feed a negative gross/net through trade_math and corrupt
+    the realized figure, so it fails closed at extraction.
+    """
+    rows = [
+        [
+            "Trades",
+            "Header",
+            "Asset Category",
+            "Currency",
+            "Symbol",
+            "Date/Time",
+            "Quantity",
+            "T. Price",
+            "Proceeds",
+            "Comm/Fee",
+            "Code",
+        ],
+        [
+            "Trades",
+            "Data",
+            "Stocks",
+            "USD",
+            "AAPL",
+            "2024-02-20, 14:00:00",
+            "-50",  # sell
+            "200.00",
+            "-10000.00",  # negative Proceeds: should be 10000.00 for a sell
+            "-2.00",
+            "P",
+        ],
+    ]
+
+    model = parse_model(rows)
+    trades, defects = parse_trades_stocklike(model, asset_scope="stocks")
+
+    assert not trades
+    assert defects
+    assert "Proceeds" in defects[0].reason
+
+
 def test_filter_non_stock_asset_by_scope():
     """Test that non-matching asset categories are filtered by scope."""
     rows = [
