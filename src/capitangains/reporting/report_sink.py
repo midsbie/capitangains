@@ -18,7 +18,7 @@ from capitangains.conv import EUR, Currency
 from .converted import ConvertedRealizedLine
 from .extract import CashFlowRow, SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
-from .i18n import NumberFormats, labels_for
+from .i18n import Locale, NumberFormats, canonical_locale, labels_for
 from .money import quantize_money
 from .quadro_8a import Quadro8ALine
 from .report_builder import ReportBuilder
@@ -608,7 +608,7 @@ class _SheetWriter:
                 if hasattr(v, "strftime"):
                     s = (
                         v.strftime("%d/%m/%Y")
-                        if self.formats.locale.upper() == "PT"
+                        if self.formats.locale == "PT"
                         else v.strftime("%Y-%m-%d")
                     )
                 else:
@@ -628,7 +628,13 @@ class _SheetWriter:
 @dataclass
 class ExcelReportSink:
     out_path: Path
-    locale: str = "PT"  # "PT" (default) or "EN"
+    locale: str = "PT"  # raw; resolved by __post_init__ (see canonical_locale)
+
+    def __post_init__(self) -> None:
+        # Resolve the raw locale once at the boundary; downstream code carries a Locale
+        # and never re-validates. An unsupported locale fails here, before any workbook
+        # work, rather than being silently coerced. See canonical_locale.
+        self._locale: Locale = canonical_locale(self.locale)
 
     def write(self, report: ReportBuilder) -> Path:
         out_path = Path(self.out_path)
@@ -638,8 +644,8 @@ class ExcelReportSink:
         if ws_default is not None:
             wb.remove(ws_default)
 
-        labels = labels_for(self.locale)
-        writer = _SheetWriter(wb, labels, NumberFormats(self.locale))
+        labels = labels_for(self._locale)
+        writer = _SheetWriter(wb, labels, NumberFormats(self._locale))
         writer.write_summary(report)
         writer.write_table(_REALIZED_SPEC, report)
         writer.write_table(_ANEXO_J_SPEC, report)

@@ -592,8 +592,6 @@ def test_pt_projection_renders_portuguese_labels():
     assert pt["sheet"]["summary"] == "Totais de Operações"
     assert pt["realized"]["ticker"] == "Símbolo"
     assert pt["anexo_j"]["pl_eur"] == "Mais/menos-valia (EUR)"
-    # Any unrecognized locale falls back to PT (the report's default).
-    assert labels_for("XX") == pt
 
 
 # Allocated cost must reach the sheets cent-quantized regardless of currency.  FIFO

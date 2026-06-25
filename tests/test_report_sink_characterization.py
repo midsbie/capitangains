@@ -31,7 +31,7 @@ from capitangains.reporting.extract import (
     TransferRow,
     WithholdingRow,
 )
-from capitangains.reporting.i18n import NumberFormats
+from capitangains.reporting.i18n import NumberFormats, canonical_locale, labels_for
 from capitangains.reporting.report_builder import ReportBuilder
 from capitangains.reporting.report_sink import ExcelReportSink
 from tests.support import make_fx, realized_line
@@ -1035,3 +1035,23 @@ def test_optional_sheets_omitted_when_source_empty(tmp_path):
 )
 def test_money_format_fallbacks(locale, ccy, expected):
     assert NumberFormats(locale).money(ccy) == expected
+
+
+def test_empty_locale_resolves_to_pt_for_labels_and_formats():
+    # An empty/unset locale resolves (once, at the boundary) to PT, the report's
+    # default, driving the same language for labels and number/date formats: never
+    # PT labels with the EN date format.
+    loc = canonical_locale("")
+    assert loc == "PT"
+    assert labels_for(loc)["sheet"]["realized"] == "Operações Realizadas"  # PT label
+    assert NumberFormats(loc).date == "DD/MM/YYYY"  # PT format, the same language
+
+
+def test_unsupported_locale_is_rejected_not_coerced(tmp_path):
+    # A non-empty unsupported locale is a caller error: the sole parse point fails
+    # loudly rather than silently substitute PT (the guess the codebase refuses).
+    with pytest.raises(ValueError, match="Unsupported locale"):
+        canonical_locale("DE")
+    # And it is caught at the sink boundary, before any workbook is written.
+    with pytest.raises(ValueError, match="Unsupported locale"):
+        ExcelReportSink(out_path=tmp_path / "report.xlsx", locale="DE")

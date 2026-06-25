@@ -3,14 +3,22 @@ projection, plus the matching locale-aware number formats.
 
 LABELS co-locates both locale strings per field under one key set, so a locale cannot
 silently diverge (a field cannot exist in one language alone). labels_for projects the
-catalog onto the active locale; any locale other than "EN" falls back to "PT" (the
-report's default). NumberFormats is the matching policy for numeric cells (date order
-and currency presentation), which also vary by locale.
+catalog onto a resolved locale. NumberFormats is the matching policy for numeric cells
+(date order and currency presentation), which also vary by locale. canonical_locale is
+the sole parse point from a raw str to a Locale; both labels_for and NumberFormats take
+that resolved Locale and never re-validate, so labels and formats can never disagree (an
+empty locale defaults to PT for both, an unsupported one is rejected at the boundary).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, get_args
+
+# The closed set of supported locales. canonical_locale is the sole parse point from a
+# raw str to this type; everything downstream (labels_for, NumberFormats) carries a
+# resolved Locale and never re-validates, so an unsupported value cannot reach them.
+Locale = Literal["EN", "PT"]
 
 LABELS: dict[str, dict[str, dict[str, str]]] = {
     "sheet": {
@@ -182,15 +190,47 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
 }
 
 
-def labels_for(locale: str) -> dict[str, dict[str, str]]:
-    """Project the canonical label catalog onto the active locale.
+# Derived from Locale so the runtime set and the type can never drift: add a locale to
+# the Literal and it is supported here automatically.
+SUPPORTED_LOCALES: tuple[Locale, ...] = get_args(Locale)
+DEFAULT_LOCALE: Locale = "PT"  # the report's default, used for an empty/unset locale
 
-    Returns a {section: {field: text}} view for the selected locale; any locale other
-    than "EN" falls back to "PT" (the report's default).
+
+def canonical_locale(locale: str) -> Locale:
+    """Parse a raw locale string into a resolved Locale.
+
+    An empty/unset locale falls back to DEFAULT_LOCALE. A non-empty locale outside
+    SUPPORTED_LOCALES is a caller error and raises, rather than being silently coerced:
+    the tool cannot produce, say, a German workbook, and quietly substituting Portuguese
+    would be the kind of guess this codebase refuses to make. The CLI already constrains
+    --locale to the supported set; this guards the programmatic boundary, where
+    ExcelReportSink accepts a bare str.
+
+    This is the sole parse point: callers resolve once here and pass the Locale down, so
+    labels and formats can never disagree and never re-validate.
     """
-    loc = "EN" if (locale or "PT").upper() == "EN" else "PT"
+    if not locale:
+        return DEFAULT_LOCALE
+
+    normalized = locale.upper()
+    for supported in SUPPORTED_LOCALES:
+        if normalized == supported:
+            return supported
+
+    raise ValueError(
+        f"Unsupported locale {locale!r}; supported locales are "
+        f"{', '.join(SUPPORTED_LOCALES)}."
+    )
+
+
+def labels_for(locale: Locale) -> dict[str, dict[str, str]]:
+    """Project the canonical label catalog onto an already-resolved locale.
+
+    Returns a {section: {field: text}} view. The locale is trusted (resolve a raw string
+    through canonical_locale before calling); this does not re-validate.
+    """
     return {
-        section: {field: trans[loc] for field, trans in fields.items()}
+        section: {field: trans[locale] for field, trans in fields.items()}
         for section, fields in LABELS.items()
     }
 
@@ -205,22 +245,25 @@ class NumberFormats:
     """Locale-aware Excel number-format strings. Pure formatting policy depending only
     on the locale, kept separate from the workbook-writing sink so the column
     descriptors that consume it do not depend on ExcelReportSink.
+
+    Holds an already-resolved Locale (see canonical_locale), so the formats are a direct
+    lookup with no re-validation.
     """
 
-    locale: str
+    locale: Locale
 
     @property
     def date(self) -> str:
-        return "DD/MM/YYYY" if self.locale.upper() == "PT" else "YYYY-MM-DD"
+        return "DD/MM/YYYY" if self.locale == "PT" else "YYYY-MM-DD"
 
     def money(self, ccy: str) -> str:
-        loc = self.locale.upper()
         cur = (ccy or "").upper()
         sym = _CURRENCY_SYMBOLS.get(cur)
         if sym:
-            if cur == "EUR" and loc == "PT":
+            if cur == "EUR" and self.locale == "PT":
                 return f'#,##0.00 "{sym}"'
             return f"{sym}#,##0.00"
-        if loc == "PT":
+
+        if self.locale == "PT":
             return f'#,##0.00 "{cur}"'
         return f'"{cur}" #,##0.00'
