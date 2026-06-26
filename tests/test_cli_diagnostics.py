@@ -413,7 +413,7 @@ def _timed_trade(datetime_str, quantity, *, symbol="AAPL", currency="USD"):
 def test_detect_timestamp_tie_buy_and_sell_collide():
     # A buy and a sell of one symbol carry a byte-identical Date/Time. The shared
     # timestamp orders neither, yet the choice flips a gap into a clean match, so it is
-    # unorderable -- the F2 case the untimed gate above does not cover.
+    # unorderable -- the case the untimed gate above does not cover.
     ts = "2024-06-15, 14:30:00"
     trades = [_timed_trade(ts, "100"), _timed_trade(ts, "-100")]
     assert detect_timestamp_tie_collisions(trades) == [

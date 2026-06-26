@@ -306,8 +306,8 @@ def test_skip_total_row():
 def test_data_row_missing_currency_is_a_defect_not_a_skipped_trailer():
     """A column-shifted row that lost its Currency fails closed, it does not vanish.
 
-    Regression (F13): the trailer filter keyed on an empty Currency, so a real
-    disposal whose Currency cell was lost to a column shift, yet still carrying
+    The trailer filter once keyed on an empty Currency, so a real disposal whose
+    Currency cell was lost to a column shift, yet still carrying
     quantity/collateral/rate/interest data, was silently dropped as if it were a
     'Total' trailer instead of surfacing as a defect. Empty Currency alone no longer
     means trailer; only a 'Total'-labelled or fully blank row is skipped.

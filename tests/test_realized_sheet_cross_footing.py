@@ -1,4 +1,4 @@
-"""The Realized sheet's money columns must cross-foot (regression guard for F5).
+"""The Realized sheet's money columns must cross-foot.
 
 The Realized Trades sheet is the tool's audit surface: a filer checks a figure by
 confirming the columns on its row add up. Two additive identities state that contract,
@@ -6,11 +6,11 @@ in each of the trade-currency and EUR money blocks:
 
     gross + fees == net        net - alloc == pl
 
-F5 was that they did not hold: each cell was quantized to cents independently, while the
+These once did not hold: each cell was quantized to cents independently, while the
 stored figures had been quantized earlier from raw, sub-cent inputs, so the two
-roundings disagreed by a cent on boundary values. The fix makes every block derive its
-dependent columns from cent-rounded primitives (allocated cost rounded once on the line;
-EUR commission taken as net - gross), so the identities hold by construction. The two
+roundings disagreed by a cent on boundary values. Every block now derives its dependent
+columns from cent-rounded primitives (allocated cost rounded once on the line; EUR
+commission taken as net - gross), so the identities hold by construction. The two
 fixtures below are the boundary cases that exposed each half of the defect:
 
 - A leg sum landing on a half-cent (10.001 + 10.004 = 20.005) rounds to 20.01, and the

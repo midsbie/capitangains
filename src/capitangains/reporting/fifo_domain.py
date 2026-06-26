@@ -92,7 +92,7 @@ class RealizedLine:
         Derived, never stored: P/L is definitionally net minus cost, and both operands
         are cent figures, so the difference is exactly the value the sheet shows and
         net - alloc == pl holds by construction. This mirrors realized_pl_eur; storing
-        it independently is what let the displayed P/L disagree with net - alloc (F5).
+        it independently would let the displayed P/L disagree with net - alloc.
         """
         return quantize_money(self.sell_net_ccy - self.alloc_cost_ccy)
 

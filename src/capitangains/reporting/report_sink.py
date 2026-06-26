@@ -61,6 +61,16 @@ class _Column(ABC, Generic[_RowT]):
         # load-bearing byte-preservation detail.
         return None
 
+    @property
+    def fixed_width(self) -> int | None:
+        """A content-independent column width, or None to size from the cell values.
+
+        Only the matched-lots JSON overrides this (see _JsonColumn): its long
+        single-line payload always overflows, so it is pinned to a cap rather than
+        measured per cell.
+        """
+        return None
+
 
 @dataclass(frozen=True)
 class _TextColumn(_Column[_RowT]):
@@ -68,6 +78,19 @@ class _TextColumn(_Column[_RowT]):
 
     def cell_value(self, row: _RowT) -> object:
         return self.value(row)
+
+
+# The matched-lots JSON column carries a long single-line payload that always overflows,
+# so it is pinned to a fixed width rather than stringified and measured per cell only to
+# be clamped to this same value afterwards.
+_JSON_COLUMN_WIDTH = 50
+
+
+@dataclass(frozen=True)
+class _JsonColumn(_TextColumn[_RowT]):
+    @property
+    def fixed_width(self) -> int | None:
+        return _JSON_COLUMN_WIDTH
 
 
 @dataclass(frozen=True)
@@ -300,7 +323,7 @@ _REALIZED_SPEC: _SheetSpec[ConvertedRealizedLine] = _SheetSpec(
             value=lambda crl: crl.realized_pl_eur,
             currency=lambda _r: EUR,
         ),
-        _TextColumn[ConvertedRealizedLine](
+        _JsonColumn[ConvertedRealizedLine](
             "legs_json", value=lambda crl: _legs_json(crl.line)
         ),
         _TextColumn[ConvertedRealizedLine](
@@ -518,6 +541,13 @@ _TRANSFERS_SPEC: _SheetSpec[TransferProtocol] = _SheetSpec(
 )
 
 
+# Column-width bounds and the padding added to measured content, applied as each sheet
+# is written (no post-hoc rescan). A fixed-width column bypasses the bounds entirely.
+_MIN_COL_WIDTH = 10
+_MAX_COL_WIDTH = 60
+_COL_PADDING = 2
+
+
 @dataclass(frozen=True)
 class _SheetWriter:
     """One workbook under construction in a single locale.
@@ -535,7 +565,9 @@ class _SheetWriter:
     def write_summary(self, report: ReportBuilder) -> None:
         ws = self.wb.create_sheet(title=self.labels["sheet"]["summary"])
         summary_labels = self.labels["summary"]
-        ws.append([summary_labels["metric"], summary_labels["amount"]])
+        header = [summary_labels["metric"], summary_labels["amount"]]
+        ws.append(header)
+        widths = [len(h) for h in header]
 
         # Primary EUR totals come from the builder's aggregation, not a re-scan here.
         eur = report.eur_totals
@@ -544,7 +576,7 @@ class _SheetWriter:
             ("proceeds_eur", eur.proceeds),
             ("alloc_eur", eur.alloc_cost),
         ):
-            self._append_money_row(ws, summary_labels[key], amount, EUR)
+            self._append_money_row(ws, widths, summary_labels[key], amount, EUR)
 
         # One realized-P/L row per native trade currency, EUR excluded so it does not
         # duplicate the primary totals. order=True on Currency gives a stable by-code
@@ -553,19 +585,30 @@ class _SheetWriter:
             if cur.is_base:
                 continue
             label = summary_labels["total_cur_tpl"].format(cur=cur)
-            self._append_money_row(ws, label, totals.realized, cur)
+            self._append_money_row(ws, widths, label, totals.realized, cur)
+
+        self._apply_widths(ws, widths, {})
 
     def _append_money_row(
-        self, ws: Worksheet, label: str, amount: Decimal, currency: Currency
+        self,
+        ws: Worksheet,
+        widths: list[int],
+        label: str,
+        amount: Decimal,
+        currency: Currency,
     ) -> None:
-        """Append a [label, amount] metric row and apply the currency's money format.
+        """Append a [label, amount] metric row, apply the currency's money format, and
+        fold the two rendered cells into the running column widths.
 
         Mirrors _MoneyColumn (quantize at the sink boundary, then formats.money on the
         code) so a summary metric cell formats identically to the data tables' cells.
         """
-        ws.append([label, float(quantize_money(amount))])
+        value = float(quantize_money(amount))
+        ws.append([label, value])
         cell = ws.cell(row=ws.max_row, column=2)
         cell.number_format = self.formats.money(str(currency))
+        widths[0] = max(widths[0], self._content_width(label))
+        widths[1] = max(widths[1], self._content_width(value))
 
     def write_table(self, spec: _SheetSpec[_RowT], report: ReportBuilder) -> None:
         """Write one uniform table sheet from its spec.
@@ -574,6 +617,10 @@ class _SheetWriter:
         spec.columns[N], so they cannot desynchronize; the format is applied
         positionally over the same list that produced the value, and only when the
         column returns one (TEXT cells are left at openpyxl's default "General").
+
+        Column widths accumulate from the values as they are written, so the workbook is
+        never rescanned afterwards; a fixed-width column (the JSON breakdown) is skipped
+        rather than stringified to measure.
         """
         rows = list(spec.rows(report))
         if not rows and spec.skip_if_empty:
@@ -581,48 +628,50 @@ class _SheetWriter:
 
         section = self.labels[spec.label_section]
         ws = self.wb.create_sheet(title=self.labels["sheet"][spec.sheet_key])
-        ws.append([section[col.header_key] for col in spec.columns])
+        headers = [section[col.header_key] for col in spec.columns]
+        ws.append(headers)
+
+        widths = [len(h) for h in headers]
+        fixed: dict[int, int] = {}
+        for idx, col in enumerate(spec.columns):
+            fw = col.fixed_width
+            if fw is not None:
+                fixed[idx] = fw
 
         for row in rows:
-            ws.append([col.cell_value(row) for col in spec.columns])
+            values = [col.cell_value(row) for col in spec.columns]
+            ws.append(values)
             r = ws.max_row
-            for idx, col in enumerate(spec.columns, start=1):
+            for idx, (col, value) in enumerate(zip(spec.columns, values, strict=True)):
                 fmt = col.number_format(self.formats, row)
                 if fmt is not None:
-                    ws.cell(row=r, column=idx).number_format = fmt
+                    ws.cell(row=r, column=idx + 1).number_format = fmt
+                if idx not in fixed:
+                    widths[idx] = max(widths[idx], self._content_width(value))
 
-    def autosize_all(self) -> None:
-        for ws in self.wb.worksheets:
-            self._autosize(ws)
+        self._apply_widths(ws, widths, fixed)
 
-    def _autosize(
-        self, sheet: Worksheet, max_width: int = 60, min_width: int = 10
+    def _content_width(self, value: object) -> int:
+        """Character width the rendered cell occupies.
+
+        A date is sized from NumberFormats.date, the single source of date presentation,
+        so the reserved width tracks the format Excel renders the cell with rather than
+        a second, independently maintained strftime.
+        """
+        if value is None:
+            return 0
+        if isinstance(value, dt.date):
+            return len(self.formats.date)
+        return len(str(value))
+
+    def _apply_widths(
+        self, ws: Worksheet, content_widths: list[int], fixed: dict[int, int]
     ) -> None:
-        header_values = [cell.value for cell in sheet[1]] if sheet.max_row else []
-        for col in range(1, sheet.max_column + 1):
-            max_len = 0
-            for row in range(1, sheet.max_row + 1):
-                v = sheet.cell(row=row, column=col).value
-                if v is None:
-                    continue
-                if hasattr(v, "strftime"):
-                    s = (
-                        v.strftime("%d/%m/%Y")
-                        if self.formats.locale == "PT"
-                        else v.strftime("%Y-%m-%d")
-                    )
-                else:
-                    s = str(v)
-                if len(s) > max_len:
-                    max_len = len(s)
-
-            header = header_values[col - 1] if col - 1 < len(header_values) else None
-            if header:
-                max_len = max(max_len, len(str(header)))
-            width = min(max_width, max(min_width, max_len + 2))
-            if header and "JSON" in str(header):
-                width = min(width, 50)
-            sheet.column_dimensions[get_column_letter(col)].width = width
+        for idx, content in enumerate(content_widths):
+            width = fixed.get(
+                idx, min(_MAX_COL_WIDTH, max(_MIN_COL_WIDTH, content + _COL_PADDING))
+            )
+            ws.column_dimensions[get_column_letter(idx + 1)].width = width
 
 
 @dataclass
@@ -656,7 +705,6 @@ class ExcelReportSink:
         writer.write_table(_SYEP_SPEC, report)
         writer.write_table(_WITHHOLDING_SPEC, report)
         writer.write_table(_TRANSFERS_SPEC, report)
-        writer.autosize_all()
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(out_path)

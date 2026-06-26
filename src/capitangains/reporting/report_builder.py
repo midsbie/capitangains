@@ -206,7 +206,7 @@ class ReportBuilder:
             sell_gross_eur=sell_gross_eur,
             # Commission is the residual net - gross (the EUR image of comm = net -
             # gross), not comm * rate rounded alone: pricing all three independently
-            # rounds them apart so gross + fees != net (F5). Net is the load-bearing
+            # rounds them apart so gross + fees != net. Net is the load-bearing
             # figure (it drives realized P/L and the proceeds split), so it stays the
             # faithful conversion and the fee column absorbs the cent residual.
             sell_comm_eur=sell_net_eur - sell_gross_eur,

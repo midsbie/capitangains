@@ -86,7 +86,7 @@ def test_has_intraday_time_true_for_parseable_time():
 def test_has_intraday_time_false_without_parseable_time():
     # The comma alone is not a time. A row IBKR left timeless -- a bare trailing comma,
     # a whitespace-only or unparseable tail -- must read as untimed so the ordering
-    # collision gate fails closed instead of sorting on an empty/garbage time (F4).
+    # collision gate fails closed instead of sorting on an empty/garbage time.
     for value in ("2024-01-15", "2024-01-15,", "2024-01-15, ", "2024-01-15, noon", ""):
         assert not has_intraday_time(value)
 
