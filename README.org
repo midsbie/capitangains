@@ -36,7 +36,7 @@ Prior-year statements matter for the same reason: a sale's cost basis comes from
 
 * CLI Usage
 
-After installation, run the =capitangains= command. Provide statements either as positional CSV path(s) or via =--statements-dir DIR= (auto-discovery); the two are mutually exclusive. A multi-file run must be a single account with one statement per year and non-overlapping periods; otherwise it aborts (exit 2) to avoid double-counting. Include prior years so FIFO can match sales with earlier buys. Unmatched SELLs abort the run (exit 2) unless each is itemized in =--auto-fix-sell-gaps=. Output defaults to =report_<year>.xlsx= in the current directory.
+After installation, run the =capitangains= command. From a source checkout managed by =make setup= (which runs =uv sync=), invoke it through =uv= so it uses the project's pinned environment: =uv run capitangains ...=. The examples below show the bare command; prefix each with =uv run= when working from such a checkout. Provide statements either as positional CSV path(s) or via =--statements-dir DIR= (auto-discovery); the two are mutually exclusive. A multi-file run must be a single account with one statement per year and non-overlapping periods; otherwise it aborts (exit 2) to avoid double-counting. Include prior years so FIFO can match sales with earlier buys. Unmatched SELLs abort the run (exit 2) unless each is itemized in =--auto-fix-sell-gaps=. Output defaults to =report_<year>.xlsx= in the current directory.
 
 ** Examples
 - Single year:
@@ -71,8 +71,11 @@ After installation, run the =capitangains= command. Provide statements either as
 You can also run the CLI module directly from the source checkout:
 
 #+begin_src sh
-  python -m capitangains.cmd ...
+  uv run python -m capitangains.cmd ...
 #+end_src
+
+(Outside a =uv=-managed checkout, drop the =uv run= prefix and use the
+=capitangains= console script or =python -m capitangains.cmd= directly.)
 
 ** Options
 
@@ -83,12 +86,12 @@ You can also run the CLI module directly from the source checkout:
 - =--broker-country CC=: ISO 2-letter jurisdiction of the IBKR contracting entity; the source country for broker-paid interest (credit + SYEP) on the Annex J Box 8A sheet (default IE, IBKR Ireland).
 - =--output PATH=: output XLSX file path (default =report_<year>.xlsx=).
 - =-n= / =--dry-run=: run the full preflight (parse, extract, FIFO-match, convert, reconcile) and report any defect, but stop before writing the workbook; exit 0 if the run would succeed.
-- =--auto-fix-sell-gaps SYMBOL@YYYY-MM-DD[,...]=: itemized acknowledgment of unmatched SELLs whose cost basis is synthesized from IBKR per-trade /Basis/ (see Handling unmatched SELLs).
+- =--auto-fix-sell-gaps SYMBOL@YYYY-MM-DD[,...]=: itemized acknowledgment of unmatched SELLs whose cost basis is synthesized from IBKR per-trade /Basis/ (see Handling unmatched SELLs). May be repeated; every occurrence is merged into one acknowledgment set, so repeating the flag is equivalent to one comma-separated value.
 - =-v= / =-vv=: increase logging verbosity (INFO / DEBUG).
 
 ** Handling unmatched SELLs
 
-By default, the tool aborts (exit 2) on unmatched SELLs. To proceed, acknowledge each gap explicitly via =--auto-fix-sell-gaps SYMBOL@YYYY-MM-DD[,...]= (symbols are case-sensitive). Listed gaps get residual lots synthesized from IBKR per-trade /Basis/ values, marked in the Realized Trades sheet for auditability. The run stays fatal if any gap is left unlisted, an acknowledged gap has a missing or corrupt Basis, or an acknowledgment matches no gap found this run.
+By default, the tool aborts (exit 2) on unmatched SELLs. To proceed, acknowledge each gap explicitly via =--auto-fix-sell-gaps SYMBOL@YYYY-MM-DD[,...]= (symbols are case-sensitive). The flag may be given more than once; every occurrence is merged into one acknowledgment set, so repeating it is equivalent to a single comma-separated value. Listed gaps get residual lots synthesized from IBKR per-trade /Basis/ values, marked in the Realized Trades sheet for auditability. The run stays fatal if any gap is left unlisted, an acknowledged gap has a missing or corrupt Basis, or an acknowledgment matches no gap found this run.
 
 ** Handling transfers
 
