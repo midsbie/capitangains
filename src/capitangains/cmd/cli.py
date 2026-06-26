@@ -25,7 +25,8 @@ Usage
     capitangains --year 2024 --dry-run --fx-table ./fx_rates.csv \
         /path/to/ActivityStatement_2024.csv
 
-(Equivalently, invoke the module with ``python -m capitangains.cmd``.)
+(Equivalently, invoke the module with ``uv run python -m capitangains.cmd``, or
+``python -m capitangains.cmd`` outside a uv-managed checkout.)
 
 Forex CSV schema (base EUR):
     date,currency,rate
@@ -135,15 +136,20 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--auto-fix-sell-gaps",
         type=str,
+        action="append",
         default=None,
         metavar="SYMBOL@YYYY-MM-DD[,...]",
         help=(
             "Itemized acknowledgment of unmatched SELLs (gaps) whose cost basis you "
             "authorize to be synthesized from IBKR's per-trade Basis. Pass a "
             "comma-separated list of SYMBOL@YYYY-MM-DD keys, one per gap you have "
-            "reviewed (symbols are case-sensitive). The run is fatal (exit 2, no "
-            "workbook) if any gap is left unlisted, any acknowledged gap has a missing "
-            "or corrupt Basis, or any acknowledgment matches no gap found this run."
+            "reviewed (symbols are case-sensitive). May be given more than once; every "
+            "occurrence is merged into one acknowledgment set, so "
+            "'--auto-fix-sell-gaps A@2024-01-02,B@2024-03-04' and "
+            "'--auto-fix-sell-gaps A@2024-01-02 --auto-fix-sell-gaps B@2024-03-04' are "
+            "equivalent. The run is fatal (exit 2, no workbook) if any gap is left "
+            "unlisted, any acknowledged gap has a missing or corrupt Basis, or any "
+            "acknowledgment matches no gap found this run."
         ),
     )
     p.add_argument(
@@ -224,6 +230,20 @@ def resolve_inputs(
     return [str(s.path) for s in result.selected]
 
 
+def _merge_gap_specs(specs: list[str] | None) -> str | None:
+    """Collapse repeated --auto-fix-sell-gaps occurrences into one canonical spec.
+
+    ``action="append"`` yields one entry per occurrence on the command line (or None
+    when the flag was never given). Each entry is itself a comma-separated
+    SYMBOL@YYYY-MM-DD list, so joining the entries with a comma is exactly the single
+    comma-list ``parse_acknowledged_gaps`` already consumes: a repeated flag unions its
+    keys instead of the second occurrence silently overwriting the first. None is
+    preserved (rather than collapsed to "") so the pipeline's "no acknowledgments" path
+    is untouched.
+    """
+    return ",".join(specs) if specs else None
+
+
 def main() -> None:
     parser = build_argparser()
     args = parser.parse_args()
@@ -245,7 +265,7 @@ def main() -> None:
             fx_table=args.fx_table,
             locale=args.locale,
             output=args.output,
-            auto_fix_sell_gaps=args.auto_fix_sell_gaps,
+            auto_fix_sell_gaps=_merge_gap_specs(args.auto_fix_sell_gaps),
             dry_run=args.dry_run,
             broker_country=args.broker_country,
         )

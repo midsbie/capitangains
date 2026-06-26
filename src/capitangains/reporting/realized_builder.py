@@ -5,9 +5,7 @@ from .money import abs_decimal
 from .trade_math import sell_gross_ccy, sell_net_ccy
 
 
-def build_realized_line(
-    trade: TradeProtocol, legs: list[SellMatchLeg]
-) -> RealizedLine:
+def build_realized_line(trade: TradeProtocol, legs: list[SellMatchLeg]) -> RealizedLine:
     """Assemble a RealizedLine from a sell trade and its matched legs.
 
     Only the trade's own primitives are set; allocated cost and realized P/L are

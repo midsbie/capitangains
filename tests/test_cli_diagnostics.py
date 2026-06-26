@@ -24,7 +24,7 @@ from decimal import Decimal
 import pytest
 from openpyxl import load_workbook
 
-from capitangains.cmd.cli import build_argparser
+from capitangains.cmd.cli import _merge_gap_specs, build_argparser
 from capitangains.conv import Currency
 from capitangains.diagnostics import (
     format_reconciliation_sample,
@@ -1328,6 +1328,42 @@ def test_process_files_synthesizes_acknowledged_gap_and_writes_workbook(
 
 
 # --- --dry-run / -n -------------------------------------------------------------------
+
+
+def test_repeated_auto_fix_sell_gaps_flags_merge_into_one_union():
+    # action="append": the flag may be repeated, and every occurrence is merged into
+    # one acknowledgment set, so a second occurrence no longer silently overwrites the
+    # first. Repeating it equals one comma-separated value, and a per-occurrence
+    # comma-list survives the merge intact.
+    parser = build_argparser()
+    args = parser.parse_args(
+        [
+            "--year",
+            "2024",
+            "stmt.csv",
+            "--auto-fix-sell-gaps",
+            "FRCB@2023-07-18",
+            "--auto-fix-sell-gaps",
+            "BANC@2023-11-30,VOD@2024-02-02",
+        ]
+    )
+    assert parse_acknowledged_gaps(
+        _merge_gap_specs(args.auto_fix_sell_gaps)
+    ) == frozenset(
+        {
+            ("FRCB", dt.date(2023, 7, 18)),
+            ("BANC", dt.date(2023, 11, 30)),
+            ("VOD", dt.date(2024, 2, 2)),
+        }
+    )
+
+
+def test_absent_auto_fix_sell_gaps_merges_to_none():
+    # No flag yields a None spec (not ""), preserving the pipeline's "no
+    # acknowledgments" path that None signals.
+    parser = build_argparser()
+    args = parser.parse_args(["--year", "2024", "stmt.csv"])
+    assert _merge_gap_specs(args.auto_fix_sell_gaps) is None
 
 
 def test_argparser_accepts_dry_run_short_and_long_flags():
