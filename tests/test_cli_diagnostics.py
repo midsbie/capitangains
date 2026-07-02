@@ -31,6 +31,7 @@ from capitangains.diagnostics import (
     report_gap_acknowledgments,
     report_invalid_statements,
     report_negative_foreign_tax,
+    report_open_position_defects,
     report_ordering_collisions,
     report_orphaned_foreign_tax,
     report_reconciliation,
@@ -40,14 +41,17 @@ from capitangains.diagnostics import (
     report_transfer_shortfalls,
     report_unattributed_income,
     report_unrecognized_sections,
+    report_unresolved_transfer_basis,
 )
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrStatementCsvParser
 from capitangains.pipeline import RunOptions, run
 from capitangains.reporting import (
+    ExtractionDefect,
     OrderingCollision,
     Quadro8ALine,
     ReconciliationReport,
+    ReportBuilder,
     StatementInput,
     SymbolReconciliation,
     TimestampTieCollision,
@@ -59,6 +63,7 @@ from capitangains.reporting import (
     detect_timestamp_tie_collisions,
     detect_unattributed_income,
     detect_unrecognized_sections,
+    detect_unresolved_transfer_basis,
     parse_acknowledged_gaps,
     partition_statements_by_metadata,
 )
@@ -68,6 +73,7 @@ from capitangains.reporting.extract.sections import (
     IGNORED_SECTIONS,
     SEC_DIVIDENDS,
     SEC_INTEREST,
+    SEC_OPEN_POSITIONS,
     SEC_SYEP,
     SEC_TRADES,
     SEC_TRANSFERS,
@@ -77,6 +83,7 @@ from capitangains.reporting.fifo_domain import GapResolution, TransferShortfall
 from capitangains.reporting.quadro_8a import IncomeKind
 from tests.support import (
     DIVIDENDS_COLUMNS,
+    OPEN_POSITIONS_COLUMNS,
     SYEP_SECTION,
     TRADES_COLUMNS,
     TRANSFERS_COLUMNS,
@@ -85,8 +92,11 @@ from tests.support import (
     Y2024,
     header_row,
     make_gap_event,
+    open_position_data,
     parse_model,
+    realized_line,
     section_table,
+    sell_match_leg,
     statement_meta_rows,
     trade_data,
     trade_row,
@@ -1709,12 +1719,12 @@ def test_detect_unrecognized_sections_flags_unknown_alongside_consumed():
 
 
 def test_detect_unrecognized_sections_silent_for_consumed_and_ignored():
-    # Trades is consumed; "Open Positions" is allow-listed. Neither is drift, so the
+    # Trades is consumed; "Cash Report" is allow-listed. Neither is drift, so the
     # sweep returns nothing.
     model = parse_model(
         [
             header_row(SEC_TRADES, TRADES_COLUMNS),
-            header_row("Open Positions", ["A", "B"]),
+            header_row("Cash Report", ["A", "B"]),
         ]
     )
     assert detect_unrecognized_sections(model) == []
@@ -1938,9 +1948,9 @@ def test_report_negative_foreign_tax_lists_and_exits(caplog):
 # --- unrecognized-section coverage sweep: sync guards --------------------------------
 
 
-def test_consumed_sections_matches_the_six_extractor_constants():
+def test_consumed_sections_matches_the_seven_extractor_constants():
     # CONSUMED_SECTIONS is built from the per-extractor constants; pin the membership
-    # so a seventh extractor (or a dropped one) cannot silently desync the set.
+    # so an eighth extractor (or a dropped one) cannot silently desync the set.
     assert {
         SEC_TRADES,
         SEC_DIVIDENDS,
@@ -1948,6 +1958,7 @@ def test_consumed_sections_matches_the_six_extractor_constants():
         SEC_WITHHOLDING,
         SEC_TRANSFERS,
         SEC_SYEP,
+        SEC_OPEN_POSITIONS,
     } == CONSUMED_SECTIONS
 
 
@@ -2036,3 +2047,251 @@ def test_run_warns_on_uncountried_dividend_and_still_writes(
         and "no identifiable source country" in r.getMessage()
         for r in caplog.records
     )
+
+
+# --- transferred-lot basis resolution: detector --------------------------------------
+
+
+def test_detect_unresolved_transfer_basis_flags_only_in_year_unresolved_lines():
+    # The detector reads the year-scoped realized lines (ReportBuilder filters to its
+    # year), so it flags an in-year disposal of an unresolved transferred lot, ignores a
+    # resolved one, and never sees a disposal dated outside the year -- the relevance
+    # the deferred gate relies on.
+    rb = ReportBuilder(year=2024)
+    in_year_unresolved = realized_line(
+        symbol="AZN",
+        currency="GBP",
+        sell_date="2024-06-10",
+        legs=[
+            sell_match_leg(
+                qty="10",
+                alloc_cost_ccy="708.495",
+                transferred=True,
+                basis_unresolved=True,
+            )
+        ],
+    )
+    in_year_resolved = realized_line(
+        symbol="LLOY",
+        currency="GBP",
+        sell_date="2024-03-01",
+        legs=[sell_match_leg(qty="10", alloc_cost_ccy="100", transferred=True)],
+    )
+    out_of_year_unresolved = realized_line(
+        symbol="IAG",
+        currency="GBP",
+        sell_date="2023-06-10",
+        legs=[
+            sell_match_leg(
+                qty="10",
+                alloc_cost_ccy="500",
+                transferred=True,
+                basis_unresolved=True,
+            )
+        ],
+    )
+    rb.add_realized_lines(
+        [in_year_unresolved, in_year_resolved, out_of_year_unresolved]
+    )
+
+    assert detect_unresolved_transfer_basis(rb.realized_lines) == [in_year_unresolved]
+
+
+# --- transferred-lot basis resolution: reporters -------------------------------------
+
+
+def test_report_unresolved_transfer_basis_silent_when_empty(caplog):
+    logger = logging.getLogger("unresolved_basis_none")
+    with caplog.at_level(logging.ERROR):
+        report_unresolved_transfer_basis([], logger)
+    assert caplog.records == []
+
+
+def test_report_unresolved_transfer_basis_lists_and_exits(caplog):
+    # One ERROR per offending disposal (naming the symbol and the recourse), then a
+    # single exit 2 -- the fail-closed gate at the point of relevance.
+    logger = logging.getLogger("unresolved_basis_fatal")
+    line = realized_line(
+        symbol="AZN",
+        currency="GBP",
+        sell_date="2024-06-10",
+        legs=[
+            sell_match_leg(
+                qty="10",
+                alloc_cost_ccy="708.495",
+                transferred=True,
+                basis_unresolved=True,
+            )
+        ],
+    )
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        report_unresolved_transfer_basis([line], logger)
+
+    assert exc.value.code == 2
+    assert any("AZN" in r.getMessage() for r in caplog.records)
+
+
+def test_report_open_position_defects_warns_without_aborting(caplog):
+    # A malformed Open Positions row is enrichment, not a reported figure, so it WARNs
+    # and never raises -- the affected symbol degrades to the Market Value fallback.
+    logger = logging.getLogger("open_position_defects")
+    defect = ExtractionDefect("Open Positions", "AZN", None, "bad Cost Basis")
+    with caplog.at_level(logging.WARNING):
+        report_open_position_defects([defect], logger)
+    assert any(
+        r.levelno == logging.WARNING and "AZN" in r.getMessage() for r in caplog.records
+    )
+
+
+# --- transferred-lot basis resolution: run() integration -----------------------------
+
+
+def _numeric_cells(ws) -> list[Decimal]:
+    """Every numeric cell of a sheet as Decimals, for layout-independent checks."""
+    return [
+        Decimal(str(v))
+        for row in ws.iter_rows(values_only=True)
+        for v in row
+        if isinstance(v, (int, float, Decimal))
+    ]
+
+
+def _transfer_basis_rows(
+    *,
+    period,
+    transfer_date=None,
+    sale_datetime=None,
+    with_open_positions=False,
+    sale_realized="2000",
+):
+    # Transfer-IN XYZ (EUR) booked at Market Value 5000 (the transfer-day price, not the
+    # basis), whose true cost basis 4000 lives in Open Positions; a later sale fully
+    # consumes the lot. EUR converts by identity, so no FX table is needed. Dropping the
+    # Open Positions block leaves the lot unresolved, so FIFO falls back to the 5000
+    # Market Value and flags it. The three blocks are independently optional so a caller
+    # can place the transfer plus its period-end snapshot in one year and the sale in a
+    # later one: the only physically consistent shape when the snapshot must still show
+    # the lot intact (a same-year full sale leaves no year-end position to snapshot).
+    rows = list(_statement_meta_rows("U1", period))
+    if transfer_date is not None:
+        rows += [
+            _TRANSFERS_HEADER,
+            transfer_data(
+                asset_category="Stocks",
+                currency="EUR",
+                symbol="XYZ",
+                date=transfer_date,
+                direction="In",
+                quantity="100",
+                market_value="5000",
+            ),
+        ]
+    if with_open_positions:
+        rows += [
+            header_row("Open Positions", OPEN_POSITIONS_COLUMNS),
+            open_position_data(
+                currency="EUR", symbol="XYZ", quantity="100", cost_basis="4000"
+            ),
+        ]
+    if sale_datetime is not None:
+        rows += [
+            _TRADES_HEADER,
+            trade_data(
+                currency="EUR",
+                symbol="XYZ",
+                datetime_str=sale_datetime,
+                quantity="-100",
+                t_price="60",
+                proceeds="6000",
+                comm_fee="0",
+                code="C",
+                basis="-4000",
+                realized=sale_realized,
+            ),
+        ]
+    return rows
+
+
+def test_run_resolves_transfer_basis_from_open_positions_and_writes(
+    write_statement, out_path, caplog
+):
+    # End to end across two statements (the only physically consistent shape): the
+    # transfer-IN and its period-end Open Positions snapshot (true basis 4000) sit in
+    # 2023 with no same-year trading, so the basis resolves from there (not the 5000
+    # Market Value); the 2024 sale then consumes the lot. The 2024 trade does not
+    # disqualify the 2023 snapshot (the no-trading guard is keyed by period), so the run
+    # writes a workbook whose realized P/L (6000 - 4000 = 2000) reconciles with IBKR's,
+    # which the 5000 fallback (P/L 1000) would not.
+    transfer_stmt = write_statement(
+        _transfer_basis_rows(
+            period=Y2023,
+            transfer_date="2023-01-03",
+            with_open_positions=True,
+        ),
+        name="2023.csv",
+    )
+    sale_stmt = write_statement(
+        _transfer_basis_rows(
+            period=Y2024,
+            sale_datetime="2024-06-10, 10:00:00",
+        ),
+        name="2024.csv",
+    )
+
+    with caplog.at_level(logging.WARNING):
+        run(_args_multi([transfer_stmt, sale_stmt], out_path))
+
+    assert out_path.exists()
+    assert not any("disagree with IBKR" in r.getMessage() for r in caplog.records)
+    cells = _numeric_cells(load_workbook(out_path)["Realized Trades"])
+    assert Decimal("2000") in cells  # resolved P/L
+    assert Decimal("1000") not in cells  # the Market Value fallback's P/L never appears
+
+
+def test_run_aborts_when_transfer_basis_unresolved_for_in_year_sale(
+    write_statement, out_path, caplog
+):
+    # The same statement WITHOUT Open Positions: the transfer-IN lot's basis cannot be
+    # resolved, so it falls back to Market Value and is flagged. Its in-year sale feeds
+    # that unresolved basis into a reported figure, so the run fails closed (exit 2, no
+    # workbook).
+    stmt = write_statement(
+        _transfer_basis_rows(
+            period=Y2024,
+            transfer_date="2024-01-03",
+            sale_datetime="2024-06-10, 10:00:00",
+            with_open_positions=False,
+        )
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc:
+        run(_args(stmt, out_path))
+
+    assert exc.value.code == 2
+    assert not out_path.exists()
+    assert any(
+        "unresolved transferred-lot" in r.getMessage() and "XYZ" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_run_does_not_abort_when_unresolved_lot_sold_outside_year(
+    write_statement, out_path
+):
+    # An unresolved transfer-IN lot (no Open Positions) whose only disposal is in 2023,
+    # outside the 2024 report year. The 2023 sale is filtered from the year-scoped
+    # realized lines, so its unresolved basis never reaches a reported figure: the
+    # deferred gate fires only at the point of relevance, and the run does not abort.
+    stmt = write_statement(
+        _transfer_basis_rows(
+            period=Y2023,
+            transfer_date="2023-01-03",
+            sale_datetime="2023-06-10, 10:00:00",
+            with_open_positions=False,
+        )
+    )
+
+    run(
+        _args(stmt, out_path)
+    )  # _args fixes year=2024; the 2023 disposal is out of scope
+    assert out_path.exists()

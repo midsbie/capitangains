@@ -18,6 +18,11 @@ from capitangains.conv.ibkr import ELISION_PLACEHOLDERS, parse_date, to_dec_stri
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
+# Asset categories the position extractors treat as stock-like. Lives here, not in
+# either extractor, so the Transfers and Open Positions extractors share one definition
+# without importing each other.
+ASSET_STOCK_LIKE = {"Stocks", "Stock", "ETFs", "ETF", "ETCs", "ETP"}
+
 
 def _is_total_label(value: str) -> bool:
     """Return True if a Currency cell labels a 'Total' summary row."""

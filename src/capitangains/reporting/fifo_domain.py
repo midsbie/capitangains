@@ -33,6 +33,9 @@ class TransferProtocol(Protocol):
     currency: Currency
     direction: str
     market_value: Decimal
+    # Resolved Open Positions cost basis for an 'In' lot, or None when unresolved (FIFO
+    # then seeds from market_value and flags the lot). See reporting.transfer_basis.
+    cost_basis: Decimal | None
     code: str
 
 
@@ -43,6 +46,10 @@ class SellMatchLeg:
     alloc_cost_ccy: Decimal
     synthetic: bool = False
     transferred: bool = False
+    # True when this leg consumed a transferred lot whose basis could not be resolved
+    # from Open Positions (so it carries the Market Value fallback). Propagated from
+    # Lot.basis_unresolved by consume_fifo for the boundary's deferred year-scoped gate.
+    basis_unresolved: bool = False
 
 
 @dataclass
@@ -52,6 +59,10 @@ class Lot:
     basis_ccy: Decimal  # total basis in trade currency (incl. buy fees)
     currency: Currency
     transferred: bool = False  # True if lot originated from a transfer
+    # True if this is a transferred lot seeded from Market Value because no Open
+    # Positions cost basis resolved (see reporting.transfer_basis); basis_ccy is then
+    # provisional.
+    basis_unresolved: bool = False
 
 
 @dataclass

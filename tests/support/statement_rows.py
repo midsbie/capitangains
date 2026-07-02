@@ -42,6 +42,20 @@ TRANSFERS_COLUMNS = [
     "Market Value",
     "Code",
 ]
+OPEN_POSITIONS_COLUMNS = [
+    "DataDiscriminator",
+    "Asset Category",
+    "Currency",
+    "Symbol",
+    "Quantity",
+    "Mult",
+    "Cost Price",
+    "Cost Basis",
+    "Close Price",
+    "Value",
+    "Unrealized P/L",
+    "Code",
+]
 DIVIDENDS_COLUMNS = INTEREST_COLUMNS = ["Currency", "Date", "Description", "Amount"]
 WITHHOLDING_COLUMNS = ["Currency", "Date", "Description", "Amount", "Code"]
 
@@ -136,6 +150,44 @@ def transfer_data(
         direction,
         quantity,
         market_value,
+        code,
+    ]
+
+
+def open_position_data(
+    *,
+    discriminator: str = "Summary",
+    asset_category: str = "Stocks",
+    currency: str = "GBP",
+    symbol: str = "AZN",
+    quantity: str = "10",
+    mult: str = "1",
+    cost_price: str = "70.8495",
+    cost_basis: str = "708.495",
+    close_price: str = "86.78",
+    value: str = "867.8",
+    unrealized_pl: str = "159.305",
+    code: str = "",
+) -> list[str]:
+    """Build a full Open Positions ``Data`` row matching OPEN_POSITIONS_COLUMNS.
+
+    Defaults reproduce the real AZN 2021 snapshot (qty 10, Cost Basis 708.495), the
+    transfer-basis story this feature reconciles.
+    """
+    return [
+        "Open Positions",
+        "Data",
+        discriminator,
+        asset_category,
+        currency,
+        symbol,
+        quantity,
+        mult,
+        cost_price,
+        cost_basis,
+        close_price,
+        value,
+        unrealized_pl,
         code,
     ]
 

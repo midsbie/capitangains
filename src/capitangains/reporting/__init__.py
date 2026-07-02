@@ -1,12 +1,14 @@
 from .event_stream import EventStream
 from .extract import (
     ExtractionDefect,
+    OpenPositionRow,
     StatementMetadata,
     StatementPeriod,
     TradeRow,
     TransferRow,
     parse_dividends,
     parse_interest,
+    parse_open_positions,
     parse_statement_metadata,
     parse_syep_interest_details,
     parse_trades_stocklike,
@@ -24,6 +26,11 @@ from .reconcile import (
 from .report_builder import ReportBuilder
 from .report_sink import ExcelReportSink
 from .source import IbkrActivityStatementSource, ParsedStatement
+from .transfer_basis import (
+    TransferBasisIndex,
+    build_transfer_basis_index,
+    resolve_transfer_basis,
+)
 from .validation import (
     OrderingCollision,
     StatementInput,
@@ -37,6 +44,7 @@ from .validation import (
     detect_timestamp_tie_collisions,
     detect_unattributed_income,
     detect_unrecognized_sections,
+    detect_unresolved_transfer_basis,
     parse_acknowledged_gaps,
     partition_statements_by_metadata,
 )
@@ -46,6 +54,7 @@ __all__ = [
     "ExtractionDefect",
     "TradeRow",
     "TransferRow",
+    "OpenPositionRow",
     "StatementPeriod",
     "StatementMetadata",
     "parse_trades_stocklike",
@@ -54,7 +63,11 @@ __all__ = [
     "parse_syep_interest_details",
     "parse_interest",
     "parse_transfers",
+    "parse_open_positions",
     "parse_statement_metadata",
+    "TransferBasisIndex",
+    "build_transfer_basis_index",
+    "resolve_transfer_basis",
     "FifoMatcher",
     "RealizedLine",
     "Lot",
@@ -79,6 +92,7 @@ __all__ = [
     "detect_orphaned_foreign_tax",
     "detect_negative_foreign_tax",
     "detect_unrecognized_sections",
+    "detect_unresolved_transfer_basis",
     "parse_acknowledged_gaps",
     "partition_statements_by_metadata",
 ]

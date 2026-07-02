@@ -10,13 +10,22 @@ a merged statement into: consumed by an extractor, intentionally ignored
 # Sections each extractor consumes (the exact literal each passes to the model).
 SEC_DIVIDENDS = "Dividends"
 SEC_INTEREST = "Interest"
+SEC_OPEN_POSITIONS = "Open Positions"
 SEC_SYEP = "Stock Yield Enhancement Program Securities Lent Interest Details"
 SEC_TRADES = "Trades"
 SEC_TRANSFERS = "Transfers"
 SEC_WITHHOLDING = "Withholding Tax"
 
 CONSUMED_SECTIONS: frozenset[str] = frozenset(
-    {SEC_TRADES, SEC_DIVIDENDS, SEC_INTEREST, SEC_WITHHOLDING, SEC_TRANSFERS, SEC_SYEP}
+    {
+        SEC_TRADES,
+        SEC_DIVIDENDS,
+        SEC_INTEREST,
+        SEC_WITHHOLDING,
+        SEC_TRANSFERS,
+        SEC_SYEP,
+        SEC_OPEN_POSITIONS,
+    }
 )
 
 # Sections present in IBKR statements that this tool knowingly does not row-extract. Per
@@ -41,7 +50,6 @@ IGNORED_SECTIONS: frozenset[str] = frozenset(
         "Net Asset Value",
         "Net Stock Position Summary",
         "Notes/Legal Notes",
-        "Open Positions",
         "Realized & Unrealized Performance Summary",
         "Statement",
         "Stock Yield Enhancement Program Securities Lent Activity",

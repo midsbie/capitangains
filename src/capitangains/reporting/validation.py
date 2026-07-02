@@ -8,8 +8,10 @@ without capturing logs or trapping SystemExit.
 
 Several scopes live here, all pure detection: invariants over extracted trade/transfer
 rows (symbol-currency uniqueness, same-day event ordering), the identity and coherence
-of a statement input set, and the built Anexo J Quadro 8A income lines (source-country
-attribution). Each file's account/period identity is validated unconditionally as a
+of a statement input set, the built Anexo J Quadro 8A income lines (source-country
+attribution), and the year-scoped realized lines (a reported disposal resting on an
+unresolved transferred-lot basis). Each file's account/period identity is validated
+unconditionally as a
 fail-closed precondition before its contents are trusted, then the cross-file coherence
 of the set (single account, non-overlapping periods) is enforced.
 
@@ -34,7 +36,7 @@ from capitangains.model import IbkrModel
 
 from .extract import StatementMetadata, TradeRow, TransferRow, parse_statement_metadata
 from .extract.sections import CONSUMED_SECTIONS, IGNORED_SECTIONS
-from .fifo_domain import GapKey
+from .fifo_domain import GapKey, RealizedLine
 from .quadro_8a import Quadro8ALine
 
 
@@ -211,6 +213,32 @@ def detect_timestamp_tie_collisions(
         )
 
     return sorted(collisions)
+
+
+def detect_unresolved_transfer_basis(
+    realized_lines: Sequence[RealizedLine],
+) -> list[RealizedLine]:
+    """Realized lines disposing of a transferred lot whose basis never resolved.
+
+    A transferred-in lot seeds its basis from the Open Positions 'Cost Basis' snapshot;
+    when none matches (by period and quantity) FIFO falls back to the transfer-day
+    Market Value and flags the lot basis_unresolved, which consume_fifo carries onto
+    each consuming leg. That fallback is the transfer-day price, not what was paid, so a
+    disposal it feeds would file a wrong cost basis.
+
+    The basis matters only where it reaches a reported figure, which is a sell consuming
+    the lot. Passing only the year-scoped realized lines (ReportBuilder.realized_lines,
+    already filtered to --year) makes this relevant by construction: a lot held open, or
+    sold only outside the reported year, never appears, so it cannot trigger a false
+    abort. Returns each offending line (any leg flagged) in input order; empty means
+    every in-scope disposal rests on a resolved basis. The boundary fails closed on a
+    non-empty result (see diagnostics.report_unresolved_transfer_basis).
+    """
+    return [
+        line
+        for line in realized_lines
+        if any(leg.basis_unresolved for leg in line.legs)
+    ]
 
 
 @dataclass(frozen=True, order=True)

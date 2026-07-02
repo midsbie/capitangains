@@ -57,8 +57,9 @@ class FifoMatcher:
         Assumes:
         - transfer.direction is 'In' or 'Out' (case-insensitive).
         - transfer.quantity is strictly positive.
-        - For 'In', transfer.market_value encodes the lot's cost basis in trade
-          currency (used as a proxy for original basis).
+        - For 'In', the lot's basis is transfer.cost_basis (the Open Positions cost
+          resolved by reporting.transfer_basis); when that is None it falls back to
+          transfer.market_value and the lot is flagged basis_unresolved.
 
         Callers must interleave transfers with trades in chronological order
         to maintain correct FIFO semantics.
@@ -68,16 +69,22 @@ class FifoMatcher:
 
         direction = transfer.direction.strip().lower()
         if direction == "in":
-            # Seed a lot at market_value as its cost basis; the original basis is not
-            # reliably carried in the CSV (see the transfers extractor).
-            basis = transfer.market_value
+            # Seed a lot from the resolved Open Positions cost basis; only when that is
+            # absent fall back to Market Value (the transfer-day price, not basis) and
+            # flag the lot so a year-scoped disposal of it fails closed at the boundary.
+            basis = (
+                transfer.cost_basis
+                if transfer.cost_basis is not None
+                else transfer.market_value
+            )
             logger.debug(
-                "Processing transfer IN: %s %s @ %s (basis: %s %s)",
+                "Processing transfer IN: %s %s @ %s (basis: %s %s, unresolved: %s)",
                 transfer.quantity,
                 transfer.symbol,
                 transfer.date,
-                transfer.market_value,
+                basis,
                 transfer.currency,
+                transfer.cost_basis is None,
             )
             lot = Lot(
                 buy_date=transfer.date,
@@ -85,6 +92,7 @@ class FifoMatcher:
                 basis_ccy=basis,
                 currency=transfer.currency,
                 transferred=True,
+                basis_unresolved=transfer.cost_basis is None,
             )
             self.positions.append_buy(transfer.symbol, lot)
         elif direction == "out":

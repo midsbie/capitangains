@@ -48,4 +48,5 @@ class Transfer:
     currency: Currency
     direction: str
     market_value: Decimal
+    cost_basis: Decimal | None = None
     code: str = ""

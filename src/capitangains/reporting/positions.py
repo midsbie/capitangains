@@ -42,6 +42,7 @@ class PositionBook:
                 qty=take,
                 alloc_cost_ccy=cost_piece,
                 transferred=lot.transferred,
+                basis_unresolved=lot.basis_unresolved,
             )
             legs.append(leg)
             alloc_cost_ccy += cost_piece

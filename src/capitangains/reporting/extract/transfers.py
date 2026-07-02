@@ -13,6 +13,7 @@ from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
 from ._common import (
+    ASSET_STOCK_LIKE,
     ExtractionDefect,
     _require_date,
     _require_decimal,
@@ -22,8 +23,6 @@ from ._common import (
 from .sections import SEC_TRANSFERS
 
 logger = logging.getLogger(__name__)
-
-ASSET_STOCK_LIKE = {"Stocks", "Stock", "ETFs", "ETF", "ETCs", "ETP"}
 
 
 @dataclass
@@ -35,8 +34,16 @@ class TransferRow:
     date: dt.date
     direction: str  # "In" or "Out"
     quantity: Decimal
-    market_value: Decimal  # Cost basis for incoming transfers
+    # Market value at transfer date; the fallback basis used only when the Open
+    # Positions cost basis cannot be resolved for this lot (see
+    # reporting.transfer_basis).
+    market_value: Decimal
     code: str
+    # The lot's true cost basis, resolved from the Open Positions section after parsing
+    # (reporting.transfer_basis.resolve_transfer_basis fills it in place). None until
+    # resolved, and None when no matching Open Positions snapshot exists, in which case
+    # FIFO seeds the lot from market_value and flags it unresolved.
+    cost_basis: Decimal | None = None
 
 
 def parse_transfers(
@@ -53,8 +60,10 @@ def parse_transfers(
       missing or placeholder basis is treated as an error.
     - Transfers feed FIFO interleaved with trades by date (not strictly before them):
       an 'In' seeds a lot and an 'Out' consumes lots.
-    - Until Open Positions support is implemented, Market Value at transfer date is used
-      as a proxy for cost basis, which may differ from IBKR's internal basis.
+    - Market Value at transfer date is read here as a fallback only; an 'In' lot's true
+      basis is resolved from the Open Positions section after parsing (see
+      reporting.transfer_basis), with Market Value used solely when that resolution
+      finds no matching snapshot.
     """
     out: list[TransferRow] = []
     defects: list[ExtractionDefect] = []
@@ -88,10 +97,10 @@ def parse_transfers(
             if not qty_s and "Quantity" in r:
                 qty_s = r.get("Quantity", "").strip()
 
-            # Incoming transfers need an opening cost basis. The original basis legally
-            # persists across an internal transfer, but IBKR does not reliably carry it,
-            # so use the populated "Market Value" at transfer time as a proxy and fall
-            # back to "Cost Basis" when a CSV variant exposes that column instead.
+            # Incoming transfers carry a Market Value at transfer time, read here as the
+            # fallback basis; the true basis is resolved later from Open Positions (see
+            # reporting.transfer_basis). Fall back to "Cost Basis" when a CSV variant
+            # exposes that column instead of "Market Value".
             val_s = r.get("Market Value", "").strip()
             if not val_s and "Cost Basis" in r:
                 val_s = r.get("Cost Basis", "").strip()

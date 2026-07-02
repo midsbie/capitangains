@@ -118,6 +118,7 @@ def _transfer(
     direction: str,
     market_value: str,
     currency: Currency = _USD,
+    cost_basis: str | None = None,
 ) -> Transfer:
     return Transfer(
         date=date,
@@ -126,6 +127,7 @@ def _transfer(
         currency=currency,
         direction=direction,
         market_value=Decimal(market_value),
+        cost_basis=None if cost_basis is None else Decimal(cost_basis),
     )
 
 
@@ -207,6 +209,53 @@ def test_transfer_in_before_sell_funds_sell():
     assert len(line.legs) == 1
     assert line.legs[0].transferred is True
     assert line.legs[0].alloc_cost_ccy == Decimal("500")  # 50/100 * 1000
+
+
+def test_transfer_in_seeds_lot_from_resolved_cost_basis():
+    """A resolved cost_basis seeds the lot, not the Market Value, and is not flagged."""
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
+
+    # Market Value 1000 (transfer-day price) is overridden by the resolved basis 700.
+    matcher.ingest_transfer(
+        _transfer("XYZ", dt.date(2024, 1, 1), "100", "In", "1000", cost_basis="700")
+    )
+    line = matcher.ingest_trade(
+        Trade(
+            date=dt.date(2024, 2, 1),
+            symbol="XYZ",
+            quantity=Decimal("-100"),
+            currency=_USD,
+            proceeds=Decimal("900"),
+            comm_fee=Decimal("0"),
+        )
+    )
+
+    assert line is not None and line.has_gap is False
+    assert line.legs[0].alloc_cost_ccy == Decimal("700")  # resolved basis, not 1000
+    assert line.legs[0].basis_unresolved is False
+
+
+def test_transfer_in_falls_back_to_market_value_and_flags_unresolved():
+    """An unresolved transfer (cost_basis=None) seeds from Market Value, flagged."""
+    matcher = FifoMatcher(gap_policy=UnacknowledgedGapPolicy())
+
+    matcher.ingest_transfer(
+        _transfer("XYZ", dt.date(2024, 1, 1), "100", "In", "1000", cost_basis=None)
+    )
+    line = matcher.ingest_trade(
+        Trade(
+            date=dt.date(2024, 2, 1),
+            symbol="XYZ",
+            quantity=Decimal("-100"),
+            currency=_USD,
+            proceeds=Decimal("900"),
+            comm_fee=Decimal("0"),
+        )
+    )
+
+    assert line is not None and line.has_gap is False
+    assert line.legs[0].alloc_cost_ccy == Decimal("1000")  # Market Value fallback
+    assert line.legs[0].basis_unresolved is True
 
 
 def test_transfer_in_after_sell_does_not_fund_earlier_sell():

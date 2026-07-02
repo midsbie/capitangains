@@ -26,6 +26,7 @@ from .reporting import (
     ExtractionDefect,
     OrderingCollision,
     Quadro8ALine,
+    RealizedLine,
     ReconciliationReport,
     SymbolReconciliation,
     TimestampTieCollision,
@@ -169,6 +170,38 @@ def report_transfer_shortfalls(
     )
 
 
+def report_open_position_defects(
+    defects: Sequence[ExtractionDefect], logger: logging.Logger
+) -> None:
+    """Warn (do NOT abort) on malformed Open Positions rows.
+
+    Open Positions is enrichment, not a reported section: it supplies a transferred
+    lot's true cost basis. A malformed or absent snapshot degrades that one symbol to
+    the Market Value fallback, and the consequence is caught downstream only if the lot
+    feeds a target-year disposal (report_unresolved_transfer_basis). So unlike the
+    row-level report_extraction_defects, a defect here must not abort eagerly: it would
+    refuse runs whose unresolved lots never reach a reported figure. One WARNING per
+    defect plus a summary; empty == silent.
+    """
+    if not defects:
+        return
+
+    for d in defects:
+        logger.warning(
+            "Open Positions row ignored (symbol=%s): %s; the affected symbol falls "
+            "back to the transfer Market Value for basis.",
+            d.symbol or "n/a",
+            d.reason,
+        )
+
+    logger.warning(
+        "%d Open Positions row(s) ignored; not fatal, but a transferred lot of an "
+        "affected symbol will use the Market Value proxy unless its basis resolves "
+        "from another statement.",
+        len(defects),
+    )
+
+
 def report_extraction_defects(
     defects: Sequence[ExtractionDefect], logger: logging.Logger
 ) -> None:
@@ -195,6 +228,45 @@ def report_extraction_defects(
         "Extraction rejected %d row(s); no workbook written. Correct the offending "
         "row(s) above and rerun.",
         len(defects),
+    )
+    raise SystemExit(EXIT_DATA_QUALITY)
+
+
+def report_unresolved_transfer_basis(
+    lines: Sequence[RealizedLine], logger: logging.Logger
+) -> None:
+    """Abort if a target-year disposal rests on an unresolved transferred-lot basis.
+
+    The detector (reporting.validation.detect_unresolved_transfer_basis) owns the scope:
+    these are year-scoped realized lines that consumed a transferred lot whose basis
+    never resolved from Open Positions, so it carries the transfer-day Market Value,
+    which is not its cost basis. The deferral is deliberate: an unresolved lot held open
+    or sold outside --year never reaches here, so the run aborts only at the point of
+    relevance, a reported figure that would be wrong. Like the other fail-closed gates:
+    one ERROR per line, a summary, then a single SystemExit(EXIT_DATA_QUALITY); no
+    workbook written. An empty sequence is silent.
+    """
+    if not lines:
+        return
+
+    for line in lines:
+        logger.error(
+            "Disposal of %s (%s) on %s rests on an unresolved transferred-lot basis "
+            "(Market Value at transfer, not cost). Supply the statement whose Open "
+            "Positions covers the transfer date, or hand-resolve a blended or "
+            "partially-sold lot whose snapshot quantity no longer matches it.",
+            line.symbol,
+            line.currency,
+            line.sell_date,
+        )
+
+    logger.error(
+        "%d in-scope disposal(s) rest on an unresolved transferred-lot cost basis; no "
+        "workbook written. Each consumed a transfer-seeded lot whose true basis could "
+        "not be read from any statement's Open Positions, so its filed gain would be "
+        "wrong. Add the covering statement(s) and rerun, or resolve the affected "
+        "lot(s) by hand.",
+        len(lines),
     )
     raise SystemExit(EXIT_DATA_QUALITY)
 

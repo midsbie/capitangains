@@ -115,6 +115,10 @@ class StatementPeriod:
         """True when the two closed intervals share at least one calendar day."""
         return self.start <= other.end and other.start <= self.end
 
+    def contains(self, day: dt.date) -> bool:
+        """True when day falls within this closed [start, end] interval."""
+        return self.start <= day <= self.end
+
 
 @dataclass(frozen=True)
 class StatementMetadata:

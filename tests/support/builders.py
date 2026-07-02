@@ -157,9 +157,11 @@ def transfer_row(
     direction: str = "In",
     quantity: Decimal | str = "100",
     market_value: Decimal | str = "10000",
+    cost_basis: Decimal | str | None = None,
     code: str = "",
 ) -> TransferRow:
-    """Build a full TransferRow."""
+    """Build a full TransferRow. ``cost_basis`` defaults to None (unresolved): FIFO then
+    seeds from ``market_value`` and flags the lot, mirroring an unindexed transfer."""
     return TransferRow(
         section="Transfers",
         asset_category=asset_category,
@@ -170,6 +172,7 @@ def transfer_row(
         quantity=_dec(quantity),
         market_value=_dec(market_value),
         code=code,
+        cost_basis=_opt_dec(cost_basis),
     )
 
 
@@ -180,6 +183,7 @@ def sell_match_leg(
     alloc_cost_ccy: Decimal | str = "0",
     synthetic: bool = False,
     transferred: bool = False,
+    basis_unresolved: bool = False,
 ) -> SellMatchLeg:
     """Build a SellMatchLeg, centralizing the leg literal repeated across the suite."""
     return SellMatchLeg(
@@ -188,6 +192,7 @@ def sell_match_leg(
         alloc_cost_ccy=_dec(alloc_cost_ccy),
         synthetic=synthetic,
         transferred=transferred,
+        basis_unresolved=basis_unresolved,
     )
 
 
@@ -199,6 +204,7 @@ def _leg_from_spec(spec: Mapping[str, Any]) -> SellMatchLeg:
         alloc_cost_ccy=spec["alloc_cost_ccy"],
         synthetic=spec.get("synthetic", False),
         transferred=spec.get("transferred", False),
+        basis_unresolved=spec.get("basis_unresolved", False),
     )
 
 

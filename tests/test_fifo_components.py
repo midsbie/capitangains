@@ -40,6 +40,32 @@ def test_position_book_fifo_consumption_and_residual_tracking():
     assert remaining2 == Decimal("20")
 
 
+def test_position_book_consume_fifo_propagates_basis_unresolved_to_legs():
+    # consume_fifo copies each lot's basis_unresolved onto its leg, exactly like
+    # transferred, so the boundary's year-scoped gate can see an unresolved disposal.
+    book = PositionBook()
+    book.append_buy(
+        "ABC",
+        Lot(
+            dt.date(2024, 1, 1),
+            Decimal("10"),
+            Decimal("100"),
+            Currency("USD"),
+            transferred=True,
+            basis_unresolved=True,
+        ),
+    )
+    book.append_buy(
+        "ABC",
+        Lot(dt.date(2024, 2, 1), Decimal("10"), Decimal("120"), Currency("USD")),
+    )
+
+    legs, _, remaining = book.consume_fifo("ABC", Currency("USD"), Decimal("20"))
+
+    assert remaining == Decimal("0")
+    assert [leg.basis_unresolved for leg in legs] == [True, False]
+
+
 def test_position_book_validations():
     book = PositionBook()
     with pytest.raises(ValueError):

@@ -123,14 +123,18 @@ def test_dropped_buy_commission_is_mismatch_proving_non_tautology():
 
 
 def test_transfer_in_basis_divergence_is_flagged():
-    """A transfer-in seeded from market_value MISMATCHes when that proxy is wrong.
+    """The Market Value fallback path MISMATCHes when Open Positions did not resolve.
 
-    `ingest_transfer` uses market_value as the cost-basis proxy (fifo.py:84). When
-    it differs from the true basis, our realized P/L is off by the gap; setting IBKR's
-    realized to the true-basis value documents and guards that approximation risk.
+    A transfer whose cost_basis never resolved (cost_basis=None) seeds the lot from
+    market_value and flags it basis_unresolved. That fallback is the transfer-day price,
+    not the true basis, so our realized P/L is off by the gap; setting IBKR's realized
+    to the true-basis value documents and guards that fallback risk. This stays a
+    unit-level check: it bypasses the pipeline's year-scoped detector, which would
+    otherwise abort on exactly this unresolved-lot disposal.
     """
     m = make_matcher()
-    # Proxy basis 5000 vs a true basis of 4000 -> IBKR realized 2000 vs our 1000.
+    # Fallback basis 5000 (market_value) vs a true basis of 4000 -> IBKR realized 2000
+    # vs our 1000. cost_basis is left None, so FIFO falls back and flags the lot.
     m.ingest_transfer(
         transfer_row(
             symbol="XFER",
@@ -144,13 +148,14 @@ def test_transfer_in_basis_divergence_is_flagged():
     )
     [rl] = ingest(m, [closing])
     assert rl.has_gap is False  # the transfer lot fully covers the sale
+    assert rl.legs[0].basis_unresolved is True  # seeded from the Market Value fallback
 
     report = reconcile_realized_against_ibkr([closing], [rl], 2024)
 
     assert report.synthetic == []  # a transfer lot is not a synthesized gap
     [r] = report.reconciled
     assert not r.is_match
-    assert r.computed == Decimal("1000.00")  # 6000 - 5000 (market_value proxy)
+    assert r.computed == Decimal("1000.00")  # 6000 - 5000 (market_value fallback)
     assert r.ibkr == Decimal("2000.00")
     assert r.diff == Decimal("1000.00")
 
