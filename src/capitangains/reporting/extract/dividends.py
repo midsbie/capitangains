@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DividendRow(CashFlowRow):
-    """A dividend cash flow, reported under the 'dividend row' label."""
+    """A dividend cash flow."""
 
     _label: ClassVar[str] = "dividend row"
 

@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class InterestRow(CashFlowRow):
-    """An account-interest cash flow, reported under the 'interest row' label."""
+    """An account-interest cash flow."""
 
     _label: ClassVar[str] = "interest row"
 
@@ -26,10 +26,6 @@ def parse_interest(
 ) -> tuple[list[InterestRow], list[ExtractionDefect]]:
     """Parse 'Interest' section: credit/debit interest and monthly SYEP interest
     summaries.
-
-    Header: Currency, Date, Description, Amount
-
-    Excludes CSV total rows (e.g., 'Total', 'Total in EUR').
     """
     out, defects = _extract_cashflow_section(
         model,

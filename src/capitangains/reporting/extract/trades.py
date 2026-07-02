@@ -148,7 +148,6 @@ def parse_trades_stocklike(
     model: IbkrModel, asset_scope: AssetScope = "stocks"
 ) -> tuple[list[TradeRow], list[ExtractionDefect]]:
     """Extract stock-like trades from 'Trades' section across header variants.
-    asset_scope: 'stocks', 'etfs', 'stocks_etfs', 'all'
 
     Returns the extracted rows and a list of row-level defects (empty on clean input);
     the caller halts at the boundary if any defect is present.

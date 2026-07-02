@@ -4,8 +4,8 @@ A Transfers row carries only the transfer-day Market Value, not what was paid; t
 cost basis lives in the Open Positions 'Cost Basis' column of the statement covering the
 transfer. This builds a per-statement index of those snapshots (before merge_models
 drops the per-file provenance each snapshot's period depends on), resolves each transfer
-against it by period-containment and quantity, then writes the resolved basis onto the
-TransferRow in place for FIFO seeding.
+against it by period, quantity, and same-period trading activity, then writes the
+resolved basis onto the TransferRow in place for FIFO seeding.
 """
 
 from __future__ import annotations
@@ -67,15 +67,9 @@ class TransferBasisIndex:
         self._periods.add(period)
 
     def mark_trade_activity(self, trades: Iterable[TradeRow]) -> None:
-        """Record every (symbol, currency, period) a trade falls in.
-
-        resolve refuses any snapshot whose period saw same-symbol trading: such a
-        snapshot may be blended off the transferred lot's own basis even when its
-        quantity still matches (a buy and an offsetting sale net the quantity back). The
-        transfer then falls through to the unresolved (Market Value + flag) path instead
-        of seeding FIFO from a blended basis that would silently pass the year-scoped
-        gate. Each trade is mapped to the period containing its date; periods are
-        disjoint, so a date lands in at most one.
+        """Record every (symbol, currency, period) a trade falls in, so resolve can
+        refuse a snapshot whose period saw same-symbol trading (the no-trading guard in
+        the class docstring). Periods are disjoint, so a date lands in at most one.
         """
         for t in trades:
             for period in self._periods:
@@ -130,8 +124,7 @@ def resolve_transfer_basis(
     """Write each transfer's resolved Open Positions cost basis onto it in place.
 
     Mutates TransferRow.cost_basis (None when unresolved), mirroring the FX pass that
-    fills DividendRow.amount_eur in place rather than rebuilding the rows. FIFO then
-    seeds a resolved lot from this basis and an unresolved one from Market Value.
+    fills DividendRow.amount_eur in place rather than rebuilding the rows.
     """
     for t in transfers:
         t.cost_basis = index.resolve(t)

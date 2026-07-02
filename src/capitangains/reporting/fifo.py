@@ -69,9 +69,6 @@ class FifoMatcher:
 
         direction = transfer.direction.strip().lower()
         if direction == "in":
-            # Seed a lot from the resolved Open Positions cost basis; only when that is
-            # absent fall back to Market Value (the transfer-day price, not basis) and
-            # flag the lot so a year-scoped disposal of it fails closed at the boundary.
             basis = (
                 transfer.cost_basis
                 if transfer.cost_basis is not None

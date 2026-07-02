@@ -39,10 +39,9 @@ class TransferRow:
     # reporting.transfer_basis).
     market_value: Decimal
     code: str
-    # The lot's true cost basis, resolved from the Open Positions section after parsing
-    # (reporting.transfer_basis.resolve_transfer_basis fills it in place). None until
-    # resolved, and None when no matching Open Positions snapshot exists, in which case
-    # FIFO seeds the lot from market_value and flags it unresolved.
+    # The lot's true cost basis, filled in place from the Open Positions section after
+    # parsing (see reporting.transfer_basis). None until resolved, and None when no
+    # snapshot matches.
     cost_basis: Decimal | None = None
 
 
@@ -60,10 +59,8 @@ def parse_transfers(
       missing or placeholder basis is treated as an error.
     - Transfers feed FIFO interleaved with trades by date (not strictly before them):
       an 'In' seeds a lot and an 'Out' consumes lots.
-    - Market Value at transfer date is read here as a fallback only; an 'In' lot's true
-      basis is resolved from the Open Positions section after parsing (see
-      reporting.transfer_basis), with Market Value used solely when that resolution
-      finds no matching snapshot.
+    - Market Value at transfer date is a fallback basis only; an 'In' lot's true basis
+      is resolved later from Open Positions (see reporting.transfer_basis).
     """
     out: list[TransferRow] = []
     defects: list[ExtractionDefect] = []
@@ -83,7 +80,6 @@ def parse_transfers(
                 "as basis"
             )
 
-        # We only care about stock-like transfers
         for r in rows:
             asset_cat = r.get("Asset Category", "").strip()
             if asset_cat not in ASSET_STOCK_LIKE:
@@ -97,10 +93,9 @@ def parse_transfers(
             if not qty_s and "Quantity" in r:
                 qty_s = r.get("Quantity", "").strip()
 
-            # Incoming transfers carry a Market Value at transfer time, read here as the
-            # fallback basis; the true basis is resolved later from Open Positions (see
-            # reporting.transfer_basis). Fall back to "Cost Basis" when a CSV variant
-            # exposes that column instead of "Market Value".
+            # Read Market Value (the fallback basis; the true basis is resolved later
+            # from Open Positions). Fall back to a "Cost Basis" column when a CSV
+            # variant exposes that instead of "Market Value".
             val_s = r.get("Market Value", "").strip()
             if not val_s and "Cost Basis" in r:
                 val_s = r.get("Cost Basis", "").strip()
@@ -131,8 +126,6 @@ def parse_transfers(
                         f"{date_s!r}: {quantity}"
                     )
 
-                # For incoming transfers, a valid basis is mandatory; treat missing/
-                # placeholder Market Value / Cost Basis as a hard error.
                 if direction_norm == "in":
                     if not val_s:
                         raise DataQualityError(

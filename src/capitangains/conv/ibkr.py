@@ -103,7 +103,6 @@ def has_intraday_time(d: str) -> bool:
     no order. The ordering-collision gate counts a row this returns False for as
     untimed, so a missing or malformed time fails closed (the run aborts) rather than
     sorting on an empty time and fabricating a FIFO order the data does not determine.
-
     """
     _, time_part = _split_datetime(d)
     try:

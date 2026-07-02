@@ -219,10 +219,8 @@ def _extract_cashflow_section(
         desc = r.get("Description", "").strip()
         amount_s = r.get("Amount", "").strip()
 
-        # A non-data trailer is the only date-less row IBKR emits: a Total/subtotal
-        # labelled in the Currency cell, or the fully blank separator between subtables.
-        # A date-less row carrying any other content (an amount that lost its Date and
-        # Currency) is not a trailer; it falls through to the field gate as a defect.
+        # Trailer: a labelled Total in the Currency cell, or the fully blank separator
+        # row between subtables.
         is_trailer = _is_total_label(cur) or not (cur or desc or amount_s)
         if not date_s and is_trailer:
             skipped_totals += 1

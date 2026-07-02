@@ -249,9 +249,9 @@ def main() -> None:
     args = parser.parse_args()
 
     verbosity_map = {
-        0: logging.WARNING,  # Default: quiet
-        1: logging.INFO,  # -v: informational
-        2: logging.DEBUG,  # -vv and above: debug
+        0: logging.WARNING,
+        1: logging.INFO,
+        2: logging.DEBUG,
     }
     level = verbosity_map.get(min(args.verbose, 2), logging.WARNING)
     configure_logging(level=level)

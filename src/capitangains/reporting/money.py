@@ -14,7 +14,6 @@ _ROUNDING = ROUND_HALF_UP
 
 
 def quantize_money(value: Decimal, places: MoneyLike = _MONEY_Q) -> Decimal:
-    """Quantize monetary values consistently across the codebase."""
     quant = Decimal(places)
     return value.quantize(quant, rounding=_ROUNDING)
 

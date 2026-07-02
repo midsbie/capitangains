@@ -2,8 +2,7 @@
 
 The Open Positions 'Cost Basis' column is what IBKR actually paid for a held lot, unlike
 the Transfers 'Market Value' (the transfer-day price). It is the authoritative basis for
-a transferred-in lot; reporting.transfer_basis matches a transfer to its snapshot here
-by period and quantity, then seeds FIFO from this cost.
+a transferred-in lot; reporting.transfer_basis matches a transfer to its snapshot here.
 """
 
 from __future__ import annotations
@@ -47,13 +46,10 @@ def parse_open_positions(
 ) -> tuple[list[OpenPositionRow], list[ExtractionDefect]]:
     """Extract stock-like position snapshots from the IBKR 'Open Positions' section.
 
-    Keeps only per-symbol Summary rows (see _SUMMARY_DISCRIMINATOR) of a stock-like
-    asset category; per-lot rows and other categories are skipped, not rejected. Symbol,
-    Currency, Quantity and Cost Basis are all required and parsed strictly, since a
-    snapshot exists to supply a transferred lot's basis and a blank or malformed cell
-    there cannot. Collects per-row defects rather than raising, mirroring the other
-    extractors; the boundary decides their disposition (here, a WARN: the symbol simply
-    degrades to the Market Value fallback, see
+    Keeps only per-symbol Summary rows of a stock-like category; other rows are skipped,
+    not rejected. All four fields are required and parsed strictly: a snapshot with a
+    blank or malformed cell cannot supply the basis it exists for. Collects per-row
+    defects rather than raising; the boundary only WARNs on them (see
     diagnostics.report_open_position_defects).
     """
     out: list[OpenPositionRow] = []

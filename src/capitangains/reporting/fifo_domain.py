@@ -46,9 +46,8 @@ class SellMatchLeg:
     alloc_cost_ccy: Decimal
     synthetic: bool = False
     transferred: bool = False
-    # True when this leg consumed a transferred lot whose basis could not be resolved
-    # from Open Positions (so it carries the Market Value fallback). Propagated from
-    # Lot.basis_unresolved by consume_fifo for the boundary's deferred year-scoped gate.
+    # Propagated from Lot.basis_unresolved by consume_fifo (this leg consumed a
+    # transferred lot on the Market Value fallback); read by the year-scoped gate.
     basis_unresolved: bool = False
 
 
@@ -59,9 +58,8 @@ class Lot:
     basis_ccy: Decimal  # total basis in trade currency (incl. buy fees)
     currency: Currency
     transferred: bool = False  # True if lot originated from a transfer
-    # True if this is a transferred lot seeded from Market Value because no Open
-    # Positions cost basis resolved (see reporting.transfer_basis); basis_ccy is then
-    # provisional.
+    # Transferred lot seeded from the Market Value fallback because no Open Positions
+    # basis resolved (see reporting.transfer_basis); basis_ccy is then provisional.
     basis_unresolved: bool = False
 
 

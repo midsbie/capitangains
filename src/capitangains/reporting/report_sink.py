@@ -248,7 +248,6 @@ class _SheetSpec(Generic[_RowT]):
     "syep"). skip_if_empty is evaluated on the prepared rows; this equals a
     source-collection check only because every provider is a 1:1 sort/passthrough; a
     future filtering provider would need a source-level predicate instead.
-
     """
 
     sheet_key: str

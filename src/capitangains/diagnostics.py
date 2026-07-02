@@ -175,13 +175,11 @@ def report_open_position_defects(
 ) -> None:
     """Warn (do NOT abort) on malformed Open Positions rows.
 
-    Open Positions is enrichment, not a reported section: it supplies a transferred
-    lot's true cost basis. A malformed or absent snapshot degrades that one symbol to
-    the Market Value fallback, and the consequence is caught downstream only if the lot
-    feeds a target-year disposal (report_unresolved_transfer_basis). So unlike the
-    row-level report_extraction_defects, a defect here must not abort eagerly: it would
-    refuse runs whose unresolved lots never reach a reported figure. One WARNING per
-    defect plus a summary; empty == silent.
+    Open Positions is enrichment: a malformed snapshot only degrades its symbol to the
+    Market Value fallback, whose consequence is caught downstream only at a target-year
+    disposal (report_unresolved_transfer_basis). So unlike report_extraction_defects
+    this must not abort eagerly, which would refuse runs whose unresolved lots never
+    reach a reported figure. One WARNING per defect plus a summary; empty == silent.
     """
     if not defects:
         return
@@ -237,14 +235,11 @@ def report_unresolved_transfer_basis(
 ) -> None:
     """Abort if a target-year disposal rests on an unresolved transferred-lot basis.
 
-    The detector (reporting.validation.detect_unresolved_transfer_basis) owns the scope:
-    these are year-scoped realized lines that consumed a transferred lot whose basis
-    never resolved from Open Positions, so it carries the transfer-day Market Value,
-    which is not its cost basis. The deferral is deliberate: an unresolved lot held open
-    or sold outside --year never reaches here, so the run aborts only at the point of
-    relevance, a reported figure that would be wrong. Like the other fail-closed gates:
-    one ERROR per line, a summary, then a single SystemExit(EXIT_DATA_QUALITY); no
-    workbook written. An empty sequence is silent.
+    The lines are year-scoped by the detector (detect_unresolved_transfer_basis), so the
+    deferral is deliberate: the run aborts only at the point of relevance, a reported
+    figure that would be wrong from the Market Value fallback. Like the other
+    fail-closed gates: one ERROR per line, a summary, then a single
+    SystemExit(EXIT_DATA_QUALITY); no workbook written. An empty sequence is silent.
     """
     if not lines:
         return

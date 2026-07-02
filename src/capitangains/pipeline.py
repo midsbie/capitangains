@@ -101,7 +101,6 @@ def run(options: RunOptions) -> None:
     # returns the parsed set, unlike the void report_* helpers below.
     acknowledged = parse_acknowledged_gaps_or_exit(options.auto_fix_sell_gaps, logger)
 
-    # Parse one or more CSVs
     inputs = options.inputs
     logger.info("Reading %d file(s): %s", len(inputs), ", ".join(inputs))
 
@@ -136,11 +135,9 @@ def run(options: RunOptions) -> None:
     input_conflicts = detect_statement_input_conflicts(statements)
     report_statement_input_conflicts(input_conflicts, logger)
 
-    # Index each file's Open Positions cost basis BEFORE merge_models drops per-file
-    # provenance. The two gates above have aborted on any malformed identity or
-    # overlapping period, so every StatementInput.path is a unique key here. A malformed
-    # Open Positions row only warns: it is enrichment, caught downstream only if it
-    # feeds a target-year disposal (report_unresolved_transfer_basis below).
+    # Index each file's Open Positions cost basis BEFORE merge_models concatenates
+    # subtables and drops the per-file provenance each snapshot's period depends on. The
+    # input-conflict gate proved every path unique, so this is a sound dict key.
     models_by_path = dict(zip(inputs, models, strict=True))
     basis_index, op_defects = build_transfer_basis_index(statements, models_by_path)
     report_open_position_defects(op_defects, logger)
@@ -157,12 +154,9 @@ def run(options: RunOptions) -> None:
     parsed = IbkrActivityStatementSource(asset_scope="stocks_etfs").read(model)
     report_extraction_defects(parsed.defects, logger)
 
-    # Fill each transfer's cost basis from the Open Positions index, in place, before
-    # the event stream seeds FIFO. An unresolved transfer keeps cost_basis=None, so FIFO
-    # falls back to Market Value and flags the lot; the year-scoped gate below catches
-    # it only if it reaches a reported disposal. Mark same-period trade activity first
-    # so the index refuses a snapshot a buy/sell round trip may have blended off the
-    # transferred lot's own basis.
+    # Resolve each transfer's basis from the index and fill it in place before the event
+    # stream seeds FIFO. mark_trade_activity must run first so a snapshot whose period
+    # saw same-symbol trading is refused (see TransferBasisIndex).
     basis_index.mark_trade_activity(parsed.trades)
     resolve_transfer_basis(parsed.transfers, basis_index)
 
@@ -232,9 +226,8 @@ def run(options: RunOptions) -> None:
         len(rb.withholding),
     )
 
-    # rb.realized_lines is already scoped to --year, so this fails closed only when an
-    # unresolved transferred-lot basis actually reaches a reported disposal; a lot held
-    # open or sold outside the year never appears here.
+    # Deferred fail-closed gate: rb.realized_lines is already --year-scoped, so an
+    # unresolved transferred-lot basis aborts only where it reaches a reported disposal.
     report_unresolved_transfer_basis(
         detect_unresolved_transfer_basis(rb.realized_lines), logger
     )
