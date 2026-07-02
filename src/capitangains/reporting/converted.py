@@ -26,13 +26,22 @@ class ConvertedLeg:
 
     leg is the trade-currency source (buy_date, qty, alloc_cost_ccy, the transferred and
     synthetic flags); alloc_cost_eur is its allocated cost (at the leg's own buy-date
-    rate) and proceeds_share_eur its share of the sale proceeds (at the line's sell-date
-    rate).
+    rate) and proceeds_share_eur its share of the net sale proceeds (at the line's
+    sell-date rate). proceeds_gross_share_eur is its share of the gross proceeds and
+    comm_share_eur the net - gross residual (a negative), so gross + commission == net
+    per leg and Anexo J Quadro 9.2A can file the realization value (Valor de Realizacao)
+    and the expenses (Despesas) as separate per-lot fields that still tie to the net.
+    buy_rate is the EUR-per-unit rate the acquisition cost was priced at
+    (the sell-date rate for a dateless gap leg, which has no acquisition date), kept so
+    the filer-facing sheets can show the exact rate behind each EUR figure.
     """
 
     leg: SellMatchLeg
     alloc_cost_eur: Decimal
     proceeds_share_eur: Decimal
+    proceeds_gross_share_eur: Decimal
+    comm_share_eur: Decimal
+    buy_rate: Decimal
 
 
 @dataclass(frozen=True)
@@ -42,8 +51,9 @@ class ConvertedRealizedLine:
     line is the trade-currency source (symbol, currency, dates, quantities, every *_ccy
     figure); the EUR totals are the line's gross/commission/net proceeds, total
     allocated cost, and realized P/L. legs carries the per-leg EUR breakdown the Anexo J
-    sheet flattens. The Realized sheet reads ccy columns off line and EUR columns off
-    this.
+    sheet flattens. sell_rate is the EUR-per-unit rate the sale figures were priced at
+    (the sell-date rate), surfaced so the Realized sheet can show it beside its EUR
+    block. The Realized sheet reads ccy columns off line and EUR columns off this.
     """
 
     line: RealizedLine
@@ -53,3 +63,4 @@ class ConvertedRealizedLine:
     sell_net_eur: Decimal
     alloc_cost_eur: Decimal
     realized_pl_eur: Decimal
+    sell_rate: Decimal

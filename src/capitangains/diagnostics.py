@@ -537,6 +537,24 @@ def report_negative_foreign_tax(
     raise SystemExit(EXIT_DATA_QUALITY)
 
 
+def report_unmapped_countries(countries: Sequence[str], logger: logging.Logger) -> None:
+    """Warn (do NOT abort) on ISO countries with no Anexo J Tabela X code.
+
+    The detector (reporting.validation.detect_unmapped_countries) owns the rationale.
+    Like the other WARN-only reporters this never raises: the annex country columns fall
+    back to the raw ISO alpha-2 code, which the filer converts to the Tabela X code by
+    hand, so the workbook stays usable. One WARNING naming the codes; empty == silent.
+    """
+    if not countries:
+        return
+    logger.warning(
+        "Anexo J country codes not in the Tabela X mapping: %s. The country columns "
+        "show the raw ISO code for these; convert each to its Anexo J code by hand, or "
+        "complete the mapping (reporting.at_country.ISO_TO_AT).",
+        ", ".join(countries),
+    )
+
+
 def _list_then_abort(
     problems: Sequence[str], summary: str, logger: logging.Logger
 ) -> None:

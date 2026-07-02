@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -15,27 +14,30 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from capitangains.conv import EUR, Currency
 
+from .at_country import at_country_code
 from .converted import ConvertedRealizedLine
 from .extract import CashFlowRow, SyepInterestRow, WithholdingRow
 from .fifo_domain import RealizedLine, TransferProtocol
 from .i18n import Locale, NumberFormats, canonical_locale, labels_for
 from .money import quantize_money
 from .quadro_8a import Quadro8ALine
+from .reconcile import SymbolReconciliation
 from .report_builder import ReportBuilder
 
 
-def _gap_status(rl: RealizedLine) -> str:
-    """Human-readable basis provenance for a realized line's status column.
+def _gap_status_key(rl: RealizedLine) -> str | None:
+    """Label key for a realized line's Basis Status cell, or None for a clean match.
 
-    Distinguishes a clean FIFO match (empty) from the two gap outcomes: a residual lot
-    synthesized from IBKR's Basis versus an unmatched remainder left at zero cost.
-    gap_fixed implies has_gap, so it is checked first.
+    Distinguishes a clean FIFO match (None, an empty cell) from the two gap outcomes: a
+    residual lot whose cost was synthesized from IBKR's Basis versus an unmatched
+    remainder left at zero cost. The keys resolve to localized, filer-facing text via
+    the realized labels (see _realized_spec). gap_fixed implies has_gap, so it is first.
     """
     if not rl.has_gap:
-        return ""
+        return None
     if rl.gap_fixed:
-        return "synthesized from Basis"
-    return "zero-cost gap"
+        return "gap_synthesized"
+    return "gap_zero_cost"
 
 
 _RowT = TypeVar("_RowT")
@@ -61,16 +63,6 @@ class _Column(ABC, Generic[_RowT]):
         # load-bearing byte-preservation detail.
         return None
 
-    @property
-    def fixed_width(self) -> int | None:
-        """A content-independent column width, or None to size from the cell values.
-
-        Only the matched-lots JSON overrides this (see _JsonColumn): its long
-        single-line payload always overflows, so it is pinned to a cap rather than
-        measured per cell.
-        """
-        return None
-
 
 @dataclass(frozen=True)
 class _TextColumn(_Column[_RowT]):
@@ -78,19 +70,6 @@ class _TextColumn(_Column[_RowT]):
 
     def cell_value(self, row: _RowT) -> object:
         return self.value(row)
-
-
-# The matched-lots JSON column carries a long single-line payload that always overflows,
-# so it is pinned to a fixed width rather than stringified and measured per cell only to
-# be clamped to this same value afterwards.
-_JSON_COLUMN_WIDTH = 50
-
-
-@dataclass(frozen=True)
-class _JsonColumn(_TextColumn[_RowT]):
-    @property
-    def fixed_width(self) -> int | None:
-        return _JSON_COLUMN_WIDTH
 
 
 @dataclass(frozen=True)
@@ -128,6 +107,25 @@ class _PctColumn(_Column[_RowT]):
 
 
 @dataclass(frozen=True)
+class _RateColumn(_Column[_RowT]):
+    """An FX rate cell: EUR per 1 unit of the trade currency.
+
+    Rendered at up to 8 decimals (a rate carries more precision than a cent amount), a
+    fixed format independent of locale and currency: a rate is a pure multiplier, not a
+    money amount and not a share count, so it reuses neither _MoneyColumn's currency
+    format nor a quantity's semantics.
+    """
+
+    value: Callable[[_RowT], Decimal]
+
+    def cell_value(self, row: _RowT) -> object:
+        return float(self.value(row))
+
+    def number_format(self, formats: NumberFormats, row: _RowT) -> str | None:
+        return "0.########"
+
+
+@dataclass(frozen=True)
 class _MoneyColumn(_Column[_RowT]):
     value: Callable[[_RowT], Decimal | None]
     currency: Callable[[_RowT], Currency]
@@ -146,51 +144,65 @@ class _MoneyColumn(_Column[_RowT]):
         return formats.money(str(self.currency(row)))
 
 
-def _legs_json(rl: RealizedLine) -> str:
-    """Serialize a realized line's matched buy lots for its JSON cell."""
-    return json.dumps(
-        [
-            {
-                "buy_date": (leg.buy_date.isoformat() if leg.buy_date else None),
-                "qty": str(leg.qty),
-                "alloc_cost_ccy": str(leg.alloc_cost_ccy),
-            }
-            for leg in rl.legs
-        ]
-    )
+# Anexo J income code for a securities capital gain (Quadro 9.2A), a constant per row.
+_QUADRO_9_2A_CODE = "G01"
 
 
 @dataclass(frozen=True)
 class _AnexoJRow:
-    """One acquisition-leg row of the Annex J breakdown (a realized line flattened over
-    its legs) with the per-leg EUR profit/loss precomputed.
+    """One acquisition-leg row of Anexo J Quadro 9.2A (a realized line flattened over
+    its legs). Carries the Portal-fileable fields (source country, acquisition and
+    realization values, expenses, counterparty) plus the working columns that identify
+    the lot.
+
+    source_country and counterparty_country are already resolved to a Tabela X code (or
+    the raw ISO when unmapped); realization_eur is the leg's gross proceeds share and
+    despesas_eur its expenses share (a positive), so Portal files them apart from net.
     """
 
     symbol: str
     currency: Currency
+    source_country: str
+    counterparty_country: str
     buy_date: dt.date | None
     sell_date: dt.date
     qty: Decimal
+    buy_rate: Decimal
     alloc_eur: Decimal
-    proceeds_eur: Decimal
+    realization_eur: Decimal
+    despesas_eur: Decimal
     pl_eur: Decimal
     transferred: bool
     synthetic: bool
 
 
+def _resolved_country(iso: str) -> str:
+    """A country's Tabela X code, or the raw ISO when unmapped (blank stays blank)."""
+    return (at_country_code(iso) or iso) if iso else ""
+
+
 def _anexo_j_rows(report: ReportBuilder) -> Iterator[_AnexoJRow]:
+    counterparty = _resolved_country(report.broker_country)
     for crl in report.converted_lines:
+        source_country = _resolved_country(
+            report.instrument_country.get(crl.line.symbol, "")
+        )
         for cleg in crl.legs:
             leg = cleg.leg
             yield _AnexoJRow(
                 symbol=crl.line.symbol,
                 currency=crl.line.currency,
+                source_country=source_country,
+                counterparty_country=counterparty,
                 buy_date=leg.buy_date,
                 sell_date=crl.line.sell_date,
                 qty=leg.qty,
+                buy_rate=cleg.buy_rate,
                 alloc_eur=cleg.alloc_cost_eur,
-                proceeds_eur=cleg.proceeds_share_eur,
-                # proceeds - alloc (both non-optional EUR cents); keep the sign order.
+                realization_eur=cleg.proceeds_gross_share_eur,
+                # Expenses are the commission as a positive (comm_share is negative).
+                despesas_eur=-cleg.comm_share_eur,
+                # Net proceeds - alloc (both non-optional EUR cents); keep sign order.
                 pl_eur=quantize_money(cleg.proceeds_share_eur - cleg.alloc_cost_eur),
                 transferred=leg.transferred,
                 synthetic=leg.synthetic,
@@ -257,79 +269,96 @@ class _SheetSpec(Generic[_RowT]):
     skip_if_empty: bool = False
 
 
-_REALIZED_SPEC: _SheetSpec[ConvertedRealizedLine] = _SheetSpec(
-    sheet_key="realized",
-    label_section="realized",
-    rows=lambda report: report.converted_lines,
-    columns=(
-        _TextColumn[ConvertedRealizedLine]("ticker", value=lambda crl: crl.line.symbol),
-        _TextColumn[ConvertedRealizedLine](
-            "trade_currency", value=lambda crl: str(crl.line.currency)
-        ),
-        _DateColumn[ConvertedRealizedLine](
-            "sell_date", value=lambda crl: crl.line.sell_date
-        ),
-        _QtyColumn[ConvertedRealizedLine](
-            "qty_sold", value=lambda crl: crl.line.sell_qty
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "gross_tcy",
-            value=lambda crl: crl.line.sell_gross_ccy,
-            currency=lambda crl: crl.line.currency,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "fees_tcy",
-            value=lambda crl: crl.line.sell_comm_ccy,
-            currency=lambda crl: crl.line.currency,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "net_tcy",
-            value=lambda crl: crl.line.sell_net_ccy,
-            currency=lambda crl: crl.line.currency,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "alloc_tcy",
-            value=lambda crl: crl.line.alloc_cost_ccy,
-            currency=lambda crl: crl.line.currency,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "pl_tcy",
-            value=lambda crl: crl.line.realized_pl_ccy,
-            currency=lambda crl: crl.line.currency,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "gross_eur",
-            value=lambda crl: crl.sell_gross_eur,
-            currency=lambda _r: EUR,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "fees_eur",
-            value=lambda crl: crl.sell_comm_eur,
-            currency=lambda _r: EUR,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "net_eur",
-            value=lambda crl: crl.sell_net_eur,
-            currency=lambda _r: EUR,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "alloc_eur",
-            value=lambda crl: crl.alloc_cost_eur,
-            currency=lambda _r: EUR,
-        ),
-        _MoneyColumn[ConvertedRealizedLine](
-            "pl_eur",
-            value=lambda crl: crl.realized_pl_eur,
-            currency=lambda _r: EUR,
-        ),
-        _JsonColumn[ConvertedRealizedLine](
-            "legs_json", value=lambda crl: _legs_json(crl.line)
-        ),
-        _TextColumn[ConvertedRealizedLine](
-            "gap_status", value=lambda crl: _gap_status(crl.line)
-        ),
+# All Realized-sheet columns except the localized Basis Status, which _realized_spec
+# appends per locale (like the Quadro 8A Type column).
+_REALIZED_BASE_COLUMNS: tuple[_Column[ConvertedRealizedLine], ...] = (
+    _TextColumn[ConvertedRealizedLine]("ticker", value=lambda crl: crl.line.symbol),
+    _TextColumn[ConvertedRealizedLine](
+        "trade_currency", value=lambda crl: str(crl.line.currency)
     ),
+    _DateColumn[ConvertedRealizedLine](
+        "sell_date", value=lambda crl: crl.line.sell_date
+    ),
+    _QtyColumn[ConvertedRealizedLine]("qty_sold", value=lambda crl: crl.line.sell_qty),
+    _MoneyColumn[ConvertedRealizedLine](
+        "gross_tcy",
+        value=lambda crl: crl.line.sell_gross_ccy,
+        currency=lambda crl: crl.line.currency,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "fees_tcy",
+        value=lambda crl: crl.line.sell_comm_ccy,
+        currency=lambda crl: crl.line.currency,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "net_tcy",
+        value=lambda crl: crl.line.sell_net_ccy,
+        currency=lambda crl: crl.line.currency,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "alloc_tcy",
+        value=lambda crl: crl.line.alloc_cost_ccy,
+        currency=lambda crl: crl.line.currency,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "pl_tcy",
+        value=lambda crl: crl.line.realized_pl_ccy,
+        currency=lambda crl: crl.line.currency,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "gross_eur",
+        value=lambda crl: crl.sell_gross_eur,
+        currency=lambda _r: EUR,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "fees_eur",
+        value=lambda crl: crl.sell_comm_eur,
+        currency=lambda _r: EUR,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "net_eur",
+        value=lambda crl: crl.sell_net_eur,
+        currency=lambda _r: EUR,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "alloc_eur",
+        value=lambda crl: crl.alloc_cost_eur,
+        currency=lambda _r: EUR,
+    ),
+    _MoneyColumn[ConvertedRealizedLine](
+        "pl_eur",
+        value=lambda crl: crl.realized_pl_eur,
+        currency=lambda _r: EUR,
+    ),
+    _RateColumn[ConvertedRealizedLine]("fx_rate", value=lambda crl: crl.sell_rate),
 )
+
+
+def _gap_status_text(rl: RealizedLine, gap_labels: dict[str, str]) -> str:
+    """A realized line's Basis Status as localized text ('' for a clean FIFO match)."""
+    key = _gap_status_key(rl)
+    return gap_labels[key] if key is not None else ""
+
+
+def _realized_spec(gap_labels: dict[str, str]) -> _SheetSpec[ConvertedRealizedLine]:
+    """Build the Realized sheet spec for one locale.
+
+    Like _quadro_8a_spec, built per write because its Basis Status column renders a
+    localized row value (the two gap provenances), resolved from the active locale's
+    realized labels and keyed by _gap_status_key. gap_labels is that section
+    (labels["realized"]), which also carries the sheet's column headers.
+    """
+    return _SheetSpec(
+        sheet_key="realized",
+        label_section="realized",
+        rows=lambda report: report.converted_lines,
+        columns=(
+            *_REALIZED_BASE_COLUMNS,
+            _TextColumn[ConvertedRealizedLine](
+                "gap_status", value=lambda crl: _gap_status_text(crl.line, gap_labels)
+            ),
+        ),
+    )
 
 
 _ANEXO_J_SPEC: _SheetSpec[_AnexoJRow] = _SheetSpec(
@@ -337,17 +366,48 @@ _ANEXO_J_SPEC: _SheetSpec[_AnexoJRow] = _SheetSpec(
     label_section="anexo_j",
     rows=_anexo_j_rows,
     columns=(
-        _TextColumn[_AnexoJRow]("ticker", value=lambda r: r.symbol),
-        _TextColumn[_AnexoJRow]("trade_currency", value=lambda r: str(r.currency)),
-        _DateColumn[_AnexoJRow]("buy_date", value=lambda r: r.buy_date),
-        _DateColumn[_AnexoJRow]("sell_date", value=lambda r: r.sell_date),
-        _QtyColumn[_AnexoJRow]("qty", value=lambda r: r.qty),
+        # Fileable block: Anexo J Quadro 9.2A field order (14 columns), mirroring the
+        # Portal UI so the filer scans a row left-to-right into one screen. The two
+        # columns the tool cannot derive (foreign tax paid on the gain, and the
+        # admitted-to-trading flag) render blank in their Portal position for the
+        # filer to complete by hand.
+        _TextColumn[_AnexoJRow]("source_country", value=lambda r: r.source_country),
+        _TextColumn[_AnexoJRow]("code", value=lambda _r: _QUADRO_9_2A_CODE),
+        _TextColumn[_AnexoJRow]("sell_year", value=lambda r: r.sell_date.year),
+        _TextColumn[_AnexoJRow]("sell_month", value=lambda r: r.sell_date.month),
+        _TextColumn[_AnexoJRow]("sell_day", value=lambda r: r.sell_date.day),
+        _MoneyColumn[_AnexoJRow](
+            "realization_eur",
+            value=lambda r: r.realization_eur,
+            currency=lambda _r: EUR,
+        ),
+        _TextColumn[_AnexoJRow](
+            "buy_year", value=lambda r: r.buy_date.year if r.buy_date else None
+        ),
+        _TextColumn[_AnexoJRow](
+            "buy_month", value=lambda r: r.buy_date.month if r.buy_date else None
+        ),
+        _TextColumn[_AnexoJRow](
+            "buy_day", value=lambda r: r.buy_date.day if r.buy_date else None
+        ),
         _MoneyColumn[_AnexoJRow](
             "alloc_eur", value=lambda r: r.alloc_eur, currency=lambda _r: EUR
         ),
         _MoneyColumn[_AnexoJRow](
-            "proceeds_eur", value=lambda r: r.proceeds_eur, currency=lambda _r: EUR
+            "despesas", value=lambda r: r.despesas_eur, currency=lambda _r: EUR
         ),
+        _TextColumn[_AnexoJRow]("foreign_tax", value=lambda _r: ""),
+        _TextColumn[_AnexoJRow](
+            "counterparty_country", value=lambda r: r.counterparty_country
+        ),
+        _TextColumn[_AnexoJRow]("admitted", value=lambda _r: ""),
+        # Working block: identify and verify each lot; the left block enters Portal.
+        _TextColumn[_AnexoJRow]("ticker", value=lambda r: r.symbol),
+        _TextColumn[_AnexoJRow]("trade_currency", value=lambda r: str(r.currency)),
+        _QtyColumn[_AnexoJRow]("qty", value=lambda r: r.qty),
+        _RateColumn[_AnexoJRow]("fx_rate", value=lambda r: r.buy_rate),
+        _DateColumn[_AnexoJRow]("buy_date", value=lambda r: r.buy_date),
+        _DateColumn[_AnexoJRow]("sell_date", value=lambda r: r.sell_date),
         _MoneyColumn[_AnexoJRow](
             "pl_eur", value=lambda r: r.pl_eur, currency=lambda _r: EUR
         ),
@@ -379,16 +439,112 @@ def _quadro_8a_spec(kind_labels: dict[str, str]) -> _SheetSpec[Quadro8ALine]:
         skip_if_empty=True,
         rows=_quadro_8a_rows,
         columns=(
+            # Fileable block: Quadro 8A field order (Portal UI), for direct entry.
             _TextColumn[Quadro8ALine]("income_code", value=lambda r: r.income_code),
             _TextColumn[Quadro8ALine](
-                "kind", value=lambda r: kind_labels[r.kind.label_key]
+                "country", value=lambda r: _resolved_country(r.country)
             ),
-            _TextColumn[Quadro8ALine]("country", value=lambda r: r.country),
             _MoneyColumn[Quadro8ALine](
                 "gross_eur", value=lambda r: r.gross_eur, currency=lambda _r: EUR
             ),
             _MoneyColumn[Quadro8ALine](
                 "tax_eur", value=lambda r: r.tax_eur, currency=lambda _r: EUR
+            ),
+            # Working column: income type, a gloss on the code, not a Portal field.
+            _TextColumn[Quadro8ALine](
+                "kind", value=lambda r: kind_labels[r.kind.label_key]
+            ),
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class _ReconRow:
+    """One Reconciliation-sheet row: a symbol's trade-currency tie-out against IBKR.
+
+    mine/ibkr/diff are the trade-currency figures for a cross-checked or synthesized key
+    and None for an uncheckable one (an incomplete Forex skip, or an anomalous blank),
+    which contributes only its symbol, currency and status. status_key selects the
+    localized Status label the spec resolves per locale (mirroring Quadro 8A's Type).
+    """
+
+    symbol: str
+    currency: Currency
+    mine: Decimal | None
+    ibkr: Decimal | None
+    diff: Decimal | None
+    status_key: str
+
+
+def _reconciled_status_key(r: SymbolReconciliation) -> str:
+    """Status key for an independently cross-checked key: OK, sign flip, or mismatch.
+
+    A sign flip is called out apart from a plain magnitude mismatch because it almost
+    always marks a structural matching or basis error, not rounding (see
+    SymbolReconciliation.sign_diverged).
+    """
+    if r.is_match:
+        return "status_ok"
+    if r.sign_diverged:
+        return "status_sign_flip"
+    return "status_mismatch"
+
+
+def _recon_rows(report: ReportBuilder) -> Iterator[_ReconRow]:
+    """Flatten the four reconciliation partitions into one uniform stream of rows.
+
+    reconciled and synthetic carry trade-currency figures (mine/IBKR/diff); the
+    incomplete (expected-Forex) and anomalous-blank partitions are bare (symbol,
+    currency) keys with nothing to compare, so their figure cells stay blank and the
+    Status alone distinguishes them. A key that is both reconciled and anomalous
+    legitimately appears twice, under its two distinct statuses (see the report type).
+    """
+    recon = report.reconciliation
+    if recon is None:
+        return
+    for r in recon.reconciled:
+        yield _ReconRow(
+            r.symbol, r.currency, r.computed, r.ibkr, r.diff, _reconciled_status_key(r)
+        )
+    for r in recon.synthetic:
+        yield _ReconRow(
+            r.symbol, r.currency, r.computed, r.ibkr, r.diff, "status_synthetic"
+        )
+    for sym, ccy in recon.incomplete:
+        yield _ReconRow(sym, ccy, None, None, None, "status_incomplete")
+    for sym, ccy in recon.anomalous_elision:
+        yield _ReconRow(sym, ccy, None, None, None, "status_anomalous")
+
+
+def _reconciliation_spec(status_labels: dict[str, str]) -> _SheetSpec[_ReconRow]:
+    """Build the Reconciliation sheet spec for one locale.
+
+    Like _quadro_8a_spec, constructed per write because its Status column renders a
+    localized row value (OK / mismatch / synthesized / not cross-checked), resolved from
+    the active locale's labels and keyed by _ReconRow.status_key. This sheet is the
+    trade-currency proof that our realized P/L ties out to IBKR's, so the EUR divergence
+    on the other sheets is purely the per-date FX method PT requires, not a computation
+    gap. Money columns take the row's own trade currency.
+    """
+    return _SheetSpec(
+        sheet_key="reconciliation",
+        label_section="reconciliation",
+        skip_if_empty=True,
+        rows=_recon_rows,
+        columns=(
+            _TextColumn[_ReconRow]("symbol", value=lambda r: r.symbol),
+            _TextColumn[_ReconRow]("currency", value=lambda r: str(r.currency)),
+            _MoneyColumn[_ReconRow](
+                "mine", value=lambda r: r.mine, currency=lambda r: r.currency
+            ),
+            _MoneyColumn[_ReconRow](
+                "ibkr", value=lambda r: r.ibkr, currency=lambda r: r.currency
+            ),
+            _MoneyColumn[_ReconRow](
+                "diff", value=lambda r: r.diff, currency=lambda r: r.currency
+            ),
+            _TextColumn[_ReconRow](
+                "status", value=lambda r: status_labels[r.status_key]
             ),
         ),
     )
@@ -541,7 +697,7 @@ _TRANSFERS_SPEC: _SheetSpec[TransferProtocol] = _SheetSpec(
 
 
 # Column-width bounds and the padding added to measured content, applied as each sheet
-# is written (no post-hoc rescan). A fixed-width column bypasses the bounds entirely.
+# is written (no post-hoc rescan).
 _MIN_COL_WIDTH = 10
 _MAX_COL_WIDTH = 60
 _COL_PADDING = 2
@@ -586,7 +742,58 @@ class _SheetWriter:
             label = summary_labels["total_cur_tpl"].format(cur=cur)
             self._append_money_row(ws, widths, label, totals.realized, cur)
 
-        self._apply_widths(ws, widths, {})
+        self._apply_widths(ws, widths)
+
+    def write_cover(self, report: ReportBuilder, body_titles: list[str]) -> None:
+        """Write the Cover/provenance sheet: run identity and FX coverage as key/value
+        rows, then an index of the sheets that follow with a one-line purpose each.
+
+        Created at index 0 so it leads the workbook; body_titles are the already-written
+        sheet titles, in order, that the index documents. A programmatic build carrying
+        no RunMetadata writes no Cover (there is no provenance to show). Dates use the
+        same NumberFormats.date as the tables, so the Cover keeps no second date format.
+        """
+        meta = report.metadata
+        if meta is None:
+            return
+
+        cover = self.labels["cover"]
+        ws = self.wb.create_sheet(title=self.labels["sheet"]["cover"], index=0)
+        widths = [0, 0]
+
+        def kv(label: str, value: object, number_format: str | None = None) -> None:
+            ws.append([label, value])
+            if number_format is not None:
+                ws.cell(row=ws.max_row, column=2).number_format = number_format
+            widths[0] = max(widths[0], self._content_width(label))
+            widths[1] = max(widths[1], self._content_width(value))
+
+        none_text = cover["fx_none"]
+        kv(cover["account"], meta.account)
+        kv(cover["tax_year"], meta.tax_year)
+        kv(cover["period_start"], meta.period_start, self.formats.date)
+        kv(cover["period_end"], meta.period_end, self.formats.date)
+        kv(cover["fx_source"], meta.fx_source or none_text)
+        kv(
+            cover["fx_currencies"],
+            ", ".join(sorted(str(c) for c in meta.fx_currencies)) or none_text,
+        )
+        if meta.fx_date_range is not None:
+            kv(cover["fx_from"], meta.fx_date_range[0], self.formats.date)
+            kv(cover["fx_to"], meta.fx_date_range[1], self.formats.date)
+        kv(cover["tool_version"], meta.tool_version)
+        kv(cover["generated_at"], meta.generated_at, f"{self.formats.date} HH:MM:SS")
+
+        # Blank separator, then the index: one row per sheet that follows, mapping its
+        # title back to a localized purpose via its sheet key.
+        ws.append([])
+        kv(cover["index_sheet"], cover["index_purpose"])
+        purposes = self.labels["cover_purpose"]
+        key_by_title = {title: key for key, title in self.labels["sheet"].items()}
+        for title in body_titles:
+            kv(title, purposes.get(key_by_title.get(title, ""), ""))
+
+        self._apply_widths(ws, widths)
 
     def _append_money_row(
         self,
@@ -618,8 +825,7 @@ class _SheetWriter:
         column returns one (TEXT cells are left at openpyxl's default "General").
 
         Column widths accumulate from the values as they are written, so the workbook is
-        never rescanned afterwards; a fixed-width column (the JSON breakdown) is skipped
-        rather than stringified to measure.
+        never rescanned afterwards.
         """
         rows = list(spec.rows(report))
         if not rows and spec.skip_if_empty:
@@ -631,12 +837,6 @@ class _SheetWriter:
         ws.append(headers)
 
         widths = [len(h) for h in headers]
-        fixed: dict[int, int] = {}
-        for idx, col in enumerate(spec.columns):
-            fw = col.fixed_width
-            if fw is not None:
-                fixed[idx] = fw
-
         for row in rows:
             values = [col.cell_value(row) for col in spec.columns]
             ws.append(values)
@@ -645,10 +845,9 @@ class _SheetWriter:
                 fmt = col.number_format(self.formats, row)
                 if fmt is not None:
                     ws.cell(row=r, column=idx + 1).number_format = fmt
-                if idx not in fixed:
-                    widths[idx] = max(widths[idx], self._content_width(value))
+                widths[idx] = max(widths[idx], self._content_width(value))
 
-        self._apply_widths(ws, widths, fixed)
+        self._apply_widths(ws, widths)
 
     def _content_width(self, value: object) -> int:
         """Character width the rendered cell occupies.
@@ -663,13 +862,9 @@ class _SheetWriter:
             return len(self.formats.date)
         return len(str(value))
 
-    def _apply_widths(
-        self, ws: Worksheet, content_widths: list[int], fixed: dict[int, int]
-    ) -> None:
+    def _apply_widths(self, ws: Worksheet, content_widths: list[int]) -> None:
         for idx, content in enumerate(content_widths):
-            width = fixed.get(
-                idx, min(_MAX_COL_WIDTH, max(_MIN_COL_WIDTH, content + _COL_PADDING))
-            )
+            width = min(_MAX_COL_WIDTH, max(_MIN_COL_WIDTH, content + _COL_PADDING))
             ws.column_dimensions[get_column_letter(idx + 1)].width = width
 
 
@@ -694,16 +889,21 @@ class ExcelReportSink:
 
         labels = labels_for(self._locale)
         writer = _SheetWriter(wb, labels, NumberFormats(self._locale))
+        # Fileable output leads: the two Anexo J annexes and the IBKR reconciliation
+        # come first, then the supporting detail. The Cover is written last (it indexes
+        # these sheets, so it needs their final titles) but is inserted at position 0.
         writer.write_summary(report)
-        writer.write_table(_REALIZED_SPEC, report)
         writer.write_table(_ANEXO_J_SPEC, report)
         writer.write_table(_quadro_8a_spec(labels["quadro_8a"]), report)
+        writer.write_table(_reconciliation_spec(labels["reconciliation"]), report)
+        writer.write_table(_realized_spec(labels["realized"]), report)
         writer.write_table(_PER_SYMBOL_SPEC, report)
         writer.write_table(_DIVIDENDS_SPEC, report)
         writer.write_table(_INTEREST_SPEC, report)
         writer.write_table(_SYEP_SPEC, report)
         writer.write_table(_WITHHOLDING_SPEC, report)
         writer.write_table(_TRANSFERS_SPEC, report)
+        writer.write_cover(report, list(wb.sheetnames))
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         wb.save(out_path)

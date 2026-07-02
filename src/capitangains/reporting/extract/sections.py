@@ -9,6 +9,7 @@ a merged statement into: consumed by an extractor, intentionally ignored
 
 # Sections each extractor consumes (the exact literal each passes to the model).
 SEC_DIVIDENDS = "Dividends"
+SEC_INSTRUMENTS = "Financial Instrument Information"
 SEC_INTEREST = "Interest"
 SEC_OPEN_POSITIONS = "Open Positions"
 SEC_SYEP = "Stock Yield Enhancement Program Securities Lent Interest Details"
@@ -25,6 +26,7 @@ CONSUMED_SECTIONS: frozenset[str] = frozenset(
         SEC_TRANSFERS,
         SEC_SYEP,
         SEC_OPEN_POSITIONS,
+        SEC_INSTRUMENTS,
     }
 )
 
@@ -43,7 +45,6 @@ IGNORED_SECTIONS: frozenset[str] = frozenset(
         "Corporate Actions",
         "Deposits & Withdrawals",
         "Fees",
-        "Financial Instrument Information",
         "Forex Balances",
         "Interest Accruals",
         "Mark-to-Market Performance Summary",

@@ -15,6 +15,7 @@ from .fifo_domain import SellMatchLeg, TransferProtocol
 from .fx import FxTable
 from .money import quantize_money
 from .quadro_8a import Quadro8ALine, aggregate_quadro_8a
+from .reconcile import ReconciliationReport
 
 _RowT = TypeVar("_RowT")
 
@@ -58,6 +59,28 @@ class SymbolTotals:
         return self.by_currency[currency]
 
 
+@dataclass(frozen=True)
+class RunMetadata:
+    """Provenance of one report run, rendered on the Cover sheet.
+
+    Assembled by the pipeline from data already in scope (statement identity, the report
+    year, the FX table's coverage, the tool version) plus an injected generated_at, and
+    carried on ReportBuilder so sink.write stays the single entrypoint. generated_at is
+    injected rather than read in the sink, keeping the workbook deterministic in tests.
+    fx_source is None and fx_currencies empty when the run was given no FX table.
+    """
+
+    account: str
+    period_start: dt.date
+    period_end: dt.date
+    tax_year: int
+    fx_source: str | None
+    fx_currencies: frozenset[Currency]
+    fx_date_range: tuple[dt.date, dt.date] | None
+    tool_version: str
+    generated_at: dt.datetime
+
+
 @dataclass
 class ReportBuilder:
     """Accumulate one tax year's reportable rows and aggregates for the sink.
@@ -73,6 +96,9 @@ class ReportBuilder:
     # the IBKR contracting entity's jurisdiction. Default IE (IBKR Ireland),
     # CLI-overridable via --broker-country.
     broker_country: str = "IE"
+    # Symbol -> ISIN-country proxy, from Financial Instrument Information. Pre-fills the
+    # Anexo J capital-gains source country; a symbol absent here renders as unmapped.
+    instrument_country: dict[str, str] = field(default_factory=dict)
     realized_lines: list[RealizedLine] = field(default_factory=list)
     # The EUR-converted views of realized_lines, built by convert_eur. Empty until then;
     # 1:1 with realized_lines once converted (a line with any missing rate is dropped
@@ -88,6 +114,14 @@ class ReportBuilder:
     # precondition for the EUR report: the CLI aborts (exit 2) when this is non-empty
     # rather than emit substituted or blank EUR figures.
     fx_missing: set[tuple[dt.date, Currency]] = field(default_factory=set)
+    # The IBKR realized-P/L cross-check the pipeline attaches after reconciling, so the
+    # sink can surface it as the Reconciliation sheet (the trade-currency tie-out that
+    # shows the EUR divergence is pure FX method, not a computation gap). It is None
+    # until the pipeline sets it, and the Reconciliation sheet is skipped until then.
+    reconciliation: ReconciliationReport | None = None
+    # Run provenance for the Cover sheet, assembled and attached by the pipeline. None
+    # on a programmatic build, which then writes no Cover.
+    metadata: RunMetadata | None = None
 
     def add_realized(self, rl: RealizedLine) -> None:
         self.realized_lines.append(rl)
@@ -183,36 +217,65 @@ class ReportBuilder:
             return None
 
         sell_net_eur = quantize_money(rl.sell_net_ccy * sell_rate)
+        sell_gross_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
+        # Commission is the residual net - gross (the EUR image of comm = net - gross),
+        # not comm * rate rounded alone: pricing all three independently rounds them
+        # apart so gross + fees != net. Net is the load-bearing figure (it drives the
+        # realized P/L and the proceeds split), so it stays the faithful conversion and
+        # the fee column absorbs the cent residual.
+        sell_comm_eur = sell_net_eur - sell_gross_eur
 
+        # The guard above proved every leg rate present; collect the narrowed rates here
+        # (mypy does not narrow list elements through the any() guard) so each leg can
+        # carry the exact buy-date rate its EUR cost was priced at.
         leg_alloc_eur: list[Decimal] = []
+        buy_rates: list[Decimal] = []
         for leg, rate in zip(rl.legs, leg_rates, strict=True):
             assert rate is not None  # guaranteed by the guard above; narrows for mypy
+            buy_rates.append(rate)
             leg_alloc_eur.append(quantize_money(leg.alloc_cost_ccy * rate))
         alloc_cost_eur = quantize_money(sum(leg_alloc_eur, Decimal("0")))
 
-        proceeds_shares = self._allocate_proceeds_to_legs(
+        # Split net and gross proceeds across the legs by quantity share (each sums to
+        # its line total, the last leg absorbing the rounding residual). Anexo J Quadro
+        # 9.2A files the gross realization value and the expenses as separate per-lot
+        # fields; the per-leg commission is the net - gross residual, mirroring the
+        # line-level sell_comm_eur, so gross + fee == net for every leg. That makes the
+        # fileable block foot per row (realization - despesas ties to the leg's net), so
+        # Portal's recomputed gain matches the P/L shown beside it.
+        net_shares = self._allocate_total_by_quantity(
             rl.legs, rl.sell_qty, sell_net_eur
         )
+        gross_shares = self._allocate_total_by_quantity(
+            rl.legs, rl.sell_qty, sell_gross_eur
+        )
         converted_legs = [
-            ConvertedLeg(leg, alloc_cost_eur=alloc, proceeds_share_eur=share)
-            for leg, alloc, share in zip(
-                rl.legs, leg_alloc_eur, proceeds_shares, strict=True
+            ConvertedLeg(
+                leg,
+                alloc_cost_eur=alloc,
+                proceeds_share_eur=net_share,
+                proceeds_gross_share_eur=gross_share,
+                comm_share_eur=net_share - gross_share,
+                buy_rate=rate,
+            )
+            for leg, alloc, net_share, gross_share, rate in zip(
+                rl.legs,
+                leg_alloc_eur,
+                net_shares,
+                gross_shares,
+                buy_rates,
+                strict=True,
             )
         ]
-        sell_gross_eur = quantize_money(rl.sell_gross_ccy * sell_rate)
         return ConvertedRealizedLine(
             line=rl,
             legs=converted_legs,
             sell_gross_eur=sell_gross_eur,
-            # Commission is the residual net - gross (the EUR image of comm = net -
-            # gross), not comm * rate rounded alone: pricing all three independently
-            # rounds them apart so gross + fees != net. Net is the load-bearing
-            # figure (it drives realized P/L and the proceeds split), so it stays the
-            # faithful conversion and the fee column absorbs the cent residual.
-            sell_comm_eur=sell_net_eur - sell_gross_eur,
+            sell_comm_eur=sell_comm_eur,
             sell_net_eur=sell_net_eur,
             alloc_cost_eur=alloc_cost_eur,
             realized_pl_eur=quantize_money(sell_net_eur - alloc_cost_eur),
+            sell_rate=sell_rate,
         )
 
     def _rate_or_record(
@@ -234,24 +297,22 @@ class ReportBuilder:
         return rate
 
     @staticmethod
-    def _allocate_proceeds_to_legs(
+    def _allocate_total_by_quantity(
         legs: list[SellMatchLeg],
         sell_qty: Decimal,
-        sell_net_eur: Decimal,
+        total_eur: Decimal,
     ) -> list[Decimal]:
-        """Split sale proceeds EUR across legs by quantity share, cent-exact.
+        """Split a sale total (net or gross proceeds) across legs by quantity share.
 
-        Returns one share per leg, in leg order; the last leg absorbs the rounding
-        residual so the shares sum exactly to sell_net_eur. A zero sell quantity (or no
-        legs) allocates nothing, returning a zero per leg.
+        Returns one cent-exact share per leg, in leg order; the last leg absorbs the
+        rounding residual so the shares sum exactly to total_eur. A zero sell quantity
+        (or no legs) allocates nothing, returning a zero per leg.
         """
         if sell_qty == 0 or not legs:
             return [Decimal("0")] * len(legs)
 
-        shares = [
-            quantize_money(sell_net_eur * leg.qty / sell_qty) for leg in legs[:-1]
-        ]
-        shares.append(sell_net_eur - sum(shares, Decimal("0")))
+        shares = [quantize_money(total_eur * leg.qty / sell_qty) for leg in legs[:-1]]
+        shares.append(total_eur - sum(shares, Decimal("0")))
         return shares
 
     def _convert_syep_interest(self, fx: FxTable | None) -> None:
@@ -357,3 +418,22 @@ class ReportBuilder:
             withholding=self.withholding,
             broker_country=self.broker_country,
         )
+
+    @property
+    def fileable_countries(self) -> set[str]:
+        """The ISO country codes rendered in the Anexo J country fields.
+
+        The union of the Quadro 8A source countries, the ISIN-country of every disposed
+        symbol on the capital-gains sheet, and the broker country (the 9.2A counterparty
+        default). Feeds detect_unmapped_countries so the boundary can warn on any the
+        Tabela X mapping does not yet cover; a blank 8A country (unattributed income) is
+        excluded, being that detector's separate concern.
+        """
+        countries = {line.country for line in self.quadro_8a if line.country}
+        countries |= {
+            country
+            for crl in self.converted_lines
+            if (country := self.instrument_country.get(crl.line.symbol))
+        }
+        countries.add(self.broker_country)
+        return countries

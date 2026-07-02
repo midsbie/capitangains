@@ -72,6 +72,7 @@ from capitangains.reporting.extract.sections import (
     CONSUMED_SECTIONS,
     IGNORED_SECTIONS,
     SEC_DIVIDENDS,
+    SEC_INSTRUMENTS,
     SEC_INTEREST,
     SEC_OPEN_POSITIONS,
     SEC_SYEP,
@@ -1948,9 +1949,9 @@ def test_report_negative_foreign_tax_lists_and_exits(caplog):
 # --- unrecognized-section coverage sweep: sync guards --------------------------------
 
 
-def test_consumed_sections_matches_the_seven_extractor_constants():
+def test_consumed_sections_matches_the_extractor_constants():
     # CONSUMED_SECTIONS is built from the per-extractor constants; pin the membership
-    # so an eighth extractor (or a dropped one) cannot silently desync the set.
+    # so a new extractor (or a dropped one) cannot silently desync the set.
     assert {
         SEC_TRADES,
         SEC_DIVIDENDS,
@@ -1959,6 +1960,7 @@ def test_consumed_sections_matches_the_seven_extractor_constants():
         SEC_TRANSFERS,
         SEC_SYEP,
         SEC_OPEN_POSITIONS,
+        SEC_INSTRUMENTS,
     } == CONSUMED_SECTIONS
 
 

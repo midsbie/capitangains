@@ -31,7 +31,8 @@ from capitangains.reporting.report_sink import ExcelReportSink
 from tests.support import make_fx, realized_line
 
 # Column offsets of the five trade-currency and five EUR money cells on the Realized
-# sheet, in _REALIZED_SPEC order: ticker, currency, sell_date, qty, then the two blocks.
+# sheet, in _realized_spec column order: ticker, currency, sell_date, qty, then the two
+# money blocks (the trailing FX Rate and Basis Status columns sit past _EUR).
 _TCY = slice(4, 9)  # gross, fees, net, alloc, pl  (trade currency)
 _EUR = slice(9, 14)  # gross, fees, net, alloc, pl  (EUR)
 

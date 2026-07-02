@@ -24,9 +24,11 @@ Delegation map:
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 
 from .diagnostics import (
@@ -45,6 +47,7 @@ from .diagnostics import (
     report_timestamp_tie_collisions,
     report_transfer_shortfalls,
     report_unattributed_income,
+    report_unmapped_countries,
     report_unrecognized_sections,
     report_unresolved_transfer_basis,
 )
@@ -56,6 +59,8 @@ from .reporting import (
     FxTable,
     IbkrActivityStatementSource,
     ReportBuilder,
+    RunMetadata,
+    StatementInput,
     build_transfer_basis_index,
     detect_negative_foreign_tax,
     detect_ordering_collisions,
@@ -64,8 +69,10 @@ from .reporting import (
     detect_symbol_currency_violations,
     detect_timestamp_tie_collisions,
     detect_unattributed_income,
+    detect_unmapped_countries,
     detect_unrecognized_sections,
     detect_unresolved_transfer_basis,
+    instrument_country_map,
     partition_statements_by_metadata,
     reconcile_realized_against_ibkr,
     resolve_transfer_basis,
@@ -91,6 +98,32 @@ class RunOptions:
     auto_fix_sell_gaps: str | None
     dry_run: bool
     broker_country: str = "IE"
+
+
+def _build_metadata(
+    statements: Sequence[StatementInput],
+    options: RunOptions,
+    fx: FxTable | None,
+    generated_at: dt.datetime,
+) -> RunMetadata:
+    """Assemble the Cover sheet's provenance from data already validated upstream.
+
+    The account is shared across inputs (the input-conflict gate proved single-account),
+    and the covered period spans the earliest start to the latest end across every input
+    statement. FX coverage is read off the loaded table (empty when no --fx-table was
+    given). generated_at is injected so the written workbook is deterministic in tests.
+    """
+    return RunMetadata(
+        account=statements[0].metadata.account,
+        period_start=min(s.metadata.period.start for s in statements),
+        period_end=max(s.metadata.period.end for s in statements),
+        tax_year=options.year,
+        fx_source=options.fx_table,
+        fx_currencies=frozenset(fx.currencies) if fx is not None else frozenset(),
+        fx_date_range=fx.date_range if fx is not None else None,
+        tool_version=version("capitangains"),
+        generated_at=generated_at,
+    )
 
 
 def run(options: RunOptions) -> None:
@@ -218,6 +251,9 @@ def run(options: RunOptions) -> None:
     rb.set_syep_interest(parsed.syep_interest)
     rb.set_interest(parsed.interest)
     rb.set_transfers(parsed.transfers)
+    # Symbol -> ISIN-country proxy for the Anexo J capital-gains source country. Built
+    # from the full instrument list (not year-scoped): the map is reference data.
+    rb.instrument_country = instrument_country_map(parsed.instruments)
 
     logger.info(
         "Report built: %d realized lines, %d dividend lines, %d withholding lines",
@@ -261,6 +297,10 @@ def run(options: RunOptions) -> None:
     report_orphaned_foreign_tax(detect_orphaned_foreign_tax(quadro_8a), logger)
     report_negative_foreign_tax(detect_negative_foreign_tax(quadro_8a), logger)
 
+    # Warn on Anexo J country fields with no Tabela X code: the annexes fall back to the
+    # raw ISO code, which the filer converts by hand. Non-fatal (figures are correct).
+    report_unmapped_countries(detect_unmapped_countries(rb.fileable_countries), logger)
+
     # Soft cross-check of our realized P/L against IBKR's per-trade Realized P/L, per
     # (symbol, currency). Both sides are in the trade currency with no FX between them,
     # so a gap beyond cent rounding is a real accounting discrepancy. The upstream
@@ -286,6 +326,13 @@ def run(options: RunOptions) -> None:
             out_path,
         )
         return
+
+    # Attach the sink-only views now that a workbook will be written: the cross-check
+    # rendered as the Reconciliation sheet, and the Cover provenance (its tool_version
+    # reads install metadata via importlib, kept out of the dry-run path). The
+    # reconciliation log line above stays the boundary's own summary.
+    rb.reconciliation = report
+    rb.metadata = _build_metadata(statements, options, fx, dt.datetime.now())
 
     sink = ExcelReportSink(out_path=out_path, locale=options.locale)
     out_path = sink.write(rb)

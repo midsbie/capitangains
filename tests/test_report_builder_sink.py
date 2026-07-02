@@ -16,12 +16,13 @@ from capitangains.reporting.extract import (
 from capitangains.reporting.fifo_domain import RealizedLine, SellMatchLeg
 from capitangains.reporting.i18n import LABELS, labels_for
 from capitangains.reporting.quadro_8a import IncomeKind, Quadro8ALine
-from capitangains.reporting.report_builder import ReportBuilder
+from capitangains.reporting.reconcile import ReconciliationReport, SymbolReconciliation
+from capitangains.reporting.report_builder import ReportBuilder, RunMetadata
 from capitangains.reporting.report_sink import (
-    _REALIZED_SPEC,
     ExcelReportSink,
     _anexo_j_rows,
-    _gap_status,
+    _gap_status_key,
+    _realized_spec,
 )
 from tests.support import convert, make_fx, realized_line, trade_row
 
@@ -275,7 +276,7 @@ def test_quadro_8a_sheet_round_trip(tmp_path):
     out_path = tmp_path / "quadro_8a.xlsx"
     ExcelReportSink(out_path=out_path, locale="EN").write(rb)
 
-    ws = load_workbook(out_path)["Annex J Box 8A Income"]
+    ws = load_workbook(out_path)["Annex J - Box 8A"]
     grid = [
         [(cell.value, cell.number_format) for cell in row] for row in ws.iter_rows()
     ]
@@ -284,33 +285,173 @@ def test_quadro_8a_sheet_round_trip(tmp_path):
     assert grid == [
         [
             ("Income Code", "General"),
-            ("Type", "General"),
             ("Source Country", "General"),
             ("Gross Income (EUR)", "General"),
             ("Foreign Tax (EUR)", "General"),
+            ("Type", "General"),
         ],
         [
             ("E11", "General"),
-            ("Dividend", "General"),
-            ("US", "General"),
+            ("840", "General"),
             (9.0, eur),
             (1.35, eur),
+            ("Dividend", "General"),
         ],
         [
             ("E11", "General"),
-            ("Payment in Lieu", "General"),
-            ("US", "General"),
+            ("840", "General"),
             (3.6, eur),
             (0, eur),
+            ("Payment in Lieu", "General"),
         ],
         [
             ("E21", "General"),
-            ("Interest", "General"),
-            ("IE", "General"),
+            ("372", "General"),
             (2.0, eur),
             (0, eur),
+            ("Interest", "General"),
         ],
     ]
+
+
+def test_realized_sheet_shows_sell_fx_rate(tmp_path):
+    # The sell-date rate that priced the EUR figures is surfaced as its own column, so a
+    # filer can reproduce each EUR amount from the trade-currency figure and the rate.
+    rb = ReportBuilder(year=2024)
+    rb.add_realized(
+        _realized(
+            "ACME",
+            "USD",
+            dt.date(2024, 6, 15),
+            [
+                {
+                    "buy_date": dt.date(2023, 1, 1),
+                    "qty": Decimal("5"),
+                    "alloc_cost_ccy": Decimal("40"),
+                }
+            ],
+        )
+    )
+    rb.convert_eur(
+        make_fx(
+            {
+                ("USD", "2023-01-01"): Decimal("0.8"),
+                ("USD", "2024-06-15"): Decimal("0.85"),
+            }
+        )
+    )
+    out_path = tmp_path / "fx_rate.xlsx"
+    ExcelReportSink(out_path=out_path, locale="EN").write(rb)
+
+    ws = load_workbook(out_path)["Realized Trades"]
+    headers = [c.value for c in ws[1]]
+    assert ws.cell(row=2, column=headers.index("FX Rate") + 1).value == 0.85
+
+
+def test_reconciliation_sheet_renders_each_status(tmp_path):
+    # Every partition of the cross-check reaches one Status the sheet renders; the
+    # matched key ties out in trade currency (diff zero), so the EUR gap is FX method.
+    usd = Currency("USD")
+    rb = ReportBuilder(year=2024)
+    rb.reconciliation = ReconciliationReport(
+        reconciled=[
+            SymbolReconciliation("MATCH", usd, Decimal("10.00"), Decimal("10.00"), 1),
+            SymbolReconciliation("FLIP", usd, Decimal("10.00"), Decimal("-10.00"), 1),
+        ],
+        synthetic=[
+            SymbolReconciliation("SYN", usd, Decimal("5.00"), Decimal("5.00"), 1)
+        ],
+        incomplete=[("FXPAIR", usd)],
+        anomalous_elision=[("WEIRD", usd)],
+    )
+    out_path = tmp_path / "recon.xlsx"
+    ExcelReportSink(out_path=out_path, locale="EN").write(rb)
+
+    ws = load_workbook(out_path)["IBKR Reconciliation"]
+    rows = {r[0].value: [c.value for c in r] for r in ws.iter_rows(min_row=2)}
+    assert rows["MATCH"][5] == "OK"
+    assert rows["FLIP"][5] == "Sign Flip"
+    assert rows["SYN"][5] == "Synthesized, unconfirmed"
+    assert rows["FXPAIR"][5] == "Not cross-checked (Forex)"
+    assert rows["WEIRD"][5] == "Anomalous, no IBKR P/L"
+    assert rows["MATCH"][2] == 10 and rows["MATCH"][3] == 10 and rows["MATCH"][4] == 0
+    # An uncheckable key carries no figures, only its status.
+    assert rows["FXPAIR"][2] is None and rows["FXPAIR"][4] is None
+
+
+def test_cover_sheet_leads_with_provenance(tmp_path):
+    rb = ReportBuilder(year=2024)
+    rb.metadata = RunMetadata(
+        account="U9",
+        period_start=dt.date(2024, 1, 1),
+        period_end=dt.date(2024, 12, 31),
+        tax_year=2024,
+        fx_source="rates.csv",
+        fx_currencies=frozenset({Currency("USD"), Currency("GBP")}),
+        fx_date_range=(dt.date(2024, 1, 1), dt.date(2024, 12, 31)),
+        tool_version="9.9.9",
+        generated_at=dt.datetime(2026, 1, 2, 3, 4, 5),
+    )
+    out_path = tmp_path / "cover.xlsx"
+    ExcelReportSink(out_path=out_path, locale="EN").write(rb)
+
+    wb = load_workbook(out_path)
+    assert wb.sheetnames[0] == "Cover"
+    ws = wb["Cover"]
+    kv = {r[0].value: r[1].value for r in ws.iter_rows(min_row=1) if r[0].value}
+    assert kv["Account"] == "U9"
+    assert kv["Tax Year"] == 2024
+    assert kv["FX Rate Source"] == "rates.csv"
+    assert kv["FX Currencies"] == "GBP, USD"  # sorted
+    # The index block lists the body sheets that follow, each with a purpose.
+    assert kv["Sheet"] == "Purpose"
+    assert "Trading Totals" in kv
+
+
+def test_anexo_j_9_2a_country_uses_tabela_x_and_code(tmp_path, monkeypatch):
+    # The 9.2A source country renders the Tabela X code (not the raw ISO) when the
+    # mapping covers it, and the Code column is the G01 constant. The mapped value here
+    # is a test fixture, not a real Tabela X code.
+    import capitangains.reporting.at_country as at_country
+
+    monkeypatch.setitem(at_country.ISO_TO_AT, "US", "TESTUS")
+    rb = ReportBuilder(year=2024)
+    rb.add_realized(
+        _realized(
+            "ACME",
+            "USD",
+            dt.date(2024, 6, 15),
+            [
+                {
+                    "buy_date": dt.date(2023, 1, 1),
+                    "qty": Decimal("5"),
+                    "alloc_cost_ccy": Decimal("40"),
+                }
+            ],
+        )
+    )
+    rb.instrument_country = {"ACME": "US"}
+    rb.convert_eur(
+        make_fx(
+            {
+                ("USD", "2023-01-01"): Decimal("1"),
+                ("USD", "2024-06-15"): Decimal("1"),
+            }
+        )
+    )
+    ExcelReportSink(out_path=(out := tmp_path / "j.xlsx"), locale="EN").write(rb)
+
+    ws = load_workbook(out)["Annex J - Box 9.2A"]
+    hdr = [c.value for c in ws[1]]
+    assert ws.cell(row=2, column=hdr.index("Source Country") + 1).value == "TESTUS"
+    assert ws.cell(row=2, column=hdr.index("Code") + 1).value == "G01"
+
+
+def test_cover_absent_without_metadata(tmp_path):
+    # A programmatic build carrying no RunMetadata writes no Cover.
+    rb = ReportBuilder(year=2024)
+    ExcelReportSink(out_path=(out := tmp_path / "no_cover.xlsx"), locale="EN").write(rb)
+    assert "Cover" not in load_workbook(out).sheetnames
 
 
 def test_excel_report_sink_handles_empty_report(tmp_path):
@@ -327,34 +468,6 @@ def test_excel_report_sink_handles_empty_report(tmp_path):
     }
 
 
-def test_excel_report_sink_serializes_legs(tmp_path):
-    rb = ReportBuilder(year=2024)
-    leg = {
-        "buy_date": dt.date(2023, 1, 1),
-        "qty": Decimal("5"),
-        "alloc_cost_ccy": Decimal("40"),
-    }
-    rl = _realized("ABC", "USD", dt.date(2024, 1, 1), [leg])
-    rb.add_realized(rl)
-    rb.convert_eur(
-        make_fx(
-            {
-                ("USD", "2023-01-01"): Decimal("0.9"),
-                ("USD", "2024-01-01"): Decimal("0.9"),
-            }
-        )
-    )
-
-    out_path = tmp_path / "report_with_leg.xlsx"
-    sink = ExcelReportSink(out_path=out_path, locale="EN")
-    sink.write(rb)
-
-    wb = load_workbook(out_path)
-    ws = wb["Realized Trades"]
-    legs_json = ws.cell(row=2, column=15).value
-    assert isinstance(legs_json, str) and '"buy_date": "2023-01-01"' in legs_json
-
-
 def test_gap_status_reflects_basis_provenance():
     leg = {
         "buy_date": dt.date(2023, 1, 1),
@@ -367,9 +480,9 @@ def test_gap_status_reflects_basis_provenance():
     )
     zero = _realized("CCC", "USD", dt.date(2024, 1, 3), [leg], has_gap=True)
 
-    assert _gap_status(clean) == ""
-    assert _gap_status(synth) == "synthesized from Basis"
-    assert _gap_status(zero) == "zero-cost gap"
+    assert _gap_status_key(clean) is None
+    assert _gap_status_key(synth) == "gap_synthesized"
+    assert _gap_status_key(zero) == "gap_zero_cost"
 
 
 def test_realized_sheet_flags_synthesized_basis(tmp_path):
@@ -399,7 +512,10 @@ def test_realized_sheet_flags_synthesized_basis(tmp_path):
     ws = load_workbook(out_path)["Realized Trades"]
     col = ws.max_column  # "Basis Status" is appended last
     assert ws.cell(row=1, column=col).value == "Basis Status"
-    assert ws.cell(row=2, column=col).value == "synthesized from Basis"
+    assert (
+        ws.cell(row=2, column=col).value
+        == "Cost basis from broker statement, unverified"
+    )
 
 
 def test_excel_report_sink_sorts_dividends_by_description(tmp_path):
@@ -499,6 +615,81 @@ def test_proceeds_allocation_sums_to_sell_net_eur(currency, fx_rates):
     (converted,) = rb.converted_lines
     shares = [cleg.proceeds_share_eur for cleg in converted.legs]
     assert sum(shares, Decimal("0")) == converted.sell_net_eur
+
+
+def test_converted_legs_split_gross_and_commission_by_quantity():
+    # Portal Anexo J files the gross realization value and the expenses separately, so
+    # each leg carries its own share of gross and commission (not just net). Two legs of
+    # 7 and 3 of 10 split gross 100 and commission -10 EUR (EUR-native, rate 1).
+    rl = realized_line(
+        symbol="ACME",
+        currency=Currency("EUR"),
+        sell_date=dt.date(2024, 6, 15),
+        sell_gross_ccy="100",
+        sell_comm_ccy="-10",
+        sell_net_ccy="90",
+        legs=[
+            {
+                "buy_date": dt.date(2023, 1, 1),
+                "qty": Decimal("7"),
+                "alloc_cost_ccy": Decimal("40"),
+            },
+            {
+                "buy_date": dt.date(2023, 2, 1),
+                "qty": Decimal("3"),
+                "alloc_cost_ccy": Decimal("30"),
+            },
+        ],
+    )
+    converted = convert(rl)
+    leg1, leg2 = converted.legs
+    assert leg1.proceeds_gross_share_eur == Decimal("70")
+    assert leg1.comm_share_eur == Decimal("-7")
+    assert leg1.proceeds_share_eur == Decimal("63")
+    assert leg2.proceeds_gross_share_eur == Decimal("30")
+    assert leg2.comm_share_eur == Decimal("-3")
+    assert leg2.proceeds_share_eur == Decimal("27")
+    # Each split preserves its own line total exactly.
+    legs = converted.legs
+    assert sum(cl.proceeds_gross_share_eur for cl in legs) == converted.sell_gross_eur
+    assert sum(cl.comm_share_eur for cl in legs) == converted.sell_comm_eur
+
+
+def test_converted_legs_foot_per_leg_when_shares_round_apart():
+    # Per-leg footing: gross_share + comm_share == net_share for every leg, so the 9.2A
+    # fileable block (realization - despesas) ties to the leg's net and Portal's
+    # recomputed gain matches the shown P/L. A 1-and-2-of-3 split of gross 0.10 / comm
+    # -0.05 rounds the shares apart: net leg1 -> 0.02 while gross -> 0.03, so an
+    # independently rounded commission (-0.02) would leave 0.03 - 0.02 = 0.01 != 0.02.
+    # Taking commission as the net - gross residual (-0.01) keeps the leg footing.
+    rl = realized_line(
+        symbol="ACME",
+        currency=Currency("EUR"),
+        sell_date=dt.date(2024, 6, 15),
+        sell_gross_ccy="0.10",
+        sell_comm_ccy="-0.05",
+        sell_net_ccy="0.05",
+        legs=[
+            {
+                "buy_date": dt.date(2023, 1, 1),
+                "qty": Decimal("1"),
+                "alloc_cost_ccy": Decimal("0"),
+            },
+            {
+                "buy_date": dt.date(2023, 2, 1),
+                "qty": Decimal("2"),
+                "alloc_cost_ccy": Decimal("0"),
+            },
+        ],
+    )
+    converted = convert(rl)
+    for cl in converted.legs:
+        assert cl.proceeds_gross_share_eur + cl.comm_share_eur == cl.proceeds_share_eur
+    # Every column still sums to its line total exactly.
+    legs = converted.legs
+    assert sum(cl.proceeds_gross_share_eur for cl in legs) == converted.sell_gross_eur
+    assert sum(cl.comm_share_eur for cl in legs) == converted.sell_comm_eur
+    assert sum(cl.proceeds_share_eur for cl in legs) == converted.sell_net_eur
 
 
 def test_excel_report_sink_sorts_withholding(tmp_path):
@@ -655,5 +846,6 @@ def test_realized_sheet_alloc_tcy_cell_is_cent_quantized():
         sell_date=dt.date(2024, 6, 15),
         legs=[_RESIDUAL_LEG],
     )
-    (alloc_tcy,) = [c for c in _REALIZED_SPEC.columns if c.header_key == "alloc_tcy"]
+    columns = _realized_spec(labels_for("EN")["realized"]).columns
+    (alloc_tcy,) = [c for c in columns if c.header_key == "alloc_tcy"]
     assert alloc_tcy.cell_value(convert(rl)) == float(Decimal("33.33"))

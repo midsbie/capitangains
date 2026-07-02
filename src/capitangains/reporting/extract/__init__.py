@@ -9,6 +9,7 @@ capitangains.reporting.extract.
 
 from ._common import CashFlowRow, ExtractionDefect
 from .dividends import DividendRow, parse_dividends
+from .instruments import InstrumentRow, instrument_country_map, parse_instruments
 from .interest import InterestRow, parse_interest
 from .open_positions import OpenPositionRow, parse_open_positions
 from .statement import StatementMetadata, StatementPeriod, parse_statement_metadata
@@ -28,6 +29,9 @@ __all__ = [
     "WithholdingRow",
     "SyepInterestRow",
     "OpenPositionRow",
+    "InstrumentRow",
+    "instrument_country_map",
+    "parse_instruments",
     "StatementPeriod",
     "StatementMetadata",
     "parse_trades_stocklike",

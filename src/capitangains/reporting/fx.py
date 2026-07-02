@@ -74,6 +74,23 @@ class FxTable:
         self.data: dict[Currency, dict[dt.date, Decimal]] = defaultdict(dict)
         self.date_index: dict[Currency, list[dt.date]] = {}
 
+    @property
+    def currencies(self) -> set[Currency]:
+        """Currencies this table carries rates for (the Cover's FX provenance)."""
+        return set(self.data)
+
+    @property
+    def date_range(self) -> tuple[dt.date, dt.date] | None:
+        """The (earliest, latest) rate date across all currencies, or None when empty.
+
+        Folds every currency's sorted date list into one span, so the Cover sheet can
+        state the coverage window the operator's FX table actually provides.
+        """
+        all_dates = [d for dates in self.date_index.values() for d in dates]
+        if not all_dates:
+            return None
+        return min(all_dates), max(all_dates)
+
     @classmethod
     def from_csv(cls, path: str | Path) -> FxTable:
         inst = cls()

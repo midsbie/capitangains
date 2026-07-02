@@ -1,11 +1,13 @@
 from .event_stream import EventStream
 from .extract import (
     ExtractionDefect,
+    InstrumentRow,
     OpenPositionRow,
     StatementMetadata,
     StatementPeriod,
     TradeRow,
     TransferRow,
+    instrument_country_map,
     parse_dividends,
     parse_interest,
     parse_open_positions,
@@ -23,7 +25,7 @@ from .reconcile import (
     SymbolReconciliation,
     reconcile_realized_against_ibkr,
 )
-from .report_builder import ReportBuilder
+from .report_builder import ReportBuilder, RunMetadata
 from .report_sink import ExcelReportSink
 from .source import IbkrActivityStatementSource, ParsedStatement
 from .transfer_basis import (
@@ -43,6 +45,7 @@ from .validation import (
     detect_symbol_currency_violations,
     detect_timestamp_tie_collisions,
     detect_unattributed_income,
+    detect_unmapped_countries,
     detect_unrecognized_sections,
     detect_unresolved_transfer_basis,
     parse_acknowledged_gaps,
@@ -55,6 +58,8 @@ __all__ = [
     "TradeRow",
     "TransferRow",
     "OpenPositionRow",
+    "InstrumentRow",
+    "instrument_country_map",
     "StatementPeriod",
     "StatementMetadata",
     "parse_trades_stocklike",
@@ -76,6 +81,7 @@ __all__ = [
     "ReconciliationReport",
     "SymbolReconciliation",
     "ReportBuilder",
+    "RunMetadata",
     "ExcelReportSink",
     "Quadro8ALine",
     "IbkrActivityStatementSource",
@@ -91,6 +97,7 @@ __all__ = [
     "detect_unattributed_income",
     "detect_orphaned_foreign_tax",
     "detect_negative_foreign_tax",
+    "detect_unmapped_countries",
     "detect_unrecognized_sections",
     "detect_unresolved_transfer_basis",
     "parse_acknowledged_gaps",

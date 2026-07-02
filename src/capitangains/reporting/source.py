@@ -8,12 +8,14 @@ from .extract import (
     AssetScope,
     DividendRow,
     ExtractionDefect,
+    InstrumentRow,
     InterestRow,
     SyepInterestRow,
     TradeRow,
     TransferRow,
     WithholdingRow,
     parse_dividends,
+    parse_instruments,
     parse_interest,
     parse_syep_interest_details,
     parse_trades_stocklike,
@@ -40,6 +42,7 @@ class ParsedStatement:
     withholding: tuple[WithholdingRow, ...]
     syep_interest: tuple[SyepInterestRow, ...]
     interest: tuple[InterestRow, ...]
+    instruments: tuple[InstrumentRow, ...]
     defects: tuple[ExtractionDefect, ...]
 
 
@@ -64,6 +67,9 @@ class IbkrActivityStatementSource:
         withholding, withholding_defects = parse_withholding_tax(model)
         syep_interest, syep_defects = parse_syep_interest_details(model)
         interest, interest_defects = parse_interest(model)
+        # Instruments carry no defects: a malformed/absent row only leaves a symbol
+        # without a country proxy, which the sink renders as unmapped (never a guess).
+        instruments = parse_instruments(model)
         return ParsedStatement(
             trades=tuple(trades),
             transfers=tuple(transfers),
@@ -71,6 +77,7 @@ class IbkrActivityStatementSource:
             withholding=tuple(withholding),
             syep_interest=tuple(syep_interest),
             interest=tuple(interest),
+            instruments=tuple(instruments),
             defects=(
                 *trade_defects,
                 *transfer_defects,

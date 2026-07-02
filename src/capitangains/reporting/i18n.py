@@ -22,6 +22,7 @@ Locale = Literal["EN", "PT"]
 
 LABELS: dict[str, dict[str, dict[str, str]]] = {
     "sheet": {
+        "cover": {"EN": "Cover", "PT": "Capa"},
         "summary": {"EN": "Trading Totals", "PT": "Totais de Operações"},
         "realized": {"EN": "Realized Trades", "PT": "Operações Realizadas"},
         "per_symbol": {"EN": "Per Symbol Summary", "PT": "Resumo por Símbolo"},
@@ -29,12 +30,73 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "interest": {"EN": "Account Interest", "PT": "Juros da Conta"},
         "withholding": {"EN": "Withholding Tax", "PT": "Retenção na Fonte"},
         "transfers": {"EN": "Stock Transfers", "PT": "Transferências de Ações"},
-        "anexo_j": {
-            "EN": "Lot-Level EUR Breakdown",
-            "PT": "Operações por Lote (Anexo J)",
-        },
-        "quadro_8a": {"EN": "Annex J Box 8A Income", "PT": "Anexo J Quadro 8A"},
+        "anexo_j": {"EN": "Annex J - Box 9.2A", "PT": "Anexo J - Quadro 9.2A"},
+        "quadro_8a": {"EN": "Annex J - Box 8A", "PT": "Anexo J - Quadro 8A"},
         "syep_interest": {"EN": "SYEP Interest", "PT": "Juros SYEP"},
+        "reconciliation": {"EN": "IBKR Reconciliation", "PT": "Reconciliação IBKR"},
+    },
+    "cover": {
+        "account": {"EN": "Account", "PT": "Conta"},
+        "tax_year": {"EN": "Tax Year", "PT": "Ano Fiscal"},
+        "period_start": {"EN": "Statement Period From", "PT": "Período do Extrato De"},
+        "period_end": {"EN": "Statement Period To", "PT": "Período do Extrato Até"},
+        "fx_source": {"EN": "FX Rate Source", "PT": "Fonte das Taxas de Câmbio"},
+        "fx_currencies": {"EN": "FX Currencies", "PT": "Moedas com Câmbio"},
+        "fx_from": {"EN": "FX Rates From", "PT": "Câmbios De"},
+        "fx_to": {"EN": "FX Rates To", "PT": "Câmbios Até"},
+        "tool_version": {"EN": "Tool Version", "PT": "Versão da Ferramenta"},
+        "generated_at": {"EN": "Generated", "PT": "Gerado em"},
+        # Value shown for the FX fields when the run was given no FX table.
+        "fx_none": {"EN": "None", "PT": "Nenhuma"},
+        "index_sheet": {"EN": "Sheet", "PT": "Folha"},
+        "index_purpose": {"EN": "Purpose", "PT": "Finalidade"},
+    },
+    # One-line purpose per sheet, keyed by sheet key, listed in the Cover index.
+    "cover_purpose": {
+        "summary": {
+            "EN": "Headline realized totals for the year, in EUR.",
+            "PT": "Totais realizados do ano, em EUR.",
+        },
+        "anexo_j": {
+            "EN": "Capital gains for Anexo J Quadro 9.2A, per lot (EUR).",
+            "PT": "Mais-valias para o Anexo J Quadro 9.2A, por lote (EUR).",
+        },
+        "quadro_8a": {
+            "EN": "Capital income for Anexo J Quadro 8A (dividends, interest).",
+            "PT": "Rendimentos de capitais do Anexo J Quadro 8A (dividendos, juros).",
+        },
+        "reconciliation": {
+            "EN": "Trade-currency tie-out of realized P/L to IBKR.",
+            "PT": "Conferência em moeda da operação com a IBKR.",
+        },
+        "realized": {
+            "EN": "Every realized sale, trade-currency and EUR side by side.",
+            "PT": "Cada venda realizada, em moeda da operação e em EUR.",
+        },
+        "per_symbol": {
+            "EN": "Realized totals per symbol.",
+            "PT": "Totais realizados por símbolo.",
+        },
+        "dividends": {
+            "EN": "Dividend payments received.",
+            "PT": "Dividendos recebidos.",
+        },
+        "interest": {
+            "EN": "Account interest received.",
+            "PT": "Juros da conta recebidos.",
+        },
+        "syep_interest": {
+            "EN": "Stock-lending (SYEP) interest received.",
+            "PT": "Juros de empréstimo de títulos (SYEP).",
+        },
+        "withholding": {
+            "EN": "Foreign tax withheld at source.",
+            "PT": "Imposto retido na fonte no estrangeiro.",
+        },
+        "transfers": {
+            "EN": "Share transfers in and out.",
+            "PT": "Transferências de ações (entradas e saídas).",
+        },
     },
     "summary": {
         "metric": {"EN": "Metric", "PT": "Métrica"},
@@ -58,51 +120,71 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "trade_currency": {"EN": "Trade Currency", "PT": "Moeda da Operação"},
         "sell_date": {"EN": "Sell Date", "PT": "Data de Venda"},
         "qty_sold": {"EN": "Quantity Sold", "PT": "Quantidade Vendida"},
-        "gross_tcy": {
-            "EN": "Gross Proceeds (Trade Currency)",
-            "PT": "Proveitos Brutos (Moeda)",
-        },
-        "fees_tcy": {
-            "EN": "Commissions/Fees (Trade Currency)",
-            "PT": "Comissões/Taxas (Moeda)",
-        },
-        "net_tcy": {
-            "EN": "Net Proceeds (Trade Currency)",
-            "PT": "Proveitos Líquidos (Moeda)",
-        },
-        "alloc_tcy": {
-            "EN": "Allocated Cost Basis (Trade Currency)",
-            "PT": "Custo Alocado (Moeda)",
-        },
-        "pl_tcy": {
-            "EN": "Realized P/L (Trade Currency)",
-            "PT": "Resultado Realizado (Moeda)",
-        },
+        "gross_tcy": {"EN": "Gross Proceeds", "PT": "Proveitos Brutos"},
+        "fees_tcy": {"EN": "Commissions/Fees", "PT": "Comissões/Taxas"},
+        "net_tcy": {"EN": "Net Proceeds", "PT": "Proveitos Líquidos"},
+        "alloc_tcy": {"EN": "Allocated Cost Basis", "PT": "Custo Alocado"},
+        "pl_tcy": {"EN": "Realized P/L", "PT": "Resultado Realizado"},
         "gross_eur": {"EN": "Gross Proceeds (EUR)", "PT": "Proveitos Brutos (EUR)"},
         "fees_eur": {"EN": "Commissions/Fees (EUR)", "PT": "Comissões/Taxas (EUR)"},
         "net_eur": {"EN": "Net Proceeds (EUR)", "PT": "Proveitos Líquidos (EUR)"},
         "alloc_eur": {"EN": "Allocated Cost Basis (EUR)", "PT": "Custo Alocado (EUR)"},
         "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Resultado Realizado (EUR)"},
-        "legs_json": {"EN": "Matched Buy Lots (JSON)", "PT": "Lotes de Compra (JSON)"},
+        "fx_rate": {"EN": "FX Rate", "PT": "Câmbio"},
         "gap_status": {"EN": "Basis Status", "PT": "Estado do Custo"},
+        # Localized Basis Status row values (not headers), keyed by _gap_status_key.
+        "gap_synthesized": {
+            "EN": "Cost basis from broker statement, unverified",
+            "PT": "Custo do extrato da corretora, não verificado",
+        },
+        "gap_zero_cost": {
+            "EN": "Cost basis missing, treated as zero",
+            "PT": "Custo em falta, considerado zero",
+        },
     },
     "anexo_j": {
+        # Fileable block (Anexo J Quadro 9.2A field order).
+        "source_country": {"EN": "Source Country", "PT": "País da Fonte"},
+        "code": {"EN": "Code", "PT": "Código"},
+        "buy_year": {"EN": "Acq. Year", "PT": "Ano Aquisição"},
+        "buy_month": {"EN": "Acq. Month", "PT": "Mês Aquisição"},
+        "sell_year": {"EN": "Disp. Year", "PT": "Ano Realização"},
+        "sell_month": {"EN": "Disp. Month", "PT": "Mês Realização"},
+        "despesas": {"EN": "Expenses (EUR)", "PT": "Despesas (EUR)"},
+        "counterparty_country": {
+            "EN": "Counterparty Country",
+            "PT": "País da Contraparte",
+        },
+        # Day of the Realizacao/Aquisicao dates, plus the two operator-supplied Portal
+        # fields (foreign tax on the gain, admitted-to-trading flag) the sink leaves
+        # blank in their Portal position.
+        "sell_day": {"EN": "Disp. Day", "PT": "Dia Realização"},
+        "buy_day": {"EN": "Acq. Day", "PT": "Dia Aquisição"},
+        "foreign_tax": {
+            "EN": "Foreign Tax (EUR)",
+            "PT": "Imposto Pago no Estrangeiro (EUR)",
+        },
+        "admitted": {"EN": "Admitted to Trading?", "PT": "Admitido à Negociação?"},
+        # Working block.
         "ticker": {"EN": "Ticker", "PT": "Símbolo"},
         "trade_currency": {"EN": "Trade Currency", "PT": "Moeda da Operação"},
         "buy_date": {"EN": "Acquisition Date", "PT": "Data de Aquisição"},
         "sell_date": {"EN": "Disposal Date", "PT": "Data de Venda"},
         "qty": {"EN": "Quantity", "PT": "Quantidade"},
+        # The acquisition-side rate (buy_rate): it prices this leg's Acquisition Value.
+        # Qualified to distinguish it from the Realized sheet's disposal-rate FX column.
+        "fx_rate": {"EN": "FX Rate (Acq.)", "PT": "Câmbio (Aquisição)"},
         "alloc_eur": {
             "EN": "Acquisition Value (EUR)",
             "PT": "Valor de Aquisição (EUR)",
         },
-        "proceeds_eur": {
-            "EN": "Disposal Value (EUR)",
+        "realization_eur": {
+            "EN": "Realization Value (EUR)",
             "PT": "Valor de Realização (EUR)",
         },
         "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Mais/menos-valia (EUR)"},
         "transferred": {"EN": "Transferred", "PT": "Transferido"},
-        "synthetic": {"EN": "Synthetic", "PT": "Sintético"},
+        "synthetic": {"EN": "Estimated Basis", "PT": "Custo Estimado"},
     },
     "quadro_8a": {
         "income_code": {"EN": "Income Code", "PT": "Código Rendimento"},
@@ -119,25 +201,40 @@ LABELS: dict[str, dict[str, dict[str, str]]] = {
         "kind_pil": {"EN": "Payment in Lieu", "PT": "Pagamento em Substituição"},
         "kind_interest": {"EN": "Interest", "PT": "Juros"},
     },
+    "reconciliation": {
+        "symbol": {"EN": "Symbol", "PT": "Símbolo"},
+        "currency": {"EN": "Currency", "PT": "Moeda"},
+        "mine": {"EN": "This Report", "PT": "Este Relatório"},
+        "ibkr": {"EN": "IBKR", "PT": "IBKR"},
+        "diff": {"EN": "Difference", "PT": "Diferença"},
+        "status": {"EN": "Status", "PT": "Estado"},
+        # Localized Status row values (not headers), keyed by _ReconRow.status_key.
+        "status_ok": {"EN": "OK", "PT": "OK"},
+        "status_mismatch": {"EN": "Mismatch", "PT": "Divergência"},
+        "status_sign_flip": {"EN": "Sign Flip", "PT": "Sinal Invertido"},
+        "status_synthetic": {
+            "EN": "Synthesized, unconfirmed",
+            "PT": "Sintetizado, não confirmado",
+        },
+        "status_incomplete": {
+            "EN": "Not cross-checked (Forex)",
+            "PT": "Não verificado (Forex)",
+        },
+        "status_anomalous": {
+            "EN": "Anomalous, no IBKR P/L",
+            "PT": "Anómalo, sem P/L IBKR",
+        },
+    },
     "per_symbol": {
         "ticker": {"EN": "Ticker", "PT": "Símbolo"},
         "trade_currency": {"EN": "Trade Currency", "PT": "Moeda da Operação"},
-        "pl_tcy": {
-            "EN": "Realized P/L (Trade Currency)",
-            "PT": "Resultado Realizado (Moeda)",
-        },
-        "net_tcy": {
-            "EN": "Net Proceeds (Trade Currency)",
-            "PT": "Proveitos Líquidos (Moeda)",
-        },
-        "alloc_tcy": {
-            "EN": "Allocated Cost Basis (Trade Currency)",
-            "PT": "Custo Alocado (Moeda)",
-        },
+        "pl_tcy": {"EN": "Realized P/L", "PT": "Resultado Realizado"},
+        "net_tcy": {"EN": "Net Proceeds", "PT": "Proveitos Líquidos"},
+        "alloc_tcy": {"EN": "Allocated Cost Basis", "PT": "Custo Alocado"},
         "pl_eur": {"EN": "Realized P/L (EUR)", "PT": "Resultado Realizado (EUR)"},
         "net_eur": {"EN": "Net Proceeds (EUR)", "PT": "Proveitos Líquidos (EUR)"},
         "alloc_eur": {"EN": "Allocated Cost Basis (EUR)", "PT": "Custo Alocado (EUR)"},
-        "has_gap": {"EN": "Gap / Synthetic", "PT": "Lacuna / Sintético"},
+        "has_gap": {"EN": "Estimated Basis", "PT": "Custo Estimado"},
     },
     "dividends": {
         "date": {"EN": "Date", "PT": "Data"},

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from capitangains.conv import Currency
@@ -33,6 +33,7 @@ from capitangains.conv.ibkr import has_intraday_time, parse_date
 from capitangains.errors import DataQualityError
 from capitangains.model import IbkrModel
 
+from .at_country import at_country_code
 from .extract import StatementMetadata, TradeRow, TransferRow, parse_statement_metadata
 from .extract.sections import CONSUMED_SECTIONS, IGNORED_SECTIONS
 from .fifo_domain import GapKey, RealizedLine
@@ -317,6 +318,19 @@ def detect_negative_foreign_tax(lines: Sequence[Quadro8ALine]) -> list[Quadro8AL
     fileable non-negative tax.
     """
     return [line for line in lines if line.tax_eur < 0]
+
+
+def detect_unmapped_countries(countries: Iterable[str]) -> list[str]:
+    """ISO country codes with no Anexo J Tabela X mapping.
+
+    The country columns of the two fileable annexes render an ISO alpha-2 code (an ISIN
+    prefix, or the broker jurisdiction). Anexo J wants the Tabela X code instead, so an
+    ISO the mapping does not cover (at_country_code returns None) is surfaced: the sheet
+    still shows the raw ISO for the filer to convert by hand, and the boundary warns.
+    Returns the unmapped codes sorted and de-duplicated; empty means every rendered
+    country maps (or the mapping is complete for this run's countries).
+    """
+    return sorted({c for c in countries if at_country_code(c) is None})
 
 
 @dataclass(frozen=True)
